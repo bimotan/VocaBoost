@@ -1,6 +1,29 @@
 # VocaBoost Desktop
 
-VocaBoost is a JavaFX + SQLite desktop vocabulary trainer rebuilt from an older Java CLI spaced-repetition project. The current version focuses on a reliable core workflow: word CRUD, legacy txt import, answer similarity feedback, Again/Hard/Good/Easy self-rating, SQLite persistence, and spaced-repetition scheduling.
+VocaBoost is a Java 17 + JavaFX + SQLite desktop vocabulary trainer rebuilt from an older Java CLI spaced-repetition project. It focuses on a complete local learning loop: add/import words, review with typed retrieval practice, measure answer similarity, schedule future reviews adaptively, and track learning progress.
+
+## Highlights
+
+- JavaFX desktop app with SQLite persistence.
+- Spaced repetition scheduler based on SM-2 style intervals.
+- Typed answer review with similarity percentage and Again / Hard / Good / Easy self-rating.
+- Similarity-aware scheduling: vague or low-similarity answers reduce easiness and increase future urgency.
+- Goals and achievements: daily review goal, daily new-word goal, session target, streak, XP, and badges.
+- Statistics page with JavaFX charts for daily review volume, accuracy trend, memory strength, hard words, and overdue count.
+- Portfolio-ready Markdown learning report export.
+- Manual add validation plus configurable dictionary lookup with offline Mock fallback.
+- Legacy txt import and GRE CSV starter-deck import.
+- Empty database bootstrap: first launch imports the bundled GRE starter sample so Word List and Review are immediately testable.
+
+## Screenshots
+
+Add screenshots after packaging or demo recording:
+
+```text
+docs/screenshots/dashboard.png
+docs/screenshots/review.png
+docs/screenshots/statistics.png
+```
 
 ## Tech Stack
 
@@ -10,20 +33,6 @@ VocaBoost is a JavaFX + SQLite desktop vocabulary trainer rebuilt from an older 
 - SQLite
 - JUnit 5
 
-## Why Maven Is Needed During Development
-
-The app depends on external libraries such as JavaFX, SQLite JDBC, and JUnit. Maven reads `pom.xml`, downloads those dependencies, compiles the code, runs tests, and starts the JavaFX app. That is why development runs through commands such as `mvn javafx:run` instead of directly double-clicking a `.java` file.
-
-For end users, Maven is not required after the app is packaged with `jpackage`; they can launch `VocaBoost.exe` directly.
-
-## Features
-
-- Dashboard: total words, due words, completed reviews, accuracy, mastered words, and daily progress.
-- Review: show English prompt, collect Chinese answer, reveal correct answer and similarity, then self-rate with Again/Hard/Good/Easy.
-- Add / Import: add words manually or import legacy semicolon-separated txt files.
-- Word List: search, edit, delete, and inspect memory strength, interval, status, and next review date.
-- Mock AI: deterministic local learning hint; no API key is required.
-
 ## Database Location
 
 The app creates a local SQLite database automatically:
@@ -32,16 +41,58 @@ The app creates a local SQLite database automatically:
 %USERPROFILE%\.vocab-trainer\vocab.db
 ```
 
-## Sample Import Files
+Existing databases are migrated with `CREATE TABLE IF NOT EXISTS`; the app does not delete your saved words.
 
-The repository includes English-named sample files under `samples/`:
+## Run in IntelliJ IDEA
 
-```text
-samples/sample-gre-words.txt
-samples/sample-legacy-import.txt
+Open `D:\java\VocaBoost` in IntelliJ IDEA, then run:
+
+```powershell
+mvn javafx:run
 ```
 
-Both use the legacy import format:
+If `mvn` is not available in PATH but IntelliJ is installed:
+
+```powershell
+& 'C:\Program Files\JetBrains\IntelliJ IDEA 2025.3.1.1\plugins\maven\lib\maven3\bin\mvn.cmd' javafx:run
+```
+
+Run tests:
+
+```powershell
+mvn test
+```
+
+## Dictionary Lookup
+
+Lookup uses this order:
+
+1. Local dictionary: bundled GRE starter sample, plus optional `ECDICT_CSV_PATH`.
+2. Configured API from `DICTIONARY_API_BASE_URL`.
+3. Public online dictionaries: dictionaryapi.dev, then Wiktionary.
+4. Mock dictionary for known sample words.
+
+To add an ECDICT-compatible local CSV, set:
+
+```powershell
+$env:ECDICT_CSV_PATH = 'D:\path\to\ecdict.csv'
+```
+
+To use a private API, set environment variables before launching:
+
+```powershell
+$env:DICTIONARY_API_BASE_URL = 'https://your-api.example/lookup'
+$env:DICTIONARY_API_KEY = 'your-key'
+mvn javafx:run
+```
+
+The app sends `GET {baseUrl}?word={english}` and includes the key in `Authorization: Bearer ...` and `X-API-Key`. If local and online dictionaries cannot verify a word, the UI shows "词条未找到" and lets you cancel or force-add it. Force-added words are tagged `UNVERIFIED`.
+
+Expected useful JSON fields include `english` or `word`, `chinese` or `translation` or `meaning` or `definition`, `pos` or `partOfSpeech`, `phonetic`, `example`, and `source`.
+
+## Import Formats
+
+Legacy txt format:
 
 ```text
 english;chinese;addedDate;lastReviewed;easiness;interval;consecutiveCorrect
@@ -53,27 +104,22 @@ Date format:
 yyyy-MM-dd HH:mm:ss
 ```
 
-Bad rows and duplicate words are skipped with a summary in the UI. The original txt file is never modified.
+GRE CSV format:
 
-## Run in IntelliJ IDEA
-
-Open the project folder in IntelliJ IDEA, then run one of these:
-
-```powershell
-mvn javafx:run
+```csv
+english,chinese,pos,example,tags
+abate,"减弱; 减少",verb,"The storm began to abate.",gre;starter
 ```
 
-If `mvn` is not available in PATH but IntelliJ is installed, use IntelliJ's bundled Maven:
+The bundled GRE starter deck is a small legally maintainable sample at:
 
-```powershell
-& 'C:\Program Files\JetBrains\IntelliJ IDEA 2025.3.1.1\plugins\maven\lib\maven3\bin\mvn.cmd' javafx:run
+```text
+src/main/resources/data/gre_starter_sample.csv
 ```
 
-Run tests:
+For a larger GRE list, prepare your own CSV in the format above and use `Add / Import -> Import GRE CSV`. Unknown or copyrighted 2000-word lists are intentionally not bundled.
 
-```powershell
-mvn test
-```
+GRE CSV import stops at 2000 imported words. The one-click GRE starter import refreshes Dashboard, Word List, and Review immediately after import.
 
 ## Build a Clickable Windows App
 
@@ -89,36 +135,34 @@ Output:
 target\dist\VocaBoost\VocaBoost.exe
 ```
 
-That `VocaBoost.exe` can be double-clicked. It includes a custom runtime image, so users do not need to install Maven. This is the best packaging option for quick demos.
-
 To build a Windows installer `.exe`, run:
 
 ```powershell
 .\scripts\package-windows.ps1 -PackageType exe
 ```
 
-Installer mode may require WiX Toolset on Windows. If WiX is missing, use the default `app-image` mode above.
+Installer mode may require WiX Toolset on Windows. If WiX is missing, use the default `app-image` mode.
 
 ## Project Structure
 
 ```text
 src/main/java/com/vocabtrainer
-├─ app          JavaFX application entry point
-├─ domain       WordCard, Deck, ReviewLog, ReviewRating
-├─ repository   SQLite setup and CRUD
-├─ service      review scheduling, similarity, import, stats, AI interface
-├─ ui           JavaFX screens
-└─ util         date and path utilities
+|- app          JavaFX application entry point
+|- domain       WordCard, Deck, ReviewLog, goals, achievements, dictionary and stats records
+|- repository   SQLite setup and CRUD
+|- service      review scheduling, goals, achievements, validation, dictionary, import, stats, AI interface
+|- ui           JavaFX screens
+`- util         date and path utilities
 ```
 
 Supporting folders:
 
 ```text
-samples/       import test data
+samples/       legacy import test data
 scripts/       local build and packaging scripts
 ```
 
-Business logic no longer depends on `Scanner`, `System.out`, or `System.exit()`.
+Business logic does not depend on `Scanner`, `System.out`, `System.exit()`, or JavaFX controls.
 
 ## Test Coverage
 
@@ -126,12 +170,18 @@ Current tests cover:
 
 - `SimilarityService`
 - `ReviewScheduler`
+- `WordSelector`
+- `WordValidationService`
+- `GoalService`
+- `AchievementService`
+- `DictionaryService`
 - `ImportExportService`
-- SQLite repository CRUD and review logs
+- SQLite repository CRUD and new persistence tables
 
-## Future Work
+Verified command:
 
-- Add complete Goals/Achievements UI and database support.
-- Add real AI service, environment-variable configuration, and SQLite AI cache.
-- Add CSV/JSON import and export.
-- Add richer charts and portfolio screenshots.
+```powershell
+& 'C:\Program Files\JetBrains\IntelliJ IDEA 2025.3.1.1\plugins\maven\lib\maven3\bin\mvn.cmd' '-Dmaven.repo.local=.m2\repository' test
+```
+
+Latest local result: 23 tests, 0 failures.

@@ -99,6 +99,36 @@ public class DatabaseManager {
                     created_at TEXT NOT NULL
                 )
                 """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS daily_goals (
+                    goal_date TEXT PRIMARY KEY,
+                    review_goal INTEGER NOT NULL,
+                    new_word_goal INTEGER NOT NULL,
+                    session_goal INTEGER NOT NULL,
+                    reviewed_count INTEGER NOT NULL DEFAULT 0,
+                    correct_count INTEGER NOT NULL DEFAULT 0,
+                    new_words_count INTEGER NOT NULL DEFAULT 0,
+                    xp_earned INTEGER NOT NULL DEFAULT 0,
+                    completed INTEGER NOT NULL DEFAULT 0
+                )
+                """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS achievements (
+                    code TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    unlocked_at TEXT NOT NULL,
+                    xp_reward INTEGER NOT NULL
+                )
+                """);
+            statement.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS dictionary_cache (
+                    english TEXT PRIMARY KEY COLLATE NOCASE,
+                    payload TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """);
         }
     }
 

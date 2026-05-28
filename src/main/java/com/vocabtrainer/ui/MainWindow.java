@@ -1,16 +1,32 @@
 package com.vocabtrainer.ui;
 
+import com.vocabtrainer.domain.Achievement;
+import com.vocabtrainer.domain.DailyGoalProgress;
+import com.vocabtrainer.domain.DailyReviewStat;
+import com.vocabtrainer.service.DashboardStats;
 import com.vocabtrainer.domain.Deck;
+import com.vocabtrainer.domain.DictionaryEntry;
+import com.vocabtrainer.domain.DictionaryLookupResult;
+import com.vocabtrainer.domain.GoalUpdate;
+import com.vocabtrainer.domain.HardWordStat;
+import com.vocabtrainer.domain.MemoryBucketStat;
+import com.vocabtrainer.domain.ReviewOutcome;
 import com.vocabtrainer.domain.ReviewRating;
+import com.vocabtrainer.domain.ReviewSessionSummary;
+import com.vocabtrainer.domain.ValidatedWord;
+import com.vocabtrainer.domain.WordVerificationResult;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.WordRepository;
+import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.AiService;
-import com.vocabtrainer.service.DashboardStats;
+import com.vocabtrainer.service.DictionaryService;
+import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ImportExportService;
 import com.vocabtrainer.service.ImportResult;
 import com.vocabtrainer.service.ReviewAnswer;
 import com.vocabtrainer.service.ReviewService;
 import com.vocabtrainer.service.StatsService;
+import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.util.DateTimeUtil;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -18,12 +34,21 @@ import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.chart.BarChart;
+import javafx.scene.chart.CategoryAxis;
+import javafx.scene.chart.LineChart;
+import javafx.scene.chart.NumberAxis;
+import javafx.scene.chart.PieChart;
+import javafx.scene.chart.XYChart;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
+import javafx.scene.control.ListView;
 import javafx.scene.control.ProgressBar;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
@@ -42,15 +67,18 @@ import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 public class MainWindow {
-    private static final int DAILY_REVIEW_GOAL = 20;
-
     private final Deck deck;
     private final WordRepository wordRepository;
     private final ReviewService reviewService;
     private final ImportExportService importExportService;
     private final StatsService statsService;
+    private final GoalService goalService;
+    private final AchievementService achievementService;
+    private final DictionaryService dictionaryService;
+    private final WordValidationService validationService;
     private final AiService aiService;
     private final Path databasePath;
 
@@ -58,10 +86,15 @@ public class MainWindow {
     private final Label totalWordsLabel = new Label("-");
     private final Label dueTodayLabel = new Label("-");
     private final Label reviewedTodayLabel = new Label("-");
+    private final Label newWordsTodayLabel = new Label("-");
     private final Label accuracyTodayLabel = new Label("-");
     private final Label masteredWordsLabel = new Label("-");
+    private final Label streakLabel = new Label("-");
+    private final Label xpLabel = new Label("-");
+    private final Label badgesLabel = new Label("-");
     private final Label databasePathLabel = new Label();
-    private final ProgressBar dailyProgress = new ProgressBar(0);
+    private final ProgressBar reviewProgress = new ProgressBar(0);
+    private final ProgressBar newWordProgress = new ProgressBar(0);
 
     private TableView<WordCard> wordTable;
     private TextField searchField;
@@ -73,14 +106,27 @@ public class MainWindow {
     private HBox ratingButtons;
     private WordCard currentReviewWord;
 
+    private BarChart<String, Number> reviewCountChart;
+    private LineChart<String, Number> accuracyChart;
+    private PieChart memoryChart;
+    private TextArea hardestWordsArea;
+    private TextArea analyticsArea;
+    private Label overdueStatsLabel;
+
     public MainWindow(Deck deck, WordRepository wordRepository, ReviewService reviewService,
                       ImportExportService importExportService, StatsService statsService,
+                      GoalService goalService, AchievementService achievementService,
+                      DictionaryService dictionaryService, WordValidationService validationService,
                       AiService aiService, Path databasePath) {
         this.deck = deck;
         this.wordRepository = wordRepository;
         this.reviewService = reviewService;
         this.importExportService = importExportService;
         this.statsService = statsService;
+        this.goalService = goalService;
+        this.achievementService = achievementService;
+        this.dictionaryService = dictionaryService;
+        this.validationService = validationService;
         this.aiService = aiService;
         this.databasePath = databasePath;
     }
@@ -93,17 +139,21 @@ public class MainWindow {
         tabs.getTabs().add(createDashboardTab());
         tabs.getTabs().add(createReviewTab());
         tabs.getTabs().add(createAddImportTab());
+        tabs.getTabs().add(createStatisticsTab());
         tabs.getTabs().add(createWordListTab());
         root.setCenter(tabs);
 
         refreshAll();
-        return new Scene(root, 1080, 720);
+        loadNextReviewWord();
+        return new Scene(root, 1120, 780);
     }
 
     private VBox createHeader() {
-        Label title = new Label("Vocabulary Trainer");
+        Label title = new Label("VocaBoost");
         title.setStyle("-fx-font-size: 24px; -fx-font-weight: 700;");
-        Label subtitle = new Label("当前词库：" + deck.getName() + " | AI：" + (aiService.isAvailable() ? "已启用" : "Mock/未配置"));
+        String dictionaryStatus = dictionaryService.isConfigured() ? "API configured" : "offline fallback";
+        Label subtitle = new Label("Deck: " + deck.getName() + " | Dictionary: " + dictionaryStatus
+            + " | AI: " + (aiService.isAvailable() ? "configured" : "mock"));
         subtitle.setStyle("-fx-text-fill: #4b5563;");
         VBox box = new VBox(4, title, subtitle);
         box.setPadding(new Insets(18, 24, 12, 24));
@@ -117,22 +167,35 @@ public class MainWindow {
         grid.setHgap(18);
         grid.setVgap(14);
 
-        addStat(grid, 0, "总单词", totalWordsLabel);
-        addStat(grid, 1, "今日待复习", dueTodayLabel);
-        addStat(grid, 2, "今日已完成", reviewedTodayLabel);
-        addStat(grid, 3, "今日正确率", accuracyTodayLabel);
-        addStat(grid, 4, "已掌握", masteredWordsLabel);
+        addStat(grid, 0, "Total words", totalWordsLabel);
+        addStat(grid, 1, "Due now", dueTodayLabel);
+        addStat(grid, 2, "Reviews today", reviewedTodayLabel);
+        addStat(grid, 3, "New words today", newWordsTodayLabel);
+        addStat(grid, 4, "Accuracy today", accuracyTodayLabel);
+        addStat(grid, 5, "Mastered words", masteredWordsLabel);
+        addStat(grid, 6, "Streak", streakLabel);
+        addStat(grid, 7, "XP", xpLabel);
 
-        Label progressTitle = new Label("每日复习目标");
-        progressTitle.setStyle("-fx-font-size: 16px; -fx-font-weight: 600;");
-        dailyProgress.setPrefWidth(360);
+        reviewProgress.setPrefWidth(420);
+        newWordProgress.setPrefWidth(420);
+        badgesLabel.setWrapText(true);
         databasePathLabel.setStyle("-fx-text-fill: #6b7280;");
-        Button refreshButton = new Button("刷新");
+        Button refreshButton = new Button("Refresh");
         refreshButton.setOnAction(event -> refreshAll());
 
-        VBox progressBox = new VBox(10, progressTitle, dailyProgress, databasePathLabel, refreshButton);
+        VBox progressBox = new VBox(10,
+            sectionTitle("Daily Goals"),
+            new Label("Review goal"),
+            reviewProgress,
+            new Label("New-word goal"),
+            newWordProgress,
+            sectionTitle("Unlocked Badges"),
+            badgesLabel,
+            databasePathLabel,
+            refreshButton
+        );
         progressBox.setPadding(new Insets(18, 0, 0, 0));
-        grid.add(progressBox, 0, 5, 2, 1);
+        grid.add(progressBox, 0, 8, 2, 1);
 
         Tab tab = new Tab("Dashboard", grid);
         tab.setClosable(false);
@@ -148,21 +211,21 @@ public class MainWindow {
     }
 
     private Tab createReviewTab() {
-        reviewWordLabel = new Label("加载中...");
+        reviewWordLabel = new Label("Loading...");
         reviewWordLabel.setStyle("-fx-font-size: 34px; -fx-font-weight: 700;");
         reviewMetaLabel = new Label();
         reviewMetaLabel.setStyle("-fx-text-fill: #4b5563;");
         answerField = new TextField();
-        answerField.setPromptText("输入中文释义");
+        answerField.setPromptText("Enter Chinese meaning");
         answerField.setPrefWidth(420);
-        submitAnswerButton = new Button("提交答案");
+        submitAnswerButton = new Button("Submit");
         submitAnswerButton.setOnAction(event -> submitCurrentAnswer());
         answerField.setOnAction(event -> submitCurrentAnswer());
 
         reviewResultArea = new TextArea();
         reviewResultArea.setEditable(false);
         reviewResultArea.setWrapText(true);
-        reviewResultArea.setPrefRowCount(7);
+        reviewResultArea.setPrefRowCount(8);
 
         ratingButtons = new HBox(10,
             ratingButton(ReviewRating.AGAIN),
@@ -192,112 +255,199 @@ public class MainWindow {
 
     private Tab createAddImportTab() {
         TextField englishField = new TextField();
-        englishField.setPromptText("英文");
+        englishField.setPromptText("English");
         TextField chineseField = new TextField();
-        chineseField.setPromptText("中文释义");
+        chineseField.setPromptText("Chinese meaning");
         TextField phoneticField = new TextField();
-        phoneticField.setPromptText("音标，可选");
+        phoneticField.setPromptText("Phonetic");
+        TextField posField = new TextField();
+        posField.setPromptText("Part of speech");
         TextField tagsField = new TextField();
-        tagsField.setPromptText("标签，可选");
+        tagsField.setPromptText("Tags");
+        TextArea exampleArea = new TextArea();
+        exampleArea.setPromptText("Example sentence");
+        exampleArea.setPrefRowCount(2);
         TextArea noteArea = new TextArea();
-        noteArea.setPromptText("笔记，可选");
-        noteArea.setPrefRowCount(4);
+        noteArea.setPromptText("Notes");
+        noteArea.setPrefRowCount(3);
         Label addStatus = new Label();
+        addStatus.setWrapText(true);
 
-        Button addButton = new Button("添加单词");
-        addButton.setOnAction(event -> {
-            String english = englishField.getText().trim();
-            String chinese = chineseField.getText().trim();
-            if (english.isEmpty() || chinese.isEmpty()) {
-                addStatus.setText("英文和中文不能为空。");
-                return;
-            }
-            try {
-                if (wordRepository.findByEnglish(deck.getId(), english).isPresent()) {
-                    addStatus.setText("单词已存在：" + english);
-                    return;
-                }
-                WordCard word = WordCard.createNew(deck.getId(), english, chinese);
-                word.setPhonetic(phoneticField.getText());
-                word.setTags(tagsField.getText());
-                word.setNote(noteArea.getText());
-                wordRepository.save(word);
-                englishField.clear();
-                chineseField.clear();
-                phoneticField.clear();
-                tagsField.clear();
-                noteArea.clear();
-                addStatus.setText("已添加：" + english);
-                refreshAll();
-            } catch (SQLException e) {
-                showError("添加失败", e.getMessage());
-            }
-        });
+        Button addButton = new Button("Add word");
+        addButton.setOnAction(event -> addWordFromForm(
+            englishField, chineseField, phoneticField, posField, exampleArea, noteArea, tagsField, addStatus));
 
         GridPane addForm = new GridPane();
         addForm.setHgap(10);
         addForm.setVgap(10);
-        addForm.add(new Label("英文"), 0, 0);
+        addForm.add(new Label("English"), 0, 0);
         addForm.add(englishField, 1, 0);
-        addForm.add(new Label("中文"), 0, 1);
+        addForm.add(new Label("Chinese"), 0, 1);
         addForm.add(chineseField, 1, 1);
-        addForm.add(new Label("音标"), 0, 2);
+        addForm.add(new Label("Phonetic"), 0, 2);
         addForm.add(phoneticField, 1, 2);
-        addForm.add(new Label("标签"), 0, 3);
-        addForm.add(tagsField, 1, 3);
-        addForm.add(new Label("笔记"), 0, 4);
-        addForm.add(noteArea, 1, 4);
-        addForm.add(addButton, 1, 5);
-        addForm.add(addStatus, 1, 6);
+        addForm.add(new Label("POS"), 0, 3);
+        addForm.add(posField, 1, 3);
+        addForm.add(new Label("Tags"), 0, 4);
+        addForm.add(tagsField, 1, 4);
+        addForm.add(new Label("Example"), 0, 5);
+        addForm.add(exampleArea, 1, 5);
+        addForm.add(new Label("Notes"), 0, 6);
+        addForm.add(noteArea, 1, 6);
+        addForm.add(addButton, 1, 7);
+        addForm.add(addStatus, 1, 8);
 
+        VBox dictionaryBox = createDictionaryBox(englishField, chineseField, phoneticField, posField, exampleArea, tagsField);
+        VBox importBox = createImportBox();
+
+        VBox content = new VBox(24, sectionTitle("Manual Add"), addForm, dictionaryBox, importBox);
+        content.setPadding(new Insets(24));
+        ScrollPane scrollPane = new ScrollPane(content);
+        scrollPane.setFitToWidth(true);
+        Tab tab = new Tab("Add / Import", scrollPane);
+        tab.setClosable(false);
+        return tab;
+    }
+
+    private VBox createDictionaryBox(TextField englishField, TextField chineseField, TextField phoneticField,
+                                     TextField posField, TextArea exampleArea, TextField tagsField) {
+        TextField lookupField = new TextField();
+        lookupField.setPromptText("Enter an English word to look up");
+        Button lookupButton = new Button("Lookup online");
+        Label lookupStatus = new Label();
+        lookupStatus.setWrapText(true);
+        ListView<DictionaryEntry> results = new ListView<>();
+        results.setPrefHeight(120);
+        results.setCellFactory(list -> new ListCell<>() {
+            @Override
+            protected void updateItem(DictionaryEntry item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                } else {
+                    setText(item.english() + " | " + item.chinese() + " | " + item.source());
+                }
+            }
+        });
+        results.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, entry) -> {
+            if (entry != null) {
+                englishField.setText(entry.english());
+                chineseField.setText(entry.chinese());
+                phoneticField.setText(entry.phonetic());
+                posField.setText(entry.partOfSpeech());
+                exampleArea.setText(entry.example());
+                tagsField.setText("dictionary");
+            }
+        });
+        lookupButton.setOnAction(event -> {
+            try {
+                String english = validationService.validateEnglishOnly(lookupField.getText());
+                DictionaryLookupResult result = dictionaryService.lookup(english);
+                lookupStatus.setText(result.success() ? result.message() : "词条未找到。" + System.lineSeparator() + result.message());
+                results.getItems().setAll(result.entries());
+                if (!result.entries().isEmpty()) {
+                    results.getSelectionModel().selectFirst();
+                }
+            } catch (IllegalArgumentException e) {
+                lookupStatus.setText(e.getMessage());
+            }
+        });
+        HBox controls = new HBox(10, lookupField, lookupButton);
+        HBox.setHgrow(lookupField, Priority.ALWAYS);
+        return new VBox(10, sectionTitle("Dictionary Lookup"), controls, results, lookupStatus);
+    }
+
+    private VBox createImportBox() {
         TextField importPathField = new TextField();
-        importPathField.setPromptText("选择旧 txt 文件，例如 samples/sample-legacy-import.txt");
-        Button chooseButton = new Button("选择文件");
+        importPathField.setPromptText("Choose legacy txt or GRE CSV");
+        Button chooseButton = new Button("Choose file");
         chooseButton.setOnAction(event -> {
             FileChooser chooser = new FileChooser();
-            chooser.setTitle("选择旧单词 txt 文件");
-            chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Text Files", "*.txt"));
+            chooser.setTitle("Choose import file");
+            chooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("Import Files", "*.txt", "*.csv"),
+                new FileChooser.ExtensionFilter("All Files", "*.*")
+            );
             java.io.File file = chooser.showOpenDialog(chooseButton.getScene().getWindow());
             if (file != null) {
                 importPathField.setText(file.toPath().toString());
             }
         });
-        Button importButton = new Button("导入旧词库");
+        Button importLegacyButton = new Button("Import legacy txt");
+        Button importCsvButton = new Button("Import GRE CSV");
+        Button importStarterButton = new Button("Import GRE starter deck");
         Label importStatus = new Label();
-        importButton.setOnAction(event -> {
-            if (importPathField.getText().isBlank()) {
-                importStatus.setText("请先选择 txt 文件。");
-                return;
-            }
+        importStatus.setWrapText(true);
+
+        importLegacyButton.setOnAction(event -> importFromPath(importPathField, importStatus, true));
+        importCsvButton.setOnAction(event -> importFromPath(importPathField, importStatus, false));
+        importStarterButton.setOnAction(event -> {
             try {
-                ImportResult result = importExportService.importLegacyTxt(Path.of(importPathField.getText().trim()), deck.getId());
-                importStatus.setText(result.toSummary());
-                refreshAll();
+                ImportResult result = importExportService.importBundledGreStarter(deck.getId());
+                afterImport(result, importStatus);
             } catch (Exception e) {
-                showError("导入失败", e.getMessage());
+                showError("Import failed", e.getMessage());
             }
         });
-        HBox importControls = new HBox(10, importPathField, chooseButton, importButton);
-        importControls.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(importPathField, Priority.ALWAYS);
-        VBox importBox = new VBox(10, sectionTitle("旧 txt 导入"), importControls, importStatus);
 
-        VBox content = new VBox(24, sectionTitle("添加单词"), addForm, importBox);
-        content.setPadding(new Insets(24));
-        Tab tab = new Tab("Add / Import", content);
+        HBox controls = new HBox(10, importPathField, chooseButton, importLegacyButton, importCsvButton, importStarterButton);
+        controls.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(importPathField, Priority.ALWAYS);
+        return new VBox(10, sectionTitle("Import"), controls, importStatus);
+    }
+
+    private Tab createStatisticsTab() {
+        reviewCountChart = new BarChart<>(new CategoryAxis(), new NumberAxis());
+        reviewCountChart.setTitle("Daily review count");
+        reviewCountChart.setLegendVisible(false);
+        reviewCountChart.setPrefHeight(240);
+
+        accuracyChart = new LineChart<>(new CategoryAxis(), new NumberAxis(0, 1, 0.25));
+        accuracyChart.setTitle("Accuracy trend");
+        accuracyChart.setLegendVisible(false);
+        accuracyChart.setPrefHeight(240);
+
+        memoryChart = new PieChart();
+        memoryChart.setTitle("Memory strength distribution");
+        memoryChart.setPrefHeight(260);
+
+        overdueStatsLabel = new Label("-");
+        overdueStatsLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: 600;");
+        hardestWordsArea = new TextArea();
+        hardestWordsArea.setEditable(false);
+        hardestWordsArea.setWrapText(true);
+        hardestWordsArea.setPrefRowCount(8);
+        analyticsArea = new TextArea();
+        analyticsArea.setEditable(false);
+        analyticsArea.setWrapText(true);
+        analyticsArea.setPrefRowCount(8);
+
+        Button refreshButton = new Button("Refresh statistics");
+        refreshButton.setOnAction(event -> refreshStatistics());
+        Button exportButton = new Button("Export Markdown report");
+        exportButton.setOnAction(event -> exportReport());
+
+        HBox buttons = new HBox(10, refreshButton, exportButton);
+        VBox charts = new VBox(16, reviewCountChart, accuracyChart, memoryChart, overdueStatsLabel,
+            sectionTitle("Hardest Words"), hardestWordsArea,
+            sectionTitle("Portfolio Summary"), analyticsArea, buttons);
+        charts.setPadding(new Insets(24));
+        ScrollPane scrollPane = new ScrollPane(charts);
+        scrollPane.setFitToWidth(true);
+        Tab tab = new Tab("Statistics", scrollPane);
         tab.setClosable(false);
         return tab;
     }
 
     private Tab createWordListTab() {
         searchField = new TextField();
-        searchField.setPromptText("搜索英文、中文或标签");
+        searchField.setPromptText("Search English, Chinese or tags");
         searchField.textProperty().addListener((observable, oldValue, newValue) -> refreshWordTable());
-        Button refreshButton = new Button("刷新");
+        Button refreshButton = new Button("Refresh");
         refreshButton.setOnAction(event -> refreshWordTable());
-        Button editButton = new Button("编辑选中");
+        Button editButton = new Button("Edit selected");
         editButton.setOnAction(event -> editSelectedWord());
-        Button deleteButton = new Button("删除选中");
+        Button deleteButton = new Button("Delete selected");
         deleteButton.setOnAction(event -> deleteSelectedWord());
 
         HBox controls = new HBox(10, searchField, refreshButton, editButton, deleteButton);
@@ -305,17 +455,17 @@ public class MainWindow {
 
         wordTable = new TableView<>(wordItems);
         wordTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
-        TableColumn<WordCard, String> englishCol = new TableColumn<>("英文");
+        TableColumn<WordCard, String> englishCol = new TableColumn<>("English");
         englishCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getEnglish()));
-        TableColumn<WordCard, String> chineseCol = new TableColumn<>("中文");
+        TableColumn<WordCard, String> chineseCol = new TableColumn<>("Chinese");
         chineseCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getChinese()));
-        TableColumn<WordCard, String> nextCol = new TableColumn<>("下次复习");
+        TableColumn<WordCard, String> nextCol = new TableColumn<>("Next review");
         nextCol.setCellValueFactory(data -> new SimpleStringProperty(DateTimeUtil.toDisplay(data.getValue().getNextReviewAt())));
-        TableColumn<WordCard, String> intervalCol = new TableColumn<>("间隔");
-        intervalCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getIntervalDays() + " 天"));
-        TableColumn<WordCard, String> strengthCol = new TableColumn<>("记忆强度");
+        TableColumn<WordCard, String> intervalCol = new TableColumn<>("Interval");
+        intervalCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getIntervalDays() + " days"));
+        TableColumn<WordCard, String> strengthCol = new TableColumn<>("Memory");
         strengthCol.setCellValueFactory(data -> new SimpleStringProperty(formatPercent(data.getValue().calculateMemoryStrength(LocalDateTime.now()))));
-        TableColumn<WordCard, String> statusCol = new TableColumn<>("状态");
+        TableColumn<WordCard, String> statusCol = new TableColumn<>("Status");
         statusCol.setCellValueFactory(data -> new SimpleStringProperty(statusText(data.getValue())));
         wordTable.getColumns().addAll(englishCol, chineseCol, nextCol, intervalCol, strengthCol, statusCol);
 
@@ -333,14 +483,95 @@ public class MainWindow {
         return label;
     }
 
+    private void addWordFromForm(TextField englishField, TextField chineseField, TextField phoneticField,
+                                 TextField posField, TextArea exampleArea, TextArea noteArea,
+                                 TextField tagsField, Label statusLabel) {
+        try {
+            ValidatedWord validated = validationService.validate(
+                englishField.getText(),
+                chineseField.getText(),
+                phoneticField.getText(),
+                posField.getText(),
+                exampleArea.getText(),
+                noteArea.getText(),
+                tagsField.getText()
+            );
+            if (wordRepository.findByEnglish(deck.getId(), validated.english()).isPresent()) {
+                statusLabel.setText("Word already exists: " + validated.english() + ". Edit it in Word List.");
+                return;
+            }
+            WordVerificationResult verification = dictionaryService.verify(validated.english());
+            ValidatedWord wordToSave = validated;
+            if (!verification.found()) {
+                if (!confirmUnverifiedAdd(validated.english(), verification.message())) {
+                    statusLabel.setText("Canceled: " + validated.english());
+                    return;
+                }
+                wordToSave = new ValidatedWord(
+                    validated.english(),
+                    validated.chinese(),
+                    validated.phonetic(),
+                    validated.partOfSpeech(),
+                    validated.exampleSentence(),
+                    validated.note(),
+                    appendTag(validated.tags(), "UNVERIFIED")
+                );
+            }
+            WordCard word = WordCard.createNew(deck.getId(), wordToSave.english(), wordToSave.chinese());
+            applyValidatedFields(word, wordToSave);
+            wordRepository.save(word);
+            GoalUpdate update = goalService.recordNewWords(1);
+            List<Achievement> unlocked = achievementService.evaluate(update.progress(), false, update.dailyGoalCompleted());
+            englishField.clear();
+            chineseField.clear();
+            phoneticField.clear();
+            posField.clear();
+            exampleArea.clear();
+            noteArea.clear();
+            tagsField.clear();
+            statusLabel.setText("Added: " + wordToSave.english()
+                + (verification.found() ? " | Verified by " + verification.source() : " | Marked UNVERIFIED")
+                + achievementText(unlocked));
+            refreshAll();
+        } catch (IllegalArgumentException e) {
+            statusLabel.setText(e.getMessage());
+        } catch (SQLException e) {
+            showError("Add failed", e.getMessage());
+        }
+    }
+
+    private void importFromPath(TextField importPathField, Label importStatus, boolean legacy) {
+        if (importPathField.getText().isBlank()) {
+            importStatus.setText("Please choose an import file first.");
+            return;
+        }
+        try {
+            Path path = Path.of(importPathField.getText().trim());
+            ImportResult result = legacy
+                ? importExportService.importLegacyTxt(path, deck.getId())
+                : importExportService.importGreCsv(path, deck.getId());
+            afterImport(result, importStatus);
+        } catch (Exception e) {
+            showError("Import failed", e.getMessage());
+        }
+    }
+
+    private void afterImport(ImportResult result, Label importStatus) {
+        GoalUpdate update = goalService.recordNewWords(result.importedCount());
+        List<Achievement> unlocked = achievementService.evaluate(update.progress(), false, update.dailyGoalCompleted());
+        importStatus.setText(result.toSummary() + achievementText(unlocked));
+        refreshAll();
+        loadNextReviewWord();
+    }
+
     private void submitCurrentAnswer() {
         if (currentReviewWord == null || submitAnswerButton.isDisabled()) {
             return;
         }
         ReviewAnswer answer = reviewService.submitAnswer(currentReviewWord.getId(), answerField.getText());
-        reviewResultArea.setText("正确答案：" + answer.correctAnswer()
-            + System.lineSeparator() + "你的答案：" + answer.userAnswer()
-            + System.lineSeparator() + "相似度：" + formatPercent(answer.similarity())
+        reviewResultArea.setText("Correct answer: " + answer.correctAnswer()
+            + System.lineSeparator() + "Your answer: " + answer.userAnswer()
+            + System.lineSeparator() + "Answer similarity: " + formatPercent(answer.similarity())
             + System.lineSeparator() + System.lineSeparator()
             + aiService.explain(currentReviewWord));
         ratingButtons.setDisable(false);
@@ -352,9 +583,12 @@ public class MainWindow {
         if (currentReviewWord == null) {
             return;
         }
-        reviewService.rateCurrent(currentReviewWord.getId(), rating);
-        loadNextReviewWord();
+        ReviewOutcome outcome = reviewService.rateCurrent(currentReviewWord.getId(), rating);
         refreshAll();
+        loadNextReviewWord();
+        if (currentReviewWord != null) {
+            reviewResultArea.setText("Saved. XP +" + outcome.xpEarned() + achievementText(outcome.unlockedAchievements()));
+        }
     }
 
     private void loadNextReviewWord() {
@@ -366,32 +600,52 @@ public class MainWindow {
         submitAnswerButton.setDisable(currentReviewWord == null);
         answerField.setDisable(currentReviewWord == null);
         if (currentReviewWord == null) {
-            reviewWordLabel.setText("今天没有待复习单词");
-            reviewMetaLabel.setText("可以添加新词或导入旧词库。");
+            showReviewCompletion();
         } else {
             reviewWordLabel.setText(currentReviewWord.getEnglish());
-            reviewMetaLabel.setText("连续正确 " + currentReviewWord.getConsecutiveCorrect()
-                + " 次 | 间隔 " + currentReviewWord.getIntervalDays()
-                + " 天 | EF " + String.format("%.2f", currentReviewWord.getEasinessFactor()));
+            reviewMetaLabel.setText("Streak " + currentReviewWord.getConsecutiveCorrect()
+                + " | Interval " + currentReviewWord.getIntervalDays()
+                + " days | EF " + String.format("%.2f", currentReviewWord.getEasinessFactor())
+                + " | Lapses " + currentReviewWord.getLapses());
             answerField.requestFocus();
         }
+    }
+
+    private void showReviewCompletion() {
+        ReviewSessionSummary session = reviewService.sessionSummary();
+        DailyGoalProgress progress = goalService.getTodayProgress();
+        reviewWordLabel.setText("Review complete");
+        reviewMetaLabel.setText("No due words right now.");
+        reviewResultArea.setText("Session completed: " + session.reviewedCount()
+            + System.lineSeparator() + "Session accuracy: " + formatPercent(session.accuracy())
+            + System.lineSeparator() + "XP earned this session: " + session.xpEarned()
+            + System.lineSeparator() + "Today review goal: " + progress.reviewedCount() + "/" + progress.reviewGoal()
+            + System.lineSeparator() + "Today new-word goal: " + progress.newWordsCount() + "/" + progress.newWordGoal()
+            + System.lineSeparator() + "Unlocked achievements: " + achievementNames(session.unlockedAchievements()));
     }
 
     private void refreshAll() {
         refreshDashboard();
         refreshWordTable();
-        loadNextReviewWord();
+        refreshStatistics();
     }
 
     private void refreshDashboard() {
         DashboardStats stats = statsService.dashboardStats(deck.getId());
+        DailyGoalProgress progress = goalService.getTodayProgress();
+        List<Achievement> achievements = achievementService.getUnlockedAchievements();
         totalWordsLabel.setText(String.valueOf(stats.totalWords()));
         dueTodayLabel.setText(String.valueOf(stats.dueToday()));
-        reviewedTodayLabel.setText(stats.reviewedToday() + " / " + DAILY_REVIEW_GOAL);
-        accuracyTodayLabel.setText(formatPercent(stats.accuracyToday()));
+        reviewedTodayLabel.setText(progress.reviewedCount() + " / " + progress.reviewGoal());
+        newWordsTodayLabel.setText(progress.newWordsCount() + " / " + progress.newWordGoal());
+        accuracyTodayLabel.setText(formatPercent(progress.accuracy()));
         masteredWordsLabel.setText(String.valueOf(stats.masteredWords()));
-        dailyProgress.setProgress(Math.min(1.0, stats.reviewedToday() / (double) DAILY_REVIEW_GOAL));
-        databasePathLabel.setText("SQLite：" + databasePath.toAbsolutePath());
+        streakLabel.setText(progress.currentStreak() + " days");
+        xpLabel.setText(String.valueOf(progress.totalXp()));
+        reviewProgress.setProgress(progress.reviewProgress());
+        newWordProgress.setProgress(progress.newWordProgress());
+        badgesLabel.setText(achievementNames(achievements));
+        databasePathLabel.setText("SQLite: " + databasePath.toAbsolutePath());
     }
 
     private void refreshWordTable() {
@@ -402,50 +656,119 @@ public class MainWindow {
             List<WordCard> words = wordRepository.search(deck.getId(), searchField == null ? "" : searchField.getText());
             wordItems.setAll(words);
         } catch (SQLException e) {
-            showError("刷新列表失败", e.getMessage());
+            showError("Refresh failed", e.getMessage());
+        }
+    }
+
+    private void refreshStatistics() {
+        if (reviewCountChart == null) {
+            return;
+        }
+        List<DailyReviewStat> dailyStats = statsService.dailyReviewStats(14);
+        XYChart.Series<String, Number> reviewSeries = new XYChart.Series<>();
+        XYChart.Series<String, Number> accuracySeries = new XYChart.Series<>();
+        for (DailyReviewStat stat : dailyStats) {
+            String day = stat.date().getMonthValue() + "/" + stat.date().getDayOfMonth();
+            reviewSeries.getData().add(new XYChart.Data<>(day, stat.reviewCount()));
+            accuracySeries.getData().add(new XYChart.Data<>(day, stat.accuracy()));
+        }
+        reviewCountChart.getData().setAll(reviewSeries);
+        accuracyChart.getData().setAll(accuracySeries);
+
+        List<PieChart.Data> memoryData = statsService.memoryDistribution(deck.getId()).stream()
+            .map(stat -> new PieChart.Data(stat.label(), stat.count()))
+            .toList();
+        memoryChart.getData().setAll(memoryData);
+        overdueStatsLabel.setText("Overdue or due words: " + statsService.overdueCount(deck.getId()));
+
+        String hardest = statsService.hardestWords(deck.getId(), 8).stream()
+            .map(word -> word.english() + " | avg similarity " + formatPercent(word.averageSimilarity())
+                + " | Again " + word.againCount())
+            .collect(Collectors.joining(System.lineSeparator()));
+        hardestWordsArea.setText(hardest.isBlank() ? "No review logs yet." : hardest);
+        analyticsArea.setText("Spaced repetition: intervals grow when recall is strong and shrink after weak recall."
+            + System.lineSeparator() + "Retrieval practice: every review stores the typed answer and response time."
+            + System.lineSeparator() + "Adaptive scheduling: low similarity increases lapse pressure and future urgency."
+            + System.lineSeparator() + "Learning analytics: charts summarize volume, accuracy, memory strength and hard words.");
+    }
+
+    private void exportReport() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Export learning report");
+        chooser.setInitialFileName("vocaboost-learning-report.md");
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Markdown", "*.md"));
+        java.io.File file = chooser.showSaveDialog(reviewCountChart.getScene().getWindow());
+        if (file == null) {
+            return;
+        }
+        try {
+            Path exported = statsService.exportMarkdownReport(deck.getId(), file.toPath());
+            showInfo("Report exported: " + exported.toAbsolutePath());
+        } catch (Exception e) {
+            showError("Export failed", e.getMessage());
         }
     }
 
     private void editSelectedWord() {
         WordCard selected = wordTable.getSelectionModel().getSelectedItem();
         if (selected == null) {
-            showInfo("请选择要编辑的单词。");
+            showInfo("Please select a word to edit.");
             return;
         }
 
         TextField englishField = new TextField(selected.getEnglish());
         TextField chineseField = new TextField(selected.getChinese());
+        TextField posField = new TextField(selected.getPartOfSpeech() == null ? "" : selected.getPartOfSpeech());
         TextField tagsField = new TextField(selected.getTags() == null ? "" : selected.getTags());
+        TextArea exampleArea = new TextArea(selected.getExampleSentence() == null ? "" : selected.getExampleSentence());
         TextArea noteArea = new TextArea(selected.getNote() == null ? "" : selected.getNote());
-        noteArea.setPrefRowCount(4);
+        exampleArea.setPrefRowCount(3);
+        noteArea.setPrefRowCount(3);
 
         GridPane form = new GridPane();
         form.setHgap(10);
         form.setVgap(10);
-        form.add(new Label("英文"), 0, 0);
+        form.add(new Label("English"), 0, 0);
         form.add(englishField, 1, 0);
-        form.add(new Label("中文"), 0, 1);
+        form.add(new Label("Chinese"), 0, 1);
         form.add(chineseField, 1, 1);
-        form.add(new Label("标签"), 0, 2);
-        form.add(tagsField, 1, 2);
-        form.add(new Label("笔记"), 0, 3);
-        form.add(noteArea, 1, 3);
+        form.add(new Label("POS"), 0, 2);
+        form.add(posField, 1, 2);
+        form.add(new Label("Tags"), 0, 3);
+        form.add(tagsField, 1, 3);
+        form.add(new Label("Example"), 0, 4);
+        form.add(exampleArea, 1, 4);
+        form.add(new Label("Notes"), 0, 5);
+        form.add(noteArea, 1, 5);
 
         Dialog<ButtonType> dialog = new Dialog<>();
-        dialog.setTitle("编辑单词");
+        dialog.setTitle("Edit word");
         dialog.getDialogPane().setContent(form);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
         Optional<ButtonType> result = dialog.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
             try {
-                selected.setEnglish(englishField.getText().trim());
-                selected.setChinese(chineseField.getText().trim());
-                selected.setTags(tagsField.getText());
-                selected.setNote(noteArea.getText());
+                ValidatedWord validated = validationService.validate(
+                    englishField.getText(),
+                    chineseField.getText(),
+                    selected.getPhonetic(),
+                    posField.getText(),
+                    exampleArea.getText(),
+                    noteArea.getText(),
+                    tagsField.getText()
+                );
+                Optional<WordCard> duplicate = wordRepository.findByEnglish(deck.getId(), validated.english());
+                if (duplicate.isPresent() && duplicate.get().getId() != selected.getId()) {
+                    showError("Save failed", "Another word already uses this English value.");
+                    return;
+                }
+                selected.setEnglish(validated.english());
+                selected.setChinese(validated.chinese());
+                applyValidatedFields(selected, validated);
                 wordRepository.save(selected);
                 refreshAll();
-            } catch (SQLException e) {
-                showError("保存失败", e.getMessage());
+            } catch (IllegalArgumentException | SQLException e) {
+                showError("Save failed", e.getMessage());
             }
         }
     }
@@ -453,35 +776,76 @@ public class MainWindow {
     private void deleteSelectedWord() {
         WordCard selected = wordTable.getSelectionModel().getSelectedItem();
         if (selected == null) {
-            showInfo("请选择要删除的单词。");
+            showInfo("Please select a word to delete.");
             return;
         }
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle("删除单词");
-        confirm.setHeaderText("确认删除 " + selected.getEnglish() + "？");
-        confirm.setContentText("删除后相关复习记录也会被移除。");
+        confirm.setTitle("Delete word");
+        confirm.setHeaderText("Delete " + selected.getEnglish() + "?");
+        confirm.setContentText("Related review logs will also be removed.");
         Optional<ButtonType> result = confirm.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
             try {
                 wordRepository.deleteById(selected.getId());
                 refreshAll();
+                loadNextReviewWord();
             } catch (SQLException e) {
-                showError("删除失败", e.getMessage());
+                showError("Delete failed", e.getMessage());
             }
         }
     }
 
+    private void applyValidatedFields(WordCard word, ValidatedWord validated) {
+        word.setPhonetic(validated.phonetic());
+        word.setPartOfSpeech(validated.partOfSpeech());
+        word.setExampleSentence(validated.exampleSentence());
+        word.setNote(validated.note());
+        word.setTags(validated.tags());
+    }
+
+    private boolean confirmUnverifiedAdd(String english, String message) {
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle("词条未找到");
+        confirm.setHeaderText("词条未找到：" + english);
+        confirm.setContentText((message == null || message.isBlank() ? "本地和在线词典都未验证该词条。" : message)
+            + System.lineSeparator() + "是否强制添加并标记为 UNVERIFIED？");
+        Optional<ButtonType> result = confirm.showAndWait();
+        return result.isPresent() && result.get() == ButtonType.OK;
+    }
+
+    private String appendTag(String tags, String tag) {
+        String clean = tags == null ? "" : tags.trim();
+        if (clean.toLowerCase().contains(tag.toLowerCase())) {
+            return clean;
+        }
+        return clean.isBlank() ? tag : clean + "; " + tag;
+    }
+
     private String statusText(WordCard word) {
         if (word.isMastered()) {
-            return "已掌握";
+            return "Mastered";
         }
         if (word.isDue(LocalDateTime.now())) {
-            return "待复习";
+            return "Due";
         }
         if (word.getRepetitions() == 0) {
-            return "新词";
+            return "New";
         }
-        return "学习中";
+        return "Learning";
+    }
+
+    private String achievementText(List<Achievement> achievements) {
+        if (achievements == null || achievements.isEmpty()) {
+            return "";
+        }
+        return System.lineSeparator() + "Unlocked: " + achievementNames(achievements);
+    }
+
+    private String achievementNames(List<Achievement> achievements) {
+        if (achievements == null || achievements.isEmpty()) {
+            return "None yet";
+        }
+        return achievements.stream().map(Achievement::name).collect(Collectors.joining(", "));
     }
 
     private String formatPercent(double value) {
@@ -492,13 +856,13 @@ public class MainWindow {
         Alert alert = new Alert(Alert.AlertType.ERROR);
         alert.setTitle(title);
         alert.setHeaderText(title);
-        alert.setContentText(message == null ? "未知错误" : message);
+        alert.setContentText(message == null ? "Unknown error" : message);
         alert.showAndWait();
     }
 
     private void showInfo(String message) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle("提示");
+        alert.setTitle("Info");
         alert.setHeaderText(null);
         alert.setContentText(message);
         alert.showAndWait();

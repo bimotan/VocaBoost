@@ -20,7 +20,7 @@ class ReviewSchedulerTest {
         word.setIntervalDays(7);
         LocalDateTime now = LocalDateTime.of(2026, 5, 28, 9, 0);
 
-        scheduler.applyRating(word, ReviewRating.AGAIN, now);
+        scheduler.applyRating(word, ReviewRating.AGAIN, 1.0, now);
 
         assertEquals(0, word.getConsecutiveCorrect());
         assertEquals(1, word.getIntervalDays());
@@ -33,25 +33,38 @@ class ReviewSchedulerTest {
         WordCard word = WordCard.createNew(1, "rote", "死记硬背");
         LocalDateTime now = LocalDateTime.of(2026, 5, 28, 9, 0);
 
-        scheduler.applyRating(word, ReviewRating.GOOD, now);
+        scheduler.applyRating(word, ReviewRating.GOOD, 1.0, now);
         assertEquals(1, word.getIntervalDays());
-        scheduler.applyRating(word, ReviewRating.GOOD, now.plusDays(1));
+        scheduler.applyRating(word, ReviewRating.GOOD, 1.0, now.plusDays(1));
         assertEquals(3, word.getIntervalDays());
-        scheduler.applyRating(word, ReviewRating.GOOD, now.plusDays(4));
+        scheduler.applyRating(word, ReviewRating.GOOD, 1.0, now.plusDays(4));
         assertEquals(7, word.getIntervalDays());
     }
 
     @Test
-    void easyIncreasesEasinessAndLaterInterval() {
+    void easyIncreasesEasinessAndLaterIntervalWhenSimilarityIsHigh() {
         WordCard word = WordCard.createNew(1, "forthright", "直率的");
         word.setConsecutiveCorrect(3);
         word.setIntervalDays(7);
         LocalDateTime now = LocalDateTime.of(2026, 5, 28, 9, 0);
 
-        scheduler.applyRating(word, ReviewRating.EASY, now);
+        scheduler.applyRating(word, ReviewRating.EASY, 0.98, now);
 
         assertEquals(4, word.getConsecutiveCorrect());
         assertTrue(word.getEasinessFactor() > WordCard.DEFAULT_EASINESS);
         assertTrue(word.getIntervalDays() > 7);
+    }
+
+    @Test
+    void lowSimilarityOverridesGoodRatingAndAddsLapse() {
+        WordCard word = WordCard.createNew(1, "lucid", "清晰的");
+        LocalDateTime now = LocalDateTime.of(2026, 5, 28, 9, 0);
+
+        scheduler.applyRating(word, ReviewRating.GOOD, 0.2, now);
+
+        assertEquals(0, word.getConsecutiveCorrect());
+        assertEquals(1, word.getLapses());
+        assertEquals(1, word.getIntervalDays());
+        assertTrue(word.getEasinessFactor() < WordCard.DEFAULT_EASINESS);
     }
 }

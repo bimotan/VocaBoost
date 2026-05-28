@@ -18,6 +18,12 @@ replay_pid*
 *.db
 *.db-shm
 *.db-wal
+.env
+.env.*
+*.local
+*.key
+application-local.properties
+dictionary-api.properties
 
 # IDE
 /.idea/

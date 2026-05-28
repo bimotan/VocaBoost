@@ -1,5 +1,6 @@
 package com.vocabtrainer.repository;
 
+import com.vocabtrainer.domain.Achievement;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -56,5 +58,34 @@ class RepositoryCrudTest {
 
         wordRepository.deleteById(word.getId());
         assertFalse(wordRepository.findById(word.getId()).isPresent());
+    }
+
+    @Test
+    void goalAchievementAndDictionaryCacheCrudWorks() throws Exception {
+        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("new-tables.db"));
+        databaseManager.initialize();
+        GoalRepository goalRepository = new GoalRepository(databaseManager);
+        AchievementRepository achievementRepository = new AchievementRepository(databaseManager);
+        DictionaryCacheRepository cacheRepository = new DictionaryCacheRepository(databaseManager);
+
+        LocalDate date = LocalDate.of(2026, 5, 28);
+        goalRepository.ensure(date, 20, 5, 10);
+        goalRepository.addProgress(date, 1, 1, 2, 9);
+        assertEquals(1, goalRepository.totalReviews());
+        assertEquals(9, goalRepository.totalXp());
+
+        Achievement achievement = new Achievement(
+            "first_review",
+            "First Review",
+            "Completed first review.",
+            LocalDateTime.of(2026, 5, 28, 9, 0),
+            10
+        );
+        assertTrue(achievementRepository.insertIfAbsent(achievement));
+        assertFalse(achievementRepository.insertIfAbsent(achievement));
+        assertEquals(1, achievementRepository.findAll().size());
+
+        cacheRepository.save("lucid", "payload", "test", LocalDateTime.of(2026, 5, 28, 9, 0));
+        assertEquals("payload", cacheRepository.findPayload("LUCID").orElseThrow());
     }
 }
