@@ -251,7 +251,7 @@ public class MainWindow {
         addForm.add(addStatus, 1, 6);
 
         TextField importPathField = new TextField();
-        importPathField.setPromptText("选择旧 txt 文件，例如 gre单词.txt");
+        importPathField.setPromptText("选择旧 txt 文件，例如 samples/sample-legacy-import.txt");
         Button chooseButton = new Button("选择文件");
         chooseButton.setOnAction(event -> {
             FileChooser chooser = new FileChooser();

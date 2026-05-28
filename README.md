@@ -1,99 +1,137 @@
-# Vocabulary Trainer 桌面版
+# VocaBoost Desktop
 
-这是一个由旧 Java 命令行背单词工具重构而来的 JavaFX + SQLite 桌面应用。第一版目标是保证项目可编译、可运行，并让核心复习流程可用：单词 CRUD、旧 txt 导入、相似度反馈、Again/Hard/Good/Easy 自评和间隔重复调度。
+VocaBoost is a JavaFX + SQLite desktop vocabulary trainer rebuilt from an older Java CLI spaced-repetition project. The current version focuses on a reliable core workflow: word CRUD, legacy txt import, answer similarity feedback, Again/Hard/Good/Easy self-rating, SQLite persistence, and spaced-repetition scheduling.
 
-## 技术栈
+## Tech Stack
 
 - Java 17+
 - JavaFX
 - Maven
-- SQLite 本地数据库
+- SQLite
 - JUnit 5
 
-## 主要功能
+## Why Maven Is Needed During Development
 
-- Dashboard：显示总词数、今日待复习、今日完成、正确率、已掌握词数和每日目标进度。
-- Review：显示英文，输入中文释义，提交后展示正确答案、相似度和 Mock AI 提示，再用 Again/Hard/Good/Easy 自评。
-- Add / Import：添加单词，导入旧版分号分隔 txt 文件。
-- Word List：搜索、查看、编辑、删除单词，并显示记忆强度、间隔和状态。
+The app depends on external libraries such as JavaFX, SQLite JDBC, and JUnit. Maven reads `pom.xml`, downloads those dependencies, compiles the code, runs tests, and starts the JavaFX app. That is why development runs through commands such as `mvn javafx:run` instead of directly double-clicking a `.java` file.
 
-## 数据库位置
+For end users, Maven is not required after the app is packaged with `jpackage`; they can launch `VocaBoost.exe` directly.
 
-默认数据库会自动创建在：
+## Features
+
+- Dashboard: total words, due words, completed reviews, accuracy, mastered words, and daily progress.
+- Review: show English prompt, collect Chinese answer, reveal correct answer and similarity, then self-rate with Again/Hard/Good/Easy.
+- Add / Import: add words manually or import legacy semicolon-separated txt files.
+- Word List: search, edit, delete, and inspect memory strength, interval, status, and next review date.
+- Mock AI: deterministic local learning hint; no API key is required.
+
+## Database Location
+
+The app creates a local SQLite database automatically:
 
 ```text
 %USERPROFILE%\.vocab-trainer\vocab.db
 ```
 
-首次启动会自动创建 SQLite 表和默认词库。
+## Sample Import Files
 
-## 旧文件导入
+The repository includes English-named sample files under `samples/`:
 
-导入格式保持兼容旧工具：
+```text
+samples/sample-gre-words.txt
+samples/sample-legacy-import.txt
+```
+
+Both use the legacy import format:
 
 ```text
 english;chinese;addedDate;lastReviewed;easiness;interval;consecutiveCorrect
 ```
 
-日期格式为：
+Date format:
 
 ```text
 yyyy-MM-dd HH:mm:ss
 ```
 
-导入时会跳过坏行和重复单词，并在界面中汇总提示；原 txt 文件不会被修改。仓库中的 `gre单词.txt` 可作为导入样例。
+Bad rows and duplicate words are skipped with a summary in the UI. The original txt file is never modified.
 
-## 构建与运行
+## Run in IntelliJ IDEA
 
-本机需要先安装 Maven，然后在项目根目录执行：
+Open the project folder in IntelliJ IDEA, then run one of these:
 
-```bash
-mvn test
+```powershell
 mvn javafx:run
 ```
 
-
-如果当前系统没有把 Maven 加入 PATH，但安装了 IntelliJ IDEA，也可以使用 IntelliJ 自带 Maven，例如：
+If `mvn` is not available in PATH but IntelliJ is installed, use IntelliJ's bundled Maven:
 
 ```powershell
-& 'C:\Program Files\JetBrains\IntelliJ IDEA 2025.3.1.1\plugins\maven\lib\maven3\bin\mvn.cmd' test
-```
-如果只想打包或验证编译：
-
-```bash
-mvn package
+& 'C:\Program Files\JetBrains\IntelliJ IDEA 2025.3.1.1\plugins\maven\lib\maven3\bin\mvn.cmd' javafx:run
 ```
 
-## AI 配置
+Run tests:
 
-当前第一版只接入 `MockAiService`，没有硬编码 API key，也不会依赖外部网络。后续可以在 `AiService` 接口下增加真实 AI 实现，并通过 `OPENAI_API_KEY` 或 `VOCAB_AI_API_KEY` 等环境变量启用。
+```powershell
+mvn test
+```
 
-## 架构
+## Build a Clickable Windows App
+
+For a click-to-run Windows app folder with `VocaBoost.exe`, use:
+
+```powershell
+.\scripts\package-windows.ps1
+```
+
+Output:
+
+```text
+target\dist\VocaBoost\VocaBoost.exe
+```
+
+That `VocaBoost.exe` can be double-clicked. It includes a custom runtime image, so users do not need to install Maven. This is the best packaging option for quick demos.
+
+To build a Windows installer `.exe`, run:
+
+```powershell
+.\scripts\package-windows.ps1 -PackageType exe
+```
+
+Installer mode may require WiX Toolset on Windows. If WiX is missing, use the default `app-image` mode above.
+
+## Project Structure
 
 ```text
 src/main/java/com/vocabtrainer
-├─ app          JavaFX 应用入口
-├─ domain       WordCard、Deck、ReviewLog、ReviewRating
-├─ repository   SQLite 初始化和 CRUD
-├─ service      复习调度、相似度、导入、统计、AI 接口
-├─ ui           JavaFX 页面
-└─ util         日期和路径工具
+├─ app          JavaFX application entry point
+├─ domain       WordCard, Deck, ReviewLog, ReviewRating
+├─ repository   SQLite setup and CRUD
+├─ service      review scheduling, similarity, import, stats, AI interface
+├─ ui           JavaFX screens
+└─ util         date and path utilities
 ```
 
-业务逻辑不再依赖 `Scanner`、`System.out` 或 `System.exit()`；UI、服务、数据库和算法已分层。
+Supporting folders:
 
-## 测试覆盖
+```text
+samples/       import test data
+scripts/       local build and packaging scripts
+```
 
-当前测试覆盖：
+Business logic no longer depends on `Scanner`, `System.out`, or `System.exit()`.
+
+## Test Coverage
+
+Current tests cover:
 
 - `SimilarityService`
 - `ReviewScheduler`
 - `ImportExportService`
-- SQLite repository CRUD 和复习日志
+- SQLite repository CRUD and review logs
 
-## 后续 TODO
+## Future Work
 
-- 增加 Goals/Achievements 的完整数据表和 UI。
-- 增加真实 AI 服务、SQLite AI 缓存和配置页开关。
-- 增加 CSV/JSON 导入导出。
-- 增强统计图表和作品集展示截图。
+- Add complete Goals/Achievements UI and database support.
+- Add real AI service, environment-variable configuration, and SQLite AI cache.
+- Add CSV/JSON import and export.
+- Add richer charts and portfolio screenshots.
