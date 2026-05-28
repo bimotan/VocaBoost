@@ -1,0 +1,32 @@
+# Java & Maven
+*.class
+*.jar
+*.war
+*.ear
+/target/
+/build/
+/out/
+hs_err_pid*
+replay_pid*
+*.log
+
+# Local Maven cache
+/.m2/
+
+# Runtime data
+.vocab-trainer/
+*.db
+*.db-shm
+*.db-wal
+
+# IDE
+/.idea/
+*.iml
+/.vscode/
+/.project
+/.classpath
+/.settings/
+
+# OS
+.DS_Store
+Thumbs.db
