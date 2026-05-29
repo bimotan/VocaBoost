@@ -49,5 +49,7 @@ class StatsServiceTest {
         assertEquals(1.0, defaultStats.get(0).accuracy());
         assertEquals(1, satStats.get(0).reviewCount());
         assertEquals(0.0, satStats.get(0).accuracy());
+        assertEquals(1.0, statsService.dashboardStats(defaultDeck.getId()).accuracyToday());
+        assertEquals(0.0, statsService.dashboardStats(satDeck.getId()).accuracyToday());
     }
 }

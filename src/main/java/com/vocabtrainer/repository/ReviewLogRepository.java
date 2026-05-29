@@ -50,6 +50,24 @@ public class ReviewLogRepository {
         return scalarInt("SELECT COUNT(*) FROM review_logs WHERE reviewed_at >= ? AND rating <> 'AGAIN'", since);
     }
 
+    public int countSince(long deckId, LocalDateTime since) throws SQLException {
+        return scalarInt("""
+            SELECT COUNT(*)
+            FROM review_logs l
+            JOIN words w ON w.id = l.word_id
+            WHERE w.deck_id = ? AND l.reviewed_at >= ?
+            """, deckId, since);
+    }
+
+    public int countCorrectSince(long deckId, LocalDateTime since) throws SQLException {
+        return scalarInt("""
+            SELECT COUNT(*)
+            FROM review_logs l
+            JOIN words w ON w.id = l.word_id
+            WHERE w.deck_id = ? AND l.reviewed_at >= ? AND l.rating <> 'AGAIN'
+            """, deckId, since);
+    }
+
     public int countByRating(ReviewRating rating) throws SQLException {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement("SELECT COUNT(*) FROM review_logs WHERE rating = ?")) {
@@ -64,6 +82,17 @@ public class ReviewLogRepository {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, DateTimeUtil.toDatabase(since));
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        }
+    }
+
+    private int scalarInt(String sql, long deckId, LocalDateTime since) throws SQLException {
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            statement.setString(2, DateTimeUtil.toDatabase(since));
             try (ResultSet rs = statement.executeQuery()) {
                 return rs.next() ? rs.getInt(1) : 0;
             }

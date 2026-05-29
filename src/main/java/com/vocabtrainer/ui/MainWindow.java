@@ -30,8 +30,10 @@ import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.util.DateTimeUtil;
 import javafx.beans.property.SimpleStringProperty;
+import javafx.animation.PauseTransition;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -64,12 +66,15 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
+import javafx.util.Duration;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class MainWindow {
@@ -118,6 +123,7 @@ public class MainWindow {
     private TextArea analyticsArea;
     private Label overdueStatsLabel;
     private ComboBox<Deck> deckSelector;
+    private boolean statisticsSelected;
 
     public MainWindow(Deck deck, DeckService deckService, WordRepository wordRepository, ReviewService reviewService,
                       ImportExportService importExportService, StatsService statsService,
@@ -467,12 +473,26 @@ public class MainWindow {
         lookupButton.setOnAction(event -> {
             try {
                 String english = validationService.validateEnglishOnly(lookupField.getText());
-                DictionaryLookupResult result = dictionaryService.lookup(english);
-                lookupStatus.setText(result.success() ? result.message() : "词条未找到。" + System.lineSeparator() + result.message());
-                results.getItems().setAll(result.entries());
-                if (!result.entries().isEmpty()) {
-                    results.getSelectionModel().selectFirst();
-                }
+                lookupButton.setDisable(true);
+                runBackground(
+                    () -> dictionaryService.lookup(english),
+                    result -> {
+                        lookupStatus.setText(result.success()
+                            ? result.message()
+                            : "词条未找到。" + System.lineSeparator() + result.message());
+                        results.getItems().setAll(result.entries());
+                        if (!result.entries().isEmpty()) {
+                            results.getSelectionModel().selectFirst();
+                        }
+                        lookupButton.setDisable(false);
+                    },
+                    error -> {
+                        lookupStatus.setText("查词失败：" + rootMessage(error));
+                        lookupButton.setDisable(false);
+                    },
+                    lookupStatus,
+                    "Looking up..."
+                );
             } catch (IllegalArgumentException e) {
                 lookupStatus.setText(e.getMessage());
             }
@@ -507,12 +527,21 @@ public class MainWindow {
         importLegacyButton.setOnAction(event -> importFromPath(importPathField, importStatus, true));
         importCsvButton.setOnAction(event -> importFromPath(importPathField, importStatus, false));
         importStarterButton.setOnAction(event -> {
-            try {
-                ImportResult result = importExportService.importBundledGreStarter(currentDeck.getId());
-                afterImport(result, importStatus);
-            } catch (Exception e) {
-                showError("Import failed", e.getMessage());
-            }
+            long deckId = currentDeck.getId();
+            importStarterButton.setDisable(true);
+            runBackground(
+                () -> importExportService.importBundledGreStarter(deckId),
+                result -> {
+                    importStarterButton.setDisable(false);
+                    afterImport(result, importStatus);
+                },
+                error -> {
+                    importStarterButton.setDisable(false);
+                    showError("Import failed", rootMessage(error));
+                },
+                importStatus,
+                "Importing GRE starter deck..."
+            );
         });
 
         HBox controls = new HBox(10, importPathField, chooseButton, importLegacyButton, importCsvButton, importStarterButton);
@@ -561,13 +590,21 @@ public class MainWindow {
         scrollPane.setFitToWidth(true);
         Tab tab = new Tab("Statistics", scrollPane);
         tab.setClosable(false);
+        tab.setOnSelectionChanged(event -> {
+            if (tab.isSelected()) {
+                statisticsSelected = true;
+                refreshStatistics();
+            }
+        });
         return tab;
     }
 
     private Tab createWordListTab() {
         searchField = new TextField();
         searchField.setPromptText("Search English, Chinese or tags");
-        searchField.textProperty().addListener((observable, oldValue, newValue) -> refreshWordTable());
+        PauseTransition searchDebounce = new PauseTransition(Duration.millis(250));
+        searchDebounce.setOnFinished(event -> refreshWordTable());
+        searchField.textProperty().addListener((observable, oldValue, newValue) -> searchDebounce.playFromStart());
         Button refreshButton = new Button("Refresh");
         refreshButton.setOnAction(event -> refreshWordTable());
         Button editButton = new Button("Edit selected");
@@ -672,10 +709,16 @@ public class MainWindow {
         }
         try {
             Path path = Path.of(importPathField.getText().trim());
-            ImportResult result = legacy
-                ? importExportService.importLegacyTxt(path, currentDeck.getId())
-                : importExportService.importGreCsv(path, currentDeck.getId());
-            afterImport(result, importStatus);
+            long deckId = currentDeck.getId();
+            runBackground(
+                () -> legacy
+                    ? importExportService.importLegacyTxt(path, deckId)
+                    : importExportService.importGreCsv(path, deckId),
+                result -> afterImport(result, importStatus),
+                error -> showError("Import failed", rootMessage(error)),
+                importStatus,
+                "Importing..."
+            );
         } catch (Exception e) {
             showError("Import failed", e.getMessage());
         }
@@ -752,7 +795,9 @@ public class MainWindow {
     private void refreshAll() {
         refreshDashboard();
         refreshWordTable();
-        refreshStatistics();
+        if (statisticsSelected) {
+            refreshStatistics();
+        }
     }
 
     private void refreshDashboard() {
@@ -975,6 +1020,24 @@ public class MainWindow {
 
     private String formatPercent(double value) {
         return String.format("%.0f%%", value * 100);
+    }
+
+    private <T> void runBackground(Callable<T> callable, Consumer<T> onSuccess, Consumer<Throwable> onFailure,
+                                   Label statusLabel, String runningMessage) {
+        if (statusLabel != null && runningMessage != null) {
+            statusLabel.setText(runningMessage);
+        }
+        Task<T> task = new Task<>() {
+            @Override
+            protected T call() throws Exception {
+                return callable.call();
+            }
+        };
+        task.setOnSucceeded(event -> onSuccess.accept(task.getValue()));
+        task.setOnFailed(event -> onFailure.accept(task.getException()));
+        Thread thread = new Thread(task, "vocaboost-background-task");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private void showError(String title, String message) {

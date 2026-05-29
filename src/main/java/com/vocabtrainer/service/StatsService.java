@@ -51,8 +51,8 @@ public class StatsService {
         try {
             LocalDateTime now = LocalDateTime.now(clock);
             LocalDateTime startOfDay = LocalDate.now(clock).atStartOfDay();
-            int reviewedToday = reviewLogRepository.countSince(startOfDay);
-            int correctToday = reviewLogRepository.countCorrectSince(startOfDay);
+            int reviewedToday = reviewLogRepository.countSince(deckId, startOfDay);
+            int correctToday = reviewLogRepository.countCorrectSince(deckId, startOfDay);
             double accuracy = reviewedToday == 0 ? 0.0 : (double) correctToday / reviewedToday;
             return new DashboardStats(
                 wordRepository.countAll(deckId),
