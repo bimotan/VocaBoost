@@ -9,6 +9,7 @@ import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.AchievementService;
+import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.DictionaryServiceFactory;
 import com.vocabtrainer.service.GoalService;
@@ -38,7 +39,8 @@ public class VocabTrainerApp extends Application {
             GoalRepository goalRepository = new GoalRepository(databaseManager);
             AchievementRepository achievementRepository = new AchievementRepository(databaseManager);
             DictionaryCacheRepository dictionaryCacheRepository = new DictionaryCacheRepository(databaseManager);
-            Deck defaultDeck = deckRepository.ensureDefaultDeck();
+            DeckService deckService = new DeckService(deckRepository);
+            Deck defaultDeck = deckService.ensureDefaultDeck();
 
             SimilarityService similarityService = new SimilarityService();
             ReviewScheduler reviewScheduler = new ReviewScheduler();
@@ -62,6 +64,7 @@ public class VocabTrainerApp extends Application {
 
             MainWindow mainWindow = new MainWindow(
                 defaultDeck,
+                deckService,
                 wordRepository,
                 reviewService,
                 importExportService,

@@ -19,6 +19,7 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.AiService;
+import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ImportExportService;
@@ -43,6 +44,7 @@ import javafx.scene.chart.XYChart;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
@@ -55,6 +57,7 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextInputDialog;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
@@ -70,7 +73,8 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class MainWindow {
-    private final Deck deck;
+    private Deck currentDeck;
+    private final DeckService deckService;
     private final WordRepository wordRepository;
     private final ReviewService reviewService;
     private final ImportExportService importExportService;
@@ -93,6 +97,7 @@ public class MainWindow {
     private final Label xpLabel = new Label("-");
     private final Label badgesLabel = new Label("-");
     private final Label databasePathLabel = new Label();
+    private final Label headerSubtitleLabel = new Label();
     private final ProgressBar reviewProgress = new ProgressBar(0);
     private final ProgressBar newWordProgress = new ProgressBar(0);
 
@@ -112,13 +117,15 @@ public class MainWindow {
     private TextArea hardestWordsArea;
     private TextArea analyticsArea;
     private Label overdueStatsLabel;
+    private ComboBox<Deck> deckSelector;
 
-    public MainWindow(Deck deck, WordRepository wordRepository, ReviewService reviewService,
+    public MainWindow(Deck deck, DeckService deckService, WordRepository wordRepository, ReviewService reviewService,
                       ImportExportService importExportService, StatsService statsService,
                       GoalService goalService, AchievementService achievementService,
                       DictionaryService dictionaryService, WordValidationService validationService,
                       AiService aiService, Path databasePath) {
-        this.deck = deck;
+        this.currentDeck = deck;
+        this.deckService = deckService;
         this.wordRepository = wordRepository;
         this.reviewService = reviewService;
         this.importExportService = importExportService;
@@ -151,14 +158,132 @@ public class MainWindow {
     private VBox createHeader() {
         Label title = new Label("VocaBoost");
         title.setStyle("-fx-font-size: 24px; -fx-font-weight: 700;");
-        String dictionaryStatus = dictionaryService.isConfigured() ? "API configured" : "offline fallback";
-        Label subtitle = new Label("Deck: " + deck.getName() + " | Dictionary: " + dictionaryStatus
-            + " | AI: " + (aiService.isAvailable() ? "configured" : "mock"));
-        subtitle.setStyle("-fx-text-fill: #4b5563;");
-        VBox box = new VBox(4, title, subtitle);
+        headerSubtitleLabel.setStyle("-fx-text-fill: #4b5563;");
+
+        deckSelector = new ComboBox<>();
+        deckSelector.setPrefWidth(220);
+        deckSelector.setCellFactory(list -> deckCell());
+        deckSelector.setButtonCell(deckCell());
+        deckSelector.valueProperty().addListener((observable, oldDeck, newDeck) -> {
+            if (newDeck != null && (currentDeck == null || newDeck.getId() != currentDeck.getId())) {
+                currentDeck = newDeck;
+                onDeckChanged();
+            }
+        });
+
+        Button newDeckButton = new Button("New deck");
+        newDeckButton.setOnAction(event -> createDeck());
+        Button renameDeckButton = new Button("Rename");
+        renameDeckButton.setOnAction(event -> renameCurrentDeck());
+        Button archiveDeckButton = new Button("Archive");
+        archiveDeckButton.setOnAction(event -> archiveCurrentDeck());
+
+        HBox deckControls = new HBox(8, new Label("Deck"), deckSelector, newDeckButton, renameDeckButton, archiveDeckButton);
+        deckControls.setAlignment(Pos.CENTER_LEFT);
+        HBox headerLine = new HBox(24, new VBox(4, title, headerSubtitleLabel), deckControls);
+        headerLine.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(headerLine.getChildren().get(0), Priority.ALWAYS);
+        refreshDeckSelector();
+        updateHeaderSubtitle();
+        VBox box = new VBox(4, headerLine);
         box.setPadding(new Insets(18, 24, 12, 24));
         box.setStyle("-fx-background-color: #f8fafc; -fx-border-color: #e5e7eb; -fx-border-width: 0 0 1 0;");
         return box;
+    }
+
+    private ListCell<Deck> deckCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(Deck item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.getName());
+            }
+        };
+    }
+
+    private void updateHeaderSubtitle() {
+        String dictionaryStatus = dictionaryService.isConfigured() ? "API configured" : "offline fallback";
+        String deckName = currentDeck == null ? "-" : currentDeck.getName();
+        headerSubtitleLabel.setText("Deck: " + deckName + " | Dictionary: " + dictionaryStatus
+            + " | AI: " + (aiService.isAvailable() ? "configured" : "mock"));
+    }
+
+    private void refreshDeckSelector() {
+        if (deckSelector == null) {
+            return;
+        }
+        List<Deck> decks = deckService.activeDecks();
+        deckSelector.getItems().setAll(decks);
+        Deck selected = decks.stream()
+            .filter(item -> currentDeck != null && item.getId() == currentDeck.getId())
+            .findFirst()
+            .orElse(decks.isEmpty() ? null : decks.get(0));
+        if (selected != null) {
+            currentDeck = selected;
+            deckSelector.getSelectionModel().select(selected);
+        }
+    }
+
+    private void createDeck() {
+        TextInputDialog dialog = new TextInputDialog();
+        dialog.setTitle("New deck");
+        dialog.setHeaderText("Create a new deck");
+        dialog.setContentText("Deck name");
+        dialog.showAndWait().ifPresent(name -> {
+            try {
+                currentDeck = deckService.createDeck(name);
+                refreshDeckSelector();
+                onDeckChanged();
+            } catch (RuntimeException e) {
+                showError("Create deck failed", rootMessage(e));
+            }
+        });
+    }
+
+    private void renameCurrentDeck() {
+        if (currentDeck == null) {
+            return;
+        }
+        TextInputDialog dialog = new TextInputDialog(currentDeck.getName());
+        dialog.setTitle("Rename deck");
+        dialog.setHeaderText("Rename current deck");
+        dialog.setContentText("Deck name");
+        dialog.showAndWait().ifPresent(name -> {
+            try {
+                currentDeck = deckService.renameDeck(currentDeck.getId(), name);
+                refreshDeckSelector();
+                onDeckChanged();
+            } catch (RuntimeException e) {
+                showError("Rename deck failed", rootMessage(e));
+            }
+        });
+    }
+
+    private void archiveCurrentDeck() {
+        if (currentDeck == null) {
+            return;
+        }
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle("Archive deck");
+        confirm.setHeaderText("Archive " + currentDeck.getName() + "?");
+        confirm.setContentText("Words remain in SQLite, but the deck will be hidden from active study views.");
+        Optional<ButtonType> result = confirm.showAndWait();
+        if (result.isPresent() && result.get() == ButtonType.OK) {
+            try {
+                currentDeck = deckService.archiveDeck(currentDeck.getId());
+                refreshDeckSelector();
+                onDeckChanged();
+            } catch (RuntimeException e) {
+                showError("Archive deck failed", rootMessage(e));
+            }
+        }
+    }
+
+    private void onDeckChanged() {
+        updateHeaderSubtitle();
+        currentReviewWord = null;
+        refreshAll();
+        loadNextReviewWord();
     }
 
     private Tab createDashboardTab() {
@@ -383,7 +508,7 @@ public class MainWindow {
         importCsvButton.setOnAction(event -> importFromPath(importPathField, importStatus, false));
         importStarterButton.setOnAction(event -> {
             try {
-                ImportResult result = importExportService.importBundledGreStarter(deck.getId());
+                ImportResult result = importExportService.importBundledGreStarter(currentDeck.getId());
                 afterImport(result, importStatus);
             } catch (Exception e) {
                 showError("Import failed", e.getMessage());
@@ -496,7 +621,7 @@ public class MainWindow {
                 noteArea.getText(),
                 tagsField.getText()
             );
-            if (wordRepository.findByEnglish(deck.getId(), validated.english()).isPresent()) {
+            if (wordRepository.findByEnglish(currentDeck.getId(), validated.english()).isPresent()) {
                 statusLabel.setText("Word already exists: " + validated.english() + ". Edit it in Word List.");
                 return;
             }
@@ -517,7 +642,7 @@ public class MainWindow {
                     appendTag(validated.tags(), "UNVERIFIED")
                 );
             }
-            WordCard word = WordCard.createNew(deck.getId(), wordToSave.english(), wordToSave.chinese());
+            WordCard word = WordCard.createNew(currentDeck.getId(), wordToSave.english(), wordToSave.chinese());
             applyValidatedFields(word, wordToSave);
             wordRepository.save(word);
             GoalUpdate update = goalService.recordNewWords(1);
@@ -548,8 +673,8 @@ public class MainWindow {
         try {
             Path path = Path.of(importPathField.getText().trim());
             ImportResult result = legacy
-                ? importExportService.importLegacyTxt(path, deck.getId())
-                : importExportService.importGreCsv(path, deck.getId());
+                ? importExportService.importLegacyTxt(path, currentDeck.getId())
+                : importExportService.importGreCsv(path, currentDeck.getId());
             afterImport(result, importStatus);
         } catch (Exception e) {
             showError("Import failed", e.getMessage());
@@ -592,7 +717,7 @@ public class MainWindow {
     }
 
     private void loadNextReviewWord() {
-        Optional<WordCard> next = reviewService.nextDueWord(deck.getId());
+        Optional<WordCard> next = reviewService.nextDueWord(currentDeck.getId());
         currentReviewWord = next.orElse(null);
         answerField.clear();
         reviewResultArea.clear();
@@ -631,7 +756,7 @@ public class MainWindow {
     }
 
     private void refreshDashboard() {
-        DashboardStats stats = statsService.dashboardStats(deck.getId());
+        DashboardStats stats = statsService.dashboardStats(currentDeck.getId());
         DailyGoalProgress progress = goalService.getTodayProgress();
         List<Achievement> achievements = achievementService.getUnlockedAchievements();
         totalWordsLabel.setText(String.valueOf(stats.totalWords()));
@@ -653,7 +778,7 @@ public class MainWindow {
             return;
         }
         try {
-            List<WordCard> words = wordRepository.search(deck.getId(), searchField == null ? "" : searchField.getText());
+            List<WordCard> words = wordRepository.search(currentDeck.getId(), searchField == null ? "" : searchField.getText());
             wordItems.setAll(words);
         } catch (SQLException e) {
             showError("Refresh failed", e.getMessage());
@@ -664,7 +789,7 @@ public class MainWindow {
         if (reviewCountChart == null) {
             return;
         }
-        List<DailyReviewStat> dailyStats = statsService.dailyReviewStats(14);
+        List<DailyReviewStat> dailyStats = statsService.dailyReviewStats(currentDeck.getId(), 14);
         XYChart.Series<String, Number> reviewSeries = new XYChart.Series<>();
         XYChart.Series<String, Number> accuracySeries = new XYChart.Series<>();
         for (DailyReviewStat stat : dailyStats) {
@@ -675,13 +800,13 @@ public class MainWindow {
         reviewCountChart.getData().setAll(reviewSeries);
         accuracyChart.getData().setAll(accuracySeries);
 
-        List<PieChart.Data> memoryData = statsService.memoryDistribution(deck.getId()).stream()
+        List<PieChart.Data> memoryData = statsService.memoryDistribution(currentDeck.getId()).stream()
             .map(stat -> new PieChart.Data(stat.label(), stat.count()))
             .toList();
         memoryChart.getData().setAll(memoryData);
-        overdueStatsLabel.setText("Overdue or due words: " + statsService.overdueCount(deck.getId()));
+        overdueStatsLabel.setText("Overdue or due words: " + statsService.overdueCount(currentDeck.getId()));
 
-        String hardest = statsService.hardestWords(deck.getId(), 8).stream()
+        String hardest = statsService.hardestWords(currentDeck.getId(), 8).stream()
             .map(word -> word.english() + " | avg similarity " + formatPercent(word.averageSimilarity())
                 + " | Again " + word.againCount())
             .collect(Collectors.joining(System.lineSeparator()));
@@ -702,7 +827,7 @@ public class MainWindow {
             return;
         }
         try {
-            Path exported = statsService.exportMarkdownReport(deck.getId(), file.toPath());
+            Path exported = statsService.exportMarkdownReport(currentDeck.getId(), file.toPath());
             showInfo("Report exported: " + exported.toAbsolutePath());
         } catch (Exception e) {
             showError("Export failed", e.getMessage());
@@ -757,7 +882,7 @@ public class MainWindow {
                     noteArea.getText(),
                     tagsField.getText()
                 );
-                Optional<WordCard> duplicate = wordRepository.findByEnglish(deck.getId(), validated.english());
+                Optional<WordCard> duplicate = wordRepository.findByEnglish(currentDeck.getId(), validated.english());
                 if (duplicate.isPresent() && duplicate.get().getId() != selected.getId()) {
                     showError("Save failed", "Another word already uses this English value.");
                     return;
@@ -858,6 +983,14 @@ public class MainWindow {
         alert.setHeaderText(title);
         alert.setContentText(message == null ? "Unknown error" : message);
         alert.showAndWait();
+    }
+
+    private String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getMessage() == null ? throwable.getMessage() : current.getMessage();
     }
 
     private void showInfo(String message) {

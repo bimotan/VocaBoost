@@ -9,6 +9,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 public class DeckRepository {
@@ -30,7 +32,7 @@ public class DeckRepository {
 
     public Deck create(String name) throws SQLException {
         LocalDateTime now = LocalDateTime.now();
-        String sql = "INSERT INTO decks(name, created_at) VALUES(?, ?)";
+        String sql = "INSERT INTO decks(name, created_at, archived) VALUES(?, ?, 0)";
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             statement.setString(1, name.trim());
@@ -46,7 +48,7 @@ public class DeckRepository {
     }
 
     public Optional<Deck> findByName(String name) throws SQLException {
-        String sql = "SELECT id, name, created_at FROM decks WHERE name = ?";
+        String sql = "SELECT id, name, created_at, archived FROM decks WHERE name = ? AND archived = 0";
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, name);
@@ -60,7 +62,7 @@ public class DeckRepository {
     }
 
     public Optional<Deck> findById(long id) throws SQLException {
-        String sql = "SELECT id, name, created_at FROM decks WHERE id = ?";
+        String sql = "SELECT id, name, created_at, archived FROM decks WHERE id = ?";
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, id);
@@ -73,11 +75,48 @@ public class DeckRepository {
         return Optional.empty();
     }
 
+    public List<Deck> findAllActive() throws SQLException {
+        String sql = "SELECT id, name, created_at, archived FROM decks WHERE archived = 0 ORDER BY lower(name), id";
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet rs = statement.executeQuery()) {
+            List<Deck> decks = new ArrayList<>();
+            while (rs.next()) {
+                decks.add(map(rs));
+            }
+            return decks;
+        }
+    }
+
+    public Deck rename(long id, String name) throws SQLException {
+        String trimmed = name == null ? "" : name.trim();
+        String sql = "UPDATE decks SET name = ? WHERE id = ? AND archived = 0";
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, trimmed);
+            statement.setLong(2, id);
+            int updated = statement.executeUpdate();
+            if (updated == 0) {
+                throw new SQLException("词库不存在或已归档");
+            }
+        }
+        return findById(id).orElseThrow(() -> new SQLException("词库不存在"));
+    }
+
+    public void archive(long id) throws SQLException {
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement("UPDATE decks SET archived = 1 WHERE id = ?")) {
+            statement.setLong(1, id);
+            statement.executeUpdate();
+        }
+    }
+
     private Deck map(ResultSet rs) throws SQLException {
         return new Deck(
             rs.getLong("id"),
             rs.getString("name"),
-            DateTimeUtil.fromDatabase(rs.getString("created_at"))
+            DateTimeUtil.fromDatabase(rs.getString("created_at")),
+            rs.getInt("archived") == 1
         );
     }
 }

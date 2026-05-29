@@ -67,6 +67,10 @@ public class StatsService {
     }
 
     public List<DailyReviewStat> dailyReviewStats(int days) {
+        return dailyReviewStats(0, days);
+    }
+
+    public List<DailyReviewStat> dailyReviewStats(long deckId, int days) {
         if (databaseManager == null) {
             return List.of();
         }
@@ -76,7 +80,7 @@ public class StatsService {
         for (int i = 0; i < days; i++) {
             map.put(start.plusDays(i), new MutableDailyStat());
         }
-        String sql = """
+        String sql = deckId <= 0 ? """
             SELECT substr(reviewed_at, 1, 10) AS day,
                    COUNT(*) AS reviews,
                    SUM(CASE WHEN rating <> 'AGAIN' THEN 1 ELSE 0 END) AS correct
@@ -84,10 +88,24 @@ public class StatsService {
             WHERE reviewed_at >= ?
             GROUP BY substr(reviewed_at, 1, 10)
             ORDER BY day
+            """ : """
+            SELECT substr(l.reviewed_at, 1, 10) AS day,
+                   COUNT(*) AS reviews,
+                   SUM(CASE WHEN l.rating <> 'AGAIN' THEN 1 ELSE 0 END) AS correct
+            FROM review_logs l
+            JOIN words w ON w.id = l.word_id
+            WHERE w.deck_id = ? AND l.reviewed_at >= ?
+            GROUP BY substr(l.reviewed_at, 1, 10)
+            ORDER BY day
             """;
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, start.atStartOfDay().toString());
+            if (deckId <= 0) {
+                statement.setString(1, start.atStartOfDay().toString());
+            } else {
+                statement.setLong(1, deckId);
+                statement.setString(2, start.atStartOfDay().toString());
+            }
             try (ResultSet rs = statement.executeQuery()) {
                 while (rs.next()) {
                     LocalDate day = LocalDate.parse(rs.getString("day"));

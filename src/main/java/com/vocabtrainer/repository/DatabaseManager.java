@@ -38,9 +38,11 @@ public class DatabaseManager {
                 CREATE TABLE IF NOT EXISTS decks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    archived INTEGER NOT NULL DEFAULT 0
                 )
                 """);
+            addColumnIfMissing(statement, "decks", "archived", "INTEGER NOT NULL DEFAULT 0");
             statement.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS words (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -129,6 +131,17 @@ public class DatabaseManager {
                     created_at TEXT NOT NULL
                 )
                 """);
+        }
+    }
+
+    private void addColumnIfMissing(Statement statement, String table, String column, String definition) throws SQLException {
+        try {
+            statement.executeUpdate("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+        } catch (SQLException e) {
+            String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+            if (!message.contains("duplicate column name")) {
+                throw e;
+            }
         }
     }
 
