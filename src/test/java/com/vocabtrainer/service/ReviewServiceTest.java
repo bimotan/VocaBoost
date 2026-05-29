@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReviewServiceTest {
@@ -55,5 +56,55 @@ class ReviewServiceTest {
 
         assertTrue(service.nextDueWord(deck.getId()).isEmpty());
         assertEquals("abate", service.nextWord(deck.getId(), ReviewMode.WEAK_WORDS).orElseThrow().getEnglish());
+    }
+
+    @Test
+    void sessionTargetStopsReviewAfterTargetIsReachedAndResetClearsProgress() throws Exception {
+        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("session-target.db"));
+        databaseManager.initialize();
+        Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
+        WordRepository wordRepository = new WordRepository(databaseManager);
+        ReviewService service = new ReviewService(wordRepository, new ReviewLogRepository(databaseManager),
+            new SimilarityService(), new ReviewScheduler());
+
+        WordCard word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
+        wordRepository.save(WordCard.createNew(deck.getId(), "abate", "减少"));
+
+        service.startSession(deck.getId(), ReviewMode.EN_TO_ZH, 1);
+        WordCard next = service.nextWord(deck.getId(), ReviewMode.EN_TO_ZH).orElseThrow();
+        service.submitAnswer(next.getId(), next.getChinese(), ReviewMode.EN_TO_ZH);
+        service.rateCurrent(next.getId(), ReviewRating.GOOD);
+
+        assertTrue(service.isSessionTargetReached());
+        assertTrue(service.nextWord(deck.getId(), ReviewMode.EN_TO_ZH).isEmpty());
+        assertEquals(1, service.sessionSummary().reviewedCount());
+
+        service.resetSession(deck.getId());
+        assertFalse(service.isSessionTargetReached());
+        assertEquals(0, service.sessionSummary().reviewedCount());
+        assertTrue(wordRepository.findById(word.getId()).isPresent());
+    }
+
+    @Test
+    void mixedModeUsesConcreteQuestionModeForCurrentCard() throws Exception {
+        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("mixed.db"));
+        databaseManager.initialize();
+        Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
+        WordRepository wordRepository = new WordRepository(databaseManager);
+        ReviewService service = new ReviewService(wordRepository, new ReviewLogRepository(databaseManager),
+            new SimilarityService(), new ReviewScheduler());
+
+        WordCard word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
+
+        service.startSession(deck.getId(), ReviewMode.MIXED, 5);
+        assertEquals("lucid", service.nextWord(deck.getId(), ReviewMode.MIXED).orElseThrow().getEnglish());
+        assertTrue(service.currentQuestionMode() == ReviewMode.EN_TO_ZH
+            || service.currentQuestionMode() == ReviewMode.ZH_TO_EN);
+        ReviewAnswer answer = service.submitAnswer(
+            word.getId(),
+            service.currentQuestionMode() == ReviewMode.ZH_TO_EN ? "lucid" : "清晰的",
+            ReviewMode.MIXED
+        );
+        assertTrue(answer.similarity() > 0.8);
     }
 }

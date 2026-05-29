@@ -35,6 +35,14 @@ public class DeckService {
         }
     }
 
+    public List<Deck> archivedDecks() {
+        try {
+            return deckRepository.findAllArchived();
+        } catch (SQLException e) {
+            throw new IllegalStateException("无法读取已归档词库列表", e);
+        }
+    }
+
     public Deck createDeck(String name) {
         String cleanName = validateName(name);
         try {
@@ -64,6 +72,14 @@ public class DeckService {
             return remaining.isEmpty() ? deckRepository.ensureDefaultDeck() : remaining.get(0);
         } catch (SQLException e) {
             throw new IllegalStateException("归档词库失败", e);
+        }
+    }
+
+    public Deck restoreDeck(long id) {
+        try {
+            return deckRepository.restore(id);
+        } catch (SQLException e) {
+            throw new IllegalArgumentException("恢复词库失败：" + e.getMessage(), e);
         }
     }
 

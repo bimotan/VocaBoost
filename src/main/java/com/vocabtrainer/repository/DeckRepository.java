@@ -88,6 +88,32 @@ public class DeckRepository {
         }
     }
 
+    public List<Deck> findAllArchived() throws SQLException {
+        String sql = "SELECT id, name, created_at, archived FROM decks WHERE archived = 1 ORDER BY lower(name), id";
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet rs = statement.executeQuery()) {
+            List<Deck> decks = new ArrayList<>();
+            while (rs.next()) {
+                decks.add(map(rs));
+            }
+            return decks;
+        }
+    }
+
+    public List<Deck> findAllIncludingArchived() throws SQLException {
+        String sql = "SELECT id, name, created_at, archived FROM decks ORDER BY archived, lower(name), id";
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet rs = statement.executeQuery()) {
+            List<Deck> decks = new ArrayList<>();
+            while (rs.next()) {
+                decks.add(map(rs));
+            }
+            return decks;
+        }
+    }
+
     public Deck rename(long id, String name) throws SQLException {
         String trimmed = name == null ? "" : name.trim();
         String sql = "UPDATE decks SET name = ? WHERE id = ? AND archived = 0";
@@ -109,6 +135,23 @@ public class DeckRepository {
             statement.setLong(1, id);
             statement.executeUpdate();
         }
+    }
+
+    public Deck restore(long id) throws SQLException {
+        Deck deck = findById(id).orElseThrow(() -> new SQLException("词库不存在"));
+        Optional<Deck> activeWithSameName = findByName(deck.getName());
+        if (activeWithSameName.isPresent() && activeWithSameName.get().getId() != id) {
+            throw new SQLException("已有同名活动词库，无法恢复：" + deck.getName());
+        }
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement("UPDATE decks SET archived = 0 WHERE id = ?")) {
+            statement.setLong(1, id);
+            int updated = statement.executeUpdate();
+            if (updated == 0) {
+                throw new SQLException("词库不存在");
+            }
+        }
+        return findById(id).orElseThrow(() -> new SQLException("词库不存在"));
     }
 
     private Deck map(ResultSet rs) throws SQLException {

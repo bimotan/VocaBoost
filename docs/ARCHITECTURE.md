@@ -12,13 +12,14 @@ Business logic stays out of JavaFX controls and does not use `Scanner`, `System.
 
 ## SQLite Schema
 
-- `decks`: active/archived vocabulary collections.
+- `decks`: active/archived vocabulary collections; archived decks can be restored unless a name conflict exists.
 - `words`: deck-scoped cards, scheduling state, metadata, tags, and archive flag.
 - `review_logs`: typed answers, correct answers, similarity, self-rating, and response time.
 - `daily_goals`: deck-scoped daily review/new-word/session goals, XP, and completion state.
 - `achievements`: deck-scoped unlocked badge records.
 - `dictionary_cache`: cached lookup payloads by English word.
-- `settings` and `ai_cache`: reserved extension tables.
+- `settings`: local configuration such as saved ECDICT CSV path and load metadata.
+- `ai_cache`: cached AI explanations keyed by word/feature.
 
 Schema changes are applied with `CREATE TABLE IF NOT EXISTS` and compatibility migrations. Existing local databases are not deleted.
 
@@ -40,13 +41,19 @@ The scheduler follows an SM-2 style model with easiness factor, interval days, r
 
 `DictionaryService` is composed in this order:
 
-1. local GRE starter and optional `ECDICT_CSV_PATH`,
-2. optional configured API through `DICTIONARY_API_BASE_URL` / `DICTIONARY_API_KEY`,
-3. public online dictionaries,
-4. mock fallback.
+1. saved ECDICT CSV path from the local `settings` table,
+2. environment fallback `ECDICT_CSV_PATH`,
+3. bundled GRE starter sample,
+4. optional configured API through `DICTIONARY_API_BASE_URL` / `DICTIONARY_API_KEY`,
+5. public online dictionaries,
+6. mock fallback.
 
-Online lookups run in background JavaFX tasks and cached results can be refreshed from the UI.
+Online lookups run in background JavaFX tasks and cached results can be refreshed from the UI. The ECDICT CSV is never copied into the repository; only the local path is stored.
 
 ## AI / Mock Design
 
-`AiService` is an interface. The current desktop app uses `MockAiService`, so no API key is required and the app remains fully usable offline.
+`AiService` is an interface. `AiServiceFactory` chooses `MockAiService` by default and switches to `OpenAiCompatibleAiService` only when `VOCABOOST_AI_PROVIDER`, `VOCABOOST_AI_BASE_URL`, `VOCABOOST_AI_API_KEY`, and `VOCABOOST_AI_MODEL` are configured. `CachingAiService` stores successful configured responses in `ai_cache`, while `FallbackAiService` keeps review usable if the provider fails.
+
+## Review Sessions
+
+`ReviewService` owns session state: active deck, selected mode, current mixed-mode question direction, target size, reviewed count, accuracy, XP, and unlocked achievements. A target of `0` means All Due. `ReviewMode.MIXED` chooses English-to-Chinese or Chinese-to-English per card, while weak-word mode keeps using weak-card selection.

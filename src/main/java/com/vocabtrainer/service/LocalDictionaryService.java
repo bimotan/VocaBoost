@@ -20,13 +20,16 @@ public class LocalDictionaryService implements DictionaryService {
     private static final String STARTER_RESOURCE = "/data/gre_starter_sample.csv";
 
     private final Map<String, DictionaryEntry> entries;
+    private final LocalDictionaryStatus status;
 
     public LocalDictionaryService() {
         this(System.getenv("ECDICT_CSV_PATH"));
     }
 
     public LocalDictionaryService(String localCsvPath) {
-        this.entries = loadEntries(localCsvPath);
+        LoadOutcome outcome = loadEntries(localCsvPath);
+        this.entries = outcome.entries();
+        this.status = outcome.status();
     }
 
     @Override
@@ -56,13 +59,26 @@ public class LocalDictionaryService implements DictionaryService {
         return !entries.isEmpty();
     }
 
-    private Map<String, DictionaryEntry> loadEntries(String localCsvPath) {
+    public LocalDictionaryStatus status() {
+        return status;
+    }
+
+    private LoadOutcome loadEntries(String localCsvPath) {
         Map<String, DictionaryEntry> result = new LinkedHashMap<>();
+        int skippedRows = 0;
+        boolean configuredLoaded = false;
+        boolean bundledLoaded = false;
+        String primarySource = "";
         if (localCsvPath != null && !localCsvPath.isBlank()) {
             Path path = Path.of(localCsvPath.trim());
             if (Files.isRegularFile(path)) {
                 try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-                    readCsv(reader, result, "ECDICT/local CSV");
+                    ReadStats stats = readCsv(reader, result, "ECDICT/local CSV");
+                    skippedRows += stats.skippedRows();
+                    configuredLoaded = stats.loadedRows() > 0;
+                    if (configuredLoaded) {
+                        primarySource = path.toAbsolutePath().toString();
+                    }
                 } catch (IOException ignored) {
                     // Fall back to bundled starter data.
                 }
@@ -71,15 +87,27 @@ public class LocalDictionaryService implements DictionaryService {
         var stream = LocalDictionaryService.class.getResourceAsStream(STARTER_RESOURCE);
         if (stream != null) {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
-                readCsv(reader, result, "Bundled GRE starter");
+                ReadStats stats = readCsv(reader, result, "Bundled GRE starter");
+                skippedRows += stats.skippedRows();
+                bundledLoaded = stats.loadedRows() > 0;
+                if (primarySource.isBlank() && bundledLoaded) {
+                    primarySource = "Bundled GRE starter";
+                }
             } catch (IOException ignored) {
                 // A missing local dictionary should not stop the app.
             }
         }
-        return result;
+        return new LoadOutcome(result, new LocalDictionaryStatus(
+            result.size(),
+            skippedRows,
+            primarySource,
+            localCsvPath == null ? "" : localCsvPath.trim(),
+            configuredLoaded,
+            bundledLoaded
+        ));
     }
 
-    private void readCsv(BufferedReader reader, Map<String, DictionaryEntry> target, String source)
+    private ReadStats readCsv(BufferedReader reader, Map<String, DictionaryEntry> target, String source)
         throws IOException {
         String line;
         int lineNumber = 0;
@@ -88,6 +116,8 @@ public class LocalDictionaryService implements DictionaryService {
         int phoneticIndex = -1;
         int posIndex = 2;
         int exampleIndex = 3;
+        int loadedRows = 0;
+        int skippedRows = 0;
         while ((line = reader.readLine()) != null) {
             lineNumber++;
             if (line.isBlank()) {
@@ -101,27 +131,40 @@ public class LocalDictionaryService implements DictionaryService {
                 posIndex = firstExistingIndex(fields, "pos", "part_of_speech", "partOfSpeech", "tag", "tags");
                 exampleIndex = firstExistingIndex(fields, "example", "example_sentence", "sentence");
                 continue;
+            } else if (lineNumber == 1 && fields.size() > 3 && !fieldAt(fields, 3).isBlank()) {
+                wordIndex = 0;
+                phoneticIndex = 1;
+                translationIndex = 3;
+                posIndex = fields.size() > 4 ? 4 : -1;
+                exampleIndex = -1;
             }
             if (wordIndex < 0 || translationIndex < 0 || fields.size() <= Math.max(wordIndex, translationIndex)) {
+                skippedRows++;
                 continue;
             }
             String english = fieldAt(fields, wordIndex);
             String chinese = fieldAt(fields, translationIndex);
             if (english.isBlank() || chinese.isBlank()) {
+                skippedRows++;
                 continue;
             }
-            String pos = fieldAt(fields, posIndex);
-            String example = fieldAt(fields, exampleIndex);
-            String phonetic = fieldAt(fields, phoneticIndex);
-            target.putIfAbsent(normalizeKey(english), new DictionaryEntry(
-                english,
-                chinese,
-                pos,
-                phonetic,
-                example,
-                source
-            ));
+            String key = normalizeKey(english);
+            if (!target.containsKey(key)) {
+                String pos = fieldAt(fields, posIndex);
+                String example = fieldAt(fields, exampleIndex);
+                String phonetic = fieldAt(fields, phoneticIndex);
+                target.put(key, new DictionaryEntry(
+                    english,
+                    chinese,
+                    pos,
+                    phonetic,
+                    example,
+                    source
+                ));
+                loadedRows++;
+            }
         }
+        return new ReadStats(loadedRows, skippedRows);
     }
 
     private List<String> parseCsvLine(String line) {
@@ -171,5 +214,11 @@ public class LocalDictionaryService implements DictionaryService {
 
     private String normalizeKey(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+    }
+
+    private record LoadOutcome(Map<String, DictionaryEntry> entries, LocalDictionaryStatus status) {
+    }
+
+    private record ReadStats(int loadedRows, int skippedRows) {
     }
 }

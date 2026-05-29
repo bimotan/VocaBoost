@@ -38,6 +38,13 @@ class DeckServiceTest {
         assertEquals(defaultDeck.getId(), fallback.getId());
         assertFalse(deckRepository.findByName("GRE 核心词").isPresent());
         assertTrue(deckRepository.findById(renamed.getId()).orElseThrow().isArchived());
+
+        assertEquals(1, deckService.archivedDecks().size());
+        Deck restored = deckService.restoreDeck(renamed.getId());
+        assertEquals("GRE 核心词", restored.getName());
+        assertFalse(restored.isArchived());
+        assertEquals(2, deckService.activeDecks().size());
+        assertTrue(deckService.archivedDecks().isEmpty());
     }
 
     @Test

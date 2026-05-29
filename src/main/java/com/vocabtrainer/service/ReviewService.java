@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Random;
 
 public class ReviewService {
     private final WordRepository wordRepository;
@@ -30,9 +31,13 @@ public class ReviewService {
     private final GoalService goalService;
     private final AchievementService achievementService;
     private final Clock clock;
+    private final Random random = new Random();
     private final Map<Long, ReviewAnswer> pendingAnswers = new HashMap<>();
     private final List<Achievement> sessionAchievements = new ArrayList<>();
     private long activeSessionDeckId;
+    private ReviewMode activeSessionMode = ReviewMode.EN_TO_ZH;
+    private ReviewMode currentQuestionMode = ReviewMode.EN_TO_ZH;
+    private int sessionTarget = -1;
     private int sessionReviewed;
     private int sessionCorrect;
     private int sessionXp;
@@ -72,15 +77,45 @@ public class ReviewService {
 
     public Optional<WordCard> nextWord(long deckId, ReviewMode mode) {
         try {
-            activeSessionDeckId = deckId;
+            ensureSession(deckId, mode);
+            if (isSessionTargetReached()) {
+                return Optional.empty();
+            }
             LocalDateTime now = LocalDateTime.now(clock);
             List<WordCard> candidates = mode == ReviewMode.WEAK_WORDS
                 ? wordRepository.findWeak(deckId, 250)
                 : wordRepository.findDue(deckId, now, 250);
-            return scheduler.selectNext(candidates, now);
+            Optional<WordCard> selected = scheduler.selectNext(candidates, now);
+            selected.ifPresent(word -> currentQuestionMode = questionModeFor(mode));
+            return selected;
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read review words", e);
         }
+    }
+
+    public void startSession(long deckId, ReviewMode mode, int target) {
+        activeSessionDeckId = deckId;
+        activeSessionMode = mode == null ? ReviewMode.EN_TO_ZH : mode;
+        sessionTarget = Math.max(0, target);
+        sessionReviewed = 0;
+        sessionCorrect = 0;
+        sessionXp = 0;
+        sessionAchievements.clear();
+        pendingAnswers.clear();
+        currentQuestionMode = questionModeFor(activeSessionMode);
+    }
+
+    public void resetSession(long deckId) {
+        ReviewMode mode = activeSessionMode == null ? ReviewMode.EN_TO_ZH : activeSessionMode;
+        startSession(deckId, mode, defaultSessionTarget(deckId));
+    }
+
+    public ReviewMode currentQuestionMode() {
+        return currentQuestionMode;
+    }
+
+    public boolean isSessionTargetReached() {
+        return sessionTarget > 0 && sessionReviewed >= sessionTarget;
     }
 
     public ReviewAnswer submitAnswer(long wordId, String userAnswer) {
@@ -91,7 +126,8 @@ public class ReviewService {
         try {
             WordCard word = wordRepository.findById(wordId)
                 .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
-            String correctAnswer = mode == ReviewMode.ZH_TO_EN ? word.getEnglish() : word.getChinese();
+            ReviewMode answerMode = mode == ReviewMode.MIXED ? currentQuestionMode : questionModeFor(mode);
+            String correctAnswer = answerMode == ReviewMode.ZH_TO_EN ? word.getEnglish() : word.getChinese();
             double similarity = similarityService.calculate(userAnswer, correctAnswer);
             ReviewAnswer answer = new ReviewAnswer(
                 wordId,
@@ -162,9 +198,7 @@ public class ReviewService {
     }
 
     public ReviewSessionSummary sessionSummary() {
-        int sessionGoal = goalService == null
-            ? GoalService.DEFAULT_SESSION_GOAL
-            : goalService.getTodayProgress(activeSessionDeckId).sessionGoal();
+        int sessionGoal = sessionTarget < 0 ? defaultSessionTarget(activeSessionDeckId) : sessionTarget;
         return new ReviewSessionSummary(
             sessionReviewed,
             sessionCorrect,
@@ -172,5 +206,31 @@ public class ReviewService {
             sessionGoal,
             List.copyOf(sessionAchievements)
         );
+    }
+
+    private void ensureSession(long deckId, ReviewMode mode) {
+        ReviewMode requested = mode == null ? ReviewMode.EN_TO_ZH : mode;
+        if (activeSessionDeckId != deckId || activeSessionMode != requested || sessionTarget < 0) {
+            startSession(deckId, requested, defaultSessionTarget(deckId));
+        }
+        activeSessionDeckId = deckId;
+        activeSessionMode = requested;
+    }
+
+    private int defaultSessionTarget(long deckId) {
+        if (goalService == null || deckId <= 0) {
+            return GoalService.DEFAULT_SESSION_GOAL;
+        }
+        return goalService.getTodayProgress(deckId).sessionGoal();
+    }
+
+    private ReviewMode questionModeFor(ReviewMode mode) {
+        if (mode == ReviewMode.ZH_TO_EN) {
+            return ReviewMode.ZH_TO_EN;
+        }
+        if (mode == ReviewMode.MIXED) {
+            return random.nextBoolean() ? ReviewMode.EN_TO_ZH : ReviewMode.ZH_TO_EN;
+        }
+        return ReviewMode.EN_TO_ZH;
     }
 }

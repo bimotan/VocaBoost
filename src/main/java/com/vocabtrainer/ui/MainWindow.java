@@ -17,17 +17,22 @@ import com.vocabtrainer.domain.ReviewSessionSummary;
 import com.vocabtrainer.domain.ValidatedWord;
 import com.vocabtrainer.domain.WordVerificationResult;
 import com.vocabtrainer.domain.WordCard;
+import com.vocabtrainer.repository.DictionaryCacheRepository;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.AiService;
 import com.vocabtrainer.service.BackupService;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
+import com.vocabtrainer.service.DictionaryServiceFactory;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ImportExportService;
 import com.vocabtrainer.service.ImportResult;
+import com.vocabtrainer.service.LocalDictionaryService;
+import com.vocabtrainer.service.LocalDictionaryStatus;
 import com.vocabtrainer.service.ReviewAnswer;
 import com.vocabtrainer.service.ReviewService;
+import com.vocabtrainer.service.SettingsService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.util.DateTimeUtil;
@@ -93,7 +98,9 @@ public class MainWindow {
     private final StatsService statsService;
     private final GoalService goalService;
     private final AchievementService achievementService;
-    private final DictionaryService dictionaryService;
+    private DictionaryService dictionaryService;
+    private final DictionaryCacheRepository dictionaryCacheRepository;
+    private final SettingsService settingsService;
     private final WordValidationService validationService;
     private final BackupService backupService;
     private final AiService aiService;
@@ -101,6 +108,7 @@ public class MainWindow {
 
     private final ObservableList<WordCard> wordItems = FXCollections.observableArrayList();
     private final ObservableList<DeckRow> deckRows = FXCollections.observableArrayList();
+    private final ObservableList<DeckRow> archivedDeckRows = FXCollections.observableArrayList();
     private final Label totalWordsLabel = new Label("-");
     private final Label dueTodayLabel = new Label("-");
     private final Label reviewedTodayLabel = new Label("-");
@@ -117,6 +125,7 @@ public class MainWindow {
 
     private TableView<WordCard> wordTable;
     private TableView<DeckRow> deckTable;
+    private TableView<DeckRow> archivedDeckTable;
     private TextField searchField;
     private ComboBox<String> wordStatusFilter;
     private TextField tagFilterField;
@@ -132,6 +141,8 @@ public class MainWindow {
     private HBox ratingButtons;
     private WordCard currentReviewWord;
     private ComboBox<ReviewMode> reviewModeSelector;
+    private ComboBox<String> sessionSizeSelector;
+    private TextField customSessionSizeField;
     private Label sessionProgressLabel;
 
     private BarChart<String, Number> reviewCountChart;
@@ -146,7 +157,8 @@ public class MainWindow {
     public MainWindow(Deck deck, DeckService deckService, WordRepository wordRepository, ReviewService reviewService,
                       ImportExportService importExportService, StatsService statsService,
                       GoalService goalService, AchievementService achievementService,
-                      DictionaryService dictionaryService, WordValidationService validationService,
+                      DictionaryService dictionaryService, DictionaryCacheRepository dictionaryCacheRepository,
+                      SettingsService settingsService, WordValidationService validationService,
                       BackupService backupService, AiService aiService, Path databasePath) {
         this.currentDeck = deck;
         this.deckService = deckService;
@@ -157,6 +169,8 @@ public class MainWindow {
         this.goalService = goalService;
         this.achievementService = achievementService;
         this.dictionaryService = dictionaryService;
+        this.dictionaryCacheRepository = dictionaryCacheRepository;
+        this.settingsService = settingsService;
         this.validationService = validationService;
         this.backupService = backupService;
         this.aiService = aiService;
@@ -228,7 +242,9 @@ public class MainWindow {
     }
 
     private void updateHeaderSubtitle() {
-        String dictionaryStatus = dictionaryService.isConfigured() ? "API configured" : "offline fallback";
+        String dictionaryStatus = settingsService.getEcdictPath().isPresent()
+            ? "ECDICT configured"
+            : "starter/online fallback";
         String deckName = currentDeck == null ? "-" : currentDeck.getName();
         headerSubtitleLabel.setText("Deck: " + deckName + " | Dictionary: " + dictionaryStatus
             + " | AI: " + (aiService.isAvailable() ? "configured" : "mock"));
@@ -305,9 +321,28 @@ public class MainWindow {
         }
     }
 
+    private void restoreSelectedArchivedDeck() {
+        if (archivedDeckTable == null) {
+            return;
+        }
+        DeckRow selected = archivedDeckTable.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            showInfo("Please select an archived deck to restore.");
+            return;
+        }
+        try {
+            currentDeck = deckService.restoreDeck(selected.deck().getId());
+            refreshDeckSelector();
+            onDeckChanged();
+        } catch (RuntimeException e) {
+            showError("Restore deck failed", rootMessage(e));
+        }
+    }
+
     private void onDeckChanged() {
         updateHeaderSubtitle();
         currentReviewWord = null;
+        reviewService.resetSession(currentDeck.getId());
         refreshAll();
         loadNextReviewWord();
     }
@@ -364,15 +399,12 @@ public class MainWindow {
     private Tab createDecksTab() {
         deckTable = new TableView<>(deckRows);
         deckTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
-        TableColumn<DeckRow, String> nameCol = new TableColumn<>("Deck");
-        nameCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().name()));
-        TableColumn<DeckRow, String> wordsCol = new TableColumn<>("Words");
-        wordsCol.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().words())));
-        TableColumn<DeckRow, String> dueCol = new TableColumn<>("Due");
-        dueCol.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().due())));
-        TableColumn<DeckRow, String> latestCol = new TableColumn<>("Latest review");
-        latestCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().latestReview()));
-        deckTable.getColumns().addAll(nameCol, wordsCol, dueCol, latestCol);
+        configureDeckTable(deckTable);
+
+        archivedDeckTable = new TableView<>(archivedDeckRows);
+        archivedDeckTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        configureDeckTable(archivedDeckTable);
+        archivedDeckTable.setPrefHeight(180);
 
         Button switchButton = new Button("Switch selected");
         switchButton.setOnAction(event -> {
@@ -383,14 +415,35 @@ public class MainWindow {
                 onDeckChanged();
             }
         });
+        Button restoreButton = new Button("Restore selected archived deck");
+        restoreButton.setOnAction(event -> restoreSelectedArchivedDeck());
         Button refreshButton = new Button("Refresh");
         refreshButton.setOnAction(event -> refreshDeckTable());
-        VBox content = new VBox(12, sectionTitle("Deck Manager"), deckTable, new HBox(10, switchButton, refreshButton));
+        VBox content = new VBox(12,
+            sectionTitle("Active Decks"),
+            deckTable,
+            new HBox(10, switchButton, refreshButton),
+            sectionTitle("Archived Decks"),
+            archivedDeckTable,
+            restoreButton
+        );
         content.setPadding(new Insets(24));
         VBox.setVgrow(deckTable, Priority.ALWAYS);
         Tab tab = new Tab("Decks", content);
         tab.setClosable(false);
         return tab;
+    }
+
+    private void configureDeckTable(TableView<DeckRow> table) {
+        TableColumn<DeckRow, String> nameCol = new TableColumn<>("Deck");
+        nameCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().name()));
+        TableColumn<DeckRow, String> wordsCol = new TableColumn<>("Words");
+        wordsCol.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().words())));
+        TableColumn<DeckRow, String> dueCol = new TableColumn<>("Due");
+        dueCol.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().due())));
+        TableColumn<DeckRow, String> latestCol = new TableColumn<>("Latest review");
+        latestCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().latestReview()));
+        table.getColumns().addAll(nameCol, wordsCol, dueCol, latestCol);
     }
 
     private Tab createReviewTab() {
@@ -399,11 +452,33 @@ public class MainWindow {
         reviewModeSelector.setCellFactory(list -> reviewModeCell());
         reviewModeSelector.setButtonCell(reviewModeCell());
         reviewModeSelector.getSelectionModel().select(ReviewMode.EN_TO_ZH);
-        reviewModeSelector.valueProperty().addListener((observable, oldMode, newMode) -> loadNextReviewWord());
+        reviewModeSelector.valueProperty().addListener((observable, oldMode, newMode) -> {
+            reviewService.resetSession(currentDeck.getId());
+            loadNextReviewWord();
+        });
+        sessionSizeSelector = new ComboBox<>();
+        sessionSizeSelector.getItems().setAll("10", "20", "50", "All Due", "Custom");
+        sessionSizeSelector.getSelectionModel().select("20");
+        customSessionSizeField = new TextField();
+        customSessionSizeField.setPromptText("Custom");
+        customSessionSizeField.setPrefWidth(90);
+        customSessionSizeField.setDisable(true);
+        sessionSizeSelector.valueProperty().addListener((observable, oldValue, newValue) ->
+            customSessionSizeField.setDisable(!"Custom".equals(newValue)));
+        Button startSessionButton = new Button("Start Session");
+        startSessionButton.setOnAction(event -> startReviewSession());
+        Button resetSessionButton = new Button("Reset Session");
+        resetSessionButton.setOnAction(event -> {
+            reviewService.resetSession(currentDeck.getId());
+            loadNextReviewWord();
+        });
         sessionProgressLabel = new Label();
         sessionProgressLabel.setStyle("-fx-text-fill: #4b5563;");
         HBox modeBox = new HBox(10, new Label("Mode"), reviewModeSelector, sessionProgressLabel);
         modeBox.setAlignment(Pos.CENTER_LEFT);
+        HBox sessionBox = new HBox(10, new Label("Session size"), sessionSizeSelector, customSessionSizeField,
+            startSessionButton, resetSessionButton);
+        sessionBox.setAlignment(Pos.CENTER_LEFT);
 
         reviewWordLabel = new Label("Loading...");
         reviewWordLabel.setStyle("-fx-font-size: 34px; -fx-font-weight: 700;");
@@ -441,7 +516,7 @@ public class MainWindow {
 
         HBox answerBox = new HBox(10, answerField, submitAnswerButton);
         answerBox.setAlignment(Pos.CENTER_LEFT);
-        VBox content = new VBox(16, modeBox, reviewWordLabel, reviewMetaLabel, answerBox,
+        VBox content = new VBox(16, modeBox, sessionBox, reviewWordLabel, reviewMetaLabel, answerBox,
             completionCard, reviewResultArea, ratingButtons);
         content.setPadding(new Insets(28));
         VBox.setVgrow(reviewResultArea, Priority.ALWAYS);
@@ -513,9 +588,11 @@ public class MainWindow {
         addForm.add(addStatus, 1, 8);
 
         VBox dictionaryBox = createDictionaryBox(englishField, chineseField, phoneticField, posField, exampleArea, tagsField);
+        VBox ecdictBox = createEcdictSettingsBox();
+        VBox aiBox = createAiSettingsBox();
         VBox importBox = createImportBox();
 
-        VBox content = new VBox(24, sectionTitle("Manual Add"), addForm, dictionaryBox, importBox);
+        VBox content = new VBox(24, sectionTitle("Manual Add"), addForm, dictionaryBox, ecdictBox, aiBox, importBox);
         content.setPadding(new Insets(24));
         ScrollPane scrollPane = new ScrollPane(content);
         scrollPane.setFitToWidth(true);
@@ -589,6 +666,81 @@ public class MainWindow {
         } catch (IllegalArgumentException e) {
             lookupStatus.setText(e.getMessage());
         }
+    }
+
+    private VBox createEcdictSettingsBox() {
+        TextField pathField = new TextField(settingsService.getEcdictPath().orElse(""));
+        pathField.setPromptText("Choose local ECDICT CSV");
+        Label statusLabel = new Label(new LocalDictionaryService(pathField.getText()).status().toDisplayText());
+        statusLabel.setWrapText(true);
+
+        Button chooseButton = new Button("Choose ECDICT CSV");
+        chooseButton.setOnAction(event -> {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle("Choose ECDICT CSV");
+            chooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("CSV", "*.csv"),
+                new FileChooser.ExtensionFilter("All Files", "*.*")
+            );
+            java.io.File file = chooser.showOpenDialog(chooseButton.getScene().getWindow());
+            if (file != null) {
+                pathField.setText(file.toPath().toString());
+            }
+        });
+
+        Button testButton = new Button("Test ECDICT");
+        testButton.setOnAction(event -> {
+            LocalDictionaryStatus status = new LocalDictionaryService(pathField.getText()).status();
+            statusLabel.setText(status.toDisplayText()
+                + (status.configuredPathLoaded() ? System.lineSeparator() + "Configured CSV loaded." : ""));
+        });
+
+        Button saveButton = new Button("Save Dictionary Path");
+        saveButton.setOnAction(event -> {
+            settingsService.saveEcdictPath(pathField.getText());
+            LocalDictionaryService local = new LocalDictionaryService(pathField.getText());
+            LocalDictionaryStatus status = local.status();
+            settingsService.save(SettingsService.ECDICT_LAST_LOADED_COUNT_KEY, String.valueOf(status.loadedCount()));
+            settingsService.save(SettingsService.ECDICT_LAST_LOADED_AT_KEY, LocalDateTime.now().toString());
+            reloadDictionaryService();
+            statusLabel.setText("Saved. " + status.toDisplayText());
+        });
+
+        Button clearButton = new Button("Clear Dictionary Path");
+        clearButton.setOnAction(event -> {
+            settingsService.clearEcdictPath();
+            pathField.clear();
+            reloadDictionaryService();
+            statusLabel.setText("Cleared. Using bundled starter and online fallback.");
+        });
+
+        HBox controls = new HBox(10, pathField, chooseButton, testButton, saveButton, clearButton);
+        HBox.setHgrow(pathField, Priority.ALWAYS);
+        return new VBox(10, sectionTitle("ECDICT Local Dictionary"), controls, statusLabel);
+    }
+
+    private VBox createAiSettingsBox() {
+        Label statusLabel = new Label(aiService.isAvailable()
+            ? "AI provider configured. Explanations use cache and HTTP fallback."
+            : "AI provider not configured. Mock explanation is used offline.");
+        statusLabel.setWrapText(true);
+        Button testButton = new Button("Test AI Explanation");
+        testButton.setOnAction(event -> {
+            WordCard sample = WordCard.createNew(currentDeck.getId(), "lucid", "清晰的; 易懂的");
+            runBackground(
+                () -> aiService.explain(sample),
+                text -> statusLabel.setText((aiService.isAvailable() ? "Configured AI: " : "Mock AI: ") + text),
+                error -> statusLabel.setText("AI test failed: " + rootMessage(error)),
+                statusLabel,
+                "Testing AI explanation..."
+            );
+        });
+        return new VBox(10, sectionTitle("AI Explanation Provider"), statusLabel, testButton);
+    }
+
+    private void reloadDictionaryService() {
+        dictionaryService = DictionaryServiceFactory.create(dictionaryCacheRepository, settingsService);
+        updateHeaderSubtitle();
     }
 
     private VBox createImportBox() {
@@ -889,16 +1041,54 @@ public class MainWindow {
         loadNextReviewWord();
     }
 
+    private void startReviewSession() {
+        try {
+            int target = selectedSessionTarget();
+            reviewService.startSession(currentDeck.getId(), currentReviewMode(), target);
+            loadNextReviewWord();
+        } catch (IllegalArgumentException e) {
+            showError("Start session failed", e.getMessage());
+        }
+    }
+
+    private int selectedSessionTarget() {
+        String value = sessionSizeSelector == null ? "20" : sessionSizeSelector.getValue();
+        if ("All Due".equals(value)) {
+            return 0;
+        }
+        if ("Custom".equals(value)) {
+            String text = customSessionSizeField == null ? "" : customSessionSizeField.getText().trim();
+            int custom = Integer.parseInt(text);
+            if (custom <= 0 || custom > 500) {
+                throw new IllegalArgumentException("Custom session size must be between 1 and 500.");
+            }
+            return custom;
+        }
+        return Integer.parseInt(value == null ? "20" : value);
+    }
+
     private void submitCurrentAnswer() {
         if (currentReviewWord == null || submitAnswerButton.isDisabled()) {
             return;
         }
         ReviewAnswer answer = reviewService.submitAnswer(currentReviewWord.getId(), answerField.getText(), answerMode());
-        reviewResultArea.setText("Correct answer: " + answer.correctAnswer()
+        WordCard wordForAi = currentReviewWord;
+        String baseResult = "Correct answer: " + answer.correctAnswer()
             + System.lineSeparator() + "Your answer: " + answer.userAnswer()
-            + System.lineSeparator() + "Answer similarity: " + formatPercent(answer.similarity())
-            + System.lineSeparator() + System.lineSeparator()
-            + aiService.explain(currentReviewWord));
+            + System.lineSeparator() + "Answer similarity: " + formatPercent(answer.similarity());
+        reviewResultArea.setText(baseResult + System.lineSeparator() + System.lineSeparator() + "AI explanation: loading...");
+        runBackground(
+            () -> aiService.explain(wordForAi),
+            explanation -> {
+                if (currentReviewWord != null && currentReviewWord.getId() == wordForAi.getId()) {
+                    reviewResultArea.setText(baseResult + System.lineSeparator() + System.lineSeparator() + explanation);
+                }
+            },
+            error -> reviewResultArea.setText(baseResult + System.lineSeparator() + System.lineSeparator()
+                + "AI explanation unavailable: " + rootMessage(error)),
+            null,
+            null
+        );
         ratingButtons.setDisable(false);
         submitAnswerButton.setDisable(true);
         answerField.setDisable(true);
@@ -949,9 +1139,11 @@ public class MainWindow {
         ReviewSessionSummary session = reviewService.sessionSummary();
         DailyGoalProgress progress = goalService.getTodayProgress(currentDeck.getId());
         reviewWordLabel.setText("Review complete");
-        reviewMetaLabel.setText("No due words right now.");
+        boolean targetReached = session.sessionGoal() > 0 && session.reviewedCount() >= session.sessionGoal();
+        reviewMetaLabel.setText(targetReached ? "Session target reached." : "No due words right now.");
         completionTitleLabel.setText("Session Complete");
         completionMetricsLabel.setText("Completed: " + session.reviewedCount()
+            + (session.sessionGoal() > 0 ? "/" + session.sessionGoal() : " / All Due")
             + " | Accuracy: " + formatPercent(session.accuracy())
             + " | XP: " + session.xpEarned()
             + System.lineSeparator() + "Today review goal: " + progress.reviewedCount() + "/" + progress.reviewGoal()
@@ -970,7 +1162,7 @@ public class MainWindow {
     }
 
     private ReviewMode answerMode() {
-        return currentReviewMode() == ReviewMode.ZH_TO_EN ? ReviewMode.ZH_TO_EN : ReviewMode.EN_TO_ZH;
+        return reviewService.currentQuestionMode();
     }
 
     private void updateSessionProgress() {
@@ -978,7 +1170,8 @@ public class MainWindow {
             return;
         }
         ReviewSessionSummary session = reviewService.sessionSummary();
-        sessionProgressLabel.setText("Session " + session.reviewedCount() + "/" + session.sessionGoal()
+        String target = session.sessionGoal() > 0 ? String.valueOf(session.sessionGoal()) : "All Due";
+        sessionProgressLabel.setText("Session " + session.reviewedCount() + "/" + target
             + " | Accuracy " + formatPercent(session.accuracy())
             + " | XP " + session.xpEarned());
     }
@@ -1011,31 +1204,35 @@ public class MainWindow {
     }
 
     private void refreshDeckTable() {
-        if (deckTable == null) {
+        if (deckTable == null && archivedDeckTable == null) {
             return;
         }
         try {
             LocalDateTime now = LocalDateTime.now();
-            List<DeckRow> rows = deckService.activeDecks().stream()
-                .map(deck -> {
-                    try {
-                        LocalDateTime latest = statsService.latestReviewAt(deck.getId());
-                        return new DeckRow(
-                            deck,
-                            deck.getName(),
-                            wordRepository.countAll(deck.getId()),
-                            wordRepository.countDue(deck.getId(), now),
-                            latest == null ? "-" : DateTimeUtil.toDisplay(latest)
-                        );
-                    } catch (SQLException e) {
-                        throw new IllegalStateException(e);
-                    }
-                })
-                .toList();
-            deckRows.setAll(rows);
+            deckRows.setAll(deckRowsFor(deckService.activeDecks(), now));
+            archivedDeckRows.setAll(deckRowsFor(deckService.archivedDecks(), now));
         } catch (RuntimeException e) {
             showError("Refresh decks failed", rootMessage(e));
         }
+    }
+
+    private List<DeckRow> deckRowsFor(List<Deck> decks, LocalDateTime now) {
+        return decks.stream()
+            .map(deck -> {
+                try {
+                    LocalDateTime latest = statsService.latestReviewAt(deck.getId());
+                    return new DeckRow(
+                        deck,
+                        deck.getName(),
+                        wordRepository.countAll(deck.getId()),
+                        wordRepository.countDue(deck.getId(), now),
+                        latest == null ? "-" : DateTimeUtil.toDisplay(latest)
+                    );
+                } catch (SQLException e) {
+                    throw new IllegalStateException(e);
+                }
+            })
+            .toList();
     }
 
     private void refreshWordTable() {

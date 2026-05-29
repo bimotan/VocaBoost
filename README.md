@@ -7,15 +7,17 @@ It is suitable as a learning analytics prototype because each review produces st
 ## Highlights
 
 - JavaFX desktop app with SQLite persistence.
-- Multi-deck management: create, switch, rename, and archive decks from the header.
+- Multi-deck management: create, switch, rename, archive, and restore decks.
 - Spaced repetition scheduler based on SM-2 style intervals.
-- Typed answer review with similarity percentage, Again / Hard / Good / Easy self-rating, English-to-Chinese, Chinese-to-English, and weak-word modes.
+- Typed answer review with similarity percentage, Again / Hard / Good / Easy self-rating, English-to-Chinese, Chinese-to-English, mixed, and weak-word modes.
+- Review session presets: 10 / 20 / 50 / All Due / Custom, with Start Session and Reset Session controls.
 - Similarity-aware scheduling: vague or low-similarity answers reduce easiness and increase future urgency.
 - Goals and achievements: daily review goal, daily new-word goal, session target, streak, XP, and badges.
 - Statistics page with JavaFX charts for daily review volume, accuracy trend, memory strength, hard words, and overdue count.
 - Portfolio-ready Markdown learning report export.
 - Data safety exports: words CSV, review-log CSV, JSON backup, and JSON backup import.
-- Manual add validation plus configurable dictionary lookup with offline Mock fallback.
+- Manual add validation plus configurable dictionary lookup with ECDICT path setup, online lookup, cache, and offline Mock fallback.
+- Optional OpenAI-compatible AI explanations with `ai_cache` and Mock fallback; no key is required for offline use.
 - Legacy txt import and GRE CSV starter-deck import.
 - Empty database bootstrap: first launch imports the bundled GRE starter sample so Word List and Review are immediately testable.
 
@@ -80,12 +82,22 @@ mvn test
 
 Lookup uses this order:
 
-1. Local dictionary: bundled GRE starter sample, plus optional `ECDICT_CSV_PATH`.
-2. Configured API from `DICTIONARY_API_BASE_URL`.
-3. Public online dictionaries: dictionaryapi.dev, then Wiktionary.
-4. Mock dictionary for known sample words.
+1. Local dictionary: saved ECDICT CSV path from the Add / Import page.
+2. Environment fallback `ECDICT_CSV_PATH`.
+3. Bundled GRE starter sample.
+4. Configured API from `DICTIONARY_API_BASE_URL`.
+5. Public online dictionaries: dictionaryapi.dev, then Wiktionary.
+6. Mock dictionary for known sample words.
 
-To add an ECDICT-compatible local CSV, set:
+To add an ECDICT-compatible local CSV without editing environment variables, use:
+
+```text
+Add / Import -> ECDICT Local Dictionary -> Choose ECDICT CSV -> Test ECDICT -> Save Dictionary Path
+```
+
+The path is stored in the local SQLite `settings` table. The large ECDICT CSV itself is not copied into this repository or uploaded to GitHub.
+
+You can still use an environment variable as fallback:
 
 ```powershell
 $env:ECDICT_CSV_PATH = 'D:\path\to\ecdict.csv'
@@ -102,6 +114,20 @@ mvn javafx:run
 The app sends `GET {baseUrl}?word={english}` and includes the key in `Authorization: Bearer ...` and `X-API-Key`. If local and online dictionaries cannot verify a word, the UI shows "词条未找到" and lets you cancel or force-add it. Force-added words are tagged `UNVERIFIED`.
 
 Expected useful JSON fields include `english` or `word`, `chinese` or `translation` or `meaning` or `definition`, `pos` or `partOfSpeech`, `phonetic`, `example`, and `source`.
+
+## Optional AI Provider
+
+By default VocaBoost uses `MockAiService`, so review explanations work offline. To enable a real OpenAI-compatible chat-completions provider, set these environment variables before launching:
+
+```powershell
+$env:VOCABOOST_AI_PROVIDER = 'openai-compatible'
+$env:VOCABOOST_AI_BASE_URL = 'https://your-provider.example/v1/chat/completions'
+$env:VOCABOOST_AI_API_KEY = 'your-key'
+$env:VOCABOOST_AI_MODEL = 'your-model'
+mvn javafx:run
+```
+
+The app does not store or commit API keys. Responses are cached in the local `ai_cache` table by word, and failures fall back to Mock AI instead of blocking review. Use `Add / Import -> AI Explanation Provider -> Test AI Explanation` to verify configuration.
 
 ## Import Formats
 
@@ -197,6 +223,11 @@ Current tests cover:
 - `GoalService`
 - `AchievementService`
 - `DictionaryService`
+- `LocalDictionaryService`
+- `SettingsRepository`
+- `AiServiceFactory`
+- `CachingAiService`
+- `MockAiService`
 - `ImportExportService`
 - `ReviewService`
 - `StatsService`
@@ -209,7 +240,7 @@ Verified command:
 & 'C:\Program Files\JetBrains\IntelliJ IDEA 2025.3.1.1\plugins\maven\lib\maven3\bin\mvn.cmd' '-Dmaven.repo.local=.m2\repository' test
 ```
 
-Latest local result: 35 tests, 0 failures.
+Latest local result: 43 tests, 0 failures.
 
 ## GitHub Actions
 

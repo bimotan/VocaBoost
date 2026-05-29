@@ -2,22 +2,26 @@ package com.vocabtrainer.app;
 
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.repository.AchievementRepository;
+import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.DictionaryCacheRepository;
 import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
+import com.vocabtrainer.repository.SettingsRepository;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.AchievementService;
+import com.vocabtrainer.service.AiService;
+import com.vocabtrainer.service.AiServiceFactory;
 import com.vocabtrainer.service.BackupService;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.DictionaryServiceFactory;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ImportExportService;
-import com.vocabtrainer.service.MockAiService;
 import com.vocabtrainer.service.ReviewScheduler;
 import com.vocabtrainer.service.ReviewService;
+import com.vocabtrainer.service.SettingsService;
 import com.vocabtrainer.service.SimilarityService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.service.WordValidationService;
@@ -40,7 +44,10 @@ public class VocabTrainerApp extends Application {
             GoalRepository goalRepository = new GoalRepository(databaseManager);
             AchievementRepository achievementRepository = new AchievementRepository(databaseManager);
             DictionaryCacheRepository dictionaryCacheRepository = new DictionaryCacheRepository(databaseManager);
+            SettingsRepository settingsRepository = new SettingsRepository(databaseManager);
+            AiCacheRepository aiCacheRepository = new AiCacheRepository(databaseManager);
             DeckService deckService = new DeckService(deckRepository);
+            SettingsService settingsService = new SettingsService(settingsRepository);
             Deck defaultDeck = deckService.ensureDefaultDeck();
 
             SimilarityService similarityService = new SimilarityService();
@@ -61,8 +68,9 @@ public class VocabTrainerApp extends Application {
                 achievementService
             );
             StatsService statsService = new StatsService(wordRepository, reviewLogRepository, databaseManager);
-            DictionaryService dictionaryService = DictionaryServiceFactory.create(dictionaryCacheRepository);
+            DictionaryService dictionaryService = DictionaryServiceFactory.create(dictionaryCacheRepository, settingsService);
             BackupService backupService = new BackupService(wordRepository, reviewLogRepository, databaseManager, validationService);
+            AiService aiService = AiServiceFactory.create(aiCacheRepository);
 
             MainWindow mainWindow = new MainWindow(
                 defaultDeck,
@@ -74,9 +82,11 @@ public class VocabTrainerApp extends Application {
                 goalService,
                 achievementService,
                 dictionaryService,
+                dictionaryCacheRepository,
+                settingsService,
                 validationService,
                 backupService,
-                new MockAiService(),
+                aiService,
                 databaseManager.getDatabasePath()
             );
             Scene scene = mainWindow.createScene();
