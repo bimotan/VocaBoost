@@ -9,7 +9,7 @@ $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $AppName = "VocaBoost"
 $Version = "1.0.0"
 $JarName = "vocab-trainer-$Version.jar"
-$MainClass = "com.vocabtrainer.app.VocabTrainerApp"
+$MainClass = "com.vocabtrainer.app.VocabTrainerLauncher"
 $InputDir = Join-Path $ProjectRoot "target\jpackage-input"
 $OutputDir = Join-Path $ProjectRoot "target\dist"
 
