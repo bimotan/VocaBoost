@@ -6,6 +6,11 @@ public record DictionaryEntry(
     String partOfSpeech,
     String phonetic,
     String example,
-    String source
+    String source,
+    String definition
 ) {
+    public DictionaryEntry(String english, String chinese, String partOfSpeech, String phonetic, String example,
+                           String source) {
+        this(english, chinese, partOfSpeech, phonetic, example, source, "");
+    }
 }

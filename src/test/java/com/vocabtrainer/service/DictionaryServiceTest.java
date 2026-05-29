@@ -10,6 +10,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -127,5 +129,32 @@ class DictionaryServiceTest {
 
         assertEquals(2, calls.get());
         assertEquals("释义2", refreshed.entries().get(0).chinese());
+    }
+
+    @Test
+    void cachedOnlineDefinitionPlaceholderIsConvertedToDefinition() throws Exception {
+        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("old-cache.db"));
+        databaseManager.initialize();
+        DictionaryCacheRepository cacheRepository = new DictionaryCacheRepository(databaseManager);
+        String oldPayload = String.join("\t",
+            b64("like"),
+            b64("请填写中文释义（English definition: Something that a person likes.）"),
+            b64("noun"),
+            b64("/laɪk/"),
+            b64("Tell me your likes and dislikes."),
+            b64("dictionaryapi.dev")
+        );
+        cacheRepository.save("like", oldPayload, "dictionary", LocalDateTime.now());
+        DictionaryService service = new CachingDictionaryService(new MockDictionaryService(), cacheRepository);
+
+        DictionaryLookupResult result = service.lookup("like");
+
+        assertTrue(result.success());
+        assertEquals("", result.entries().get(0).chinese());
+        assertEquals("Something that a person likes.", result.entries().get(0).definition());
+    }
+
+    private String b64(String value) {
+        return Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
     }
 }

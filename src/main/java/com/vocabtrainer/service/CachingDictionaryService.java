@@ -91,7 +91,8 @@ public class CachingDictionaryService implements DictionaryService {
                 encode(entry.partOfSpeech()),
                 encode(entry.phonetic()),
                 encode(entry.example()),
-                encode(entry.source())
+                encode(entry.source()),
+                encode(entry.definition())
             ));
         }
         return String.join("\n", rows);
@@ -104,14 +105,21 @@ public class CachingDictionaryService implements DictionaryService {
                 continue;
             }
             String[] fields = row.split("\\t", -1);
-            if (fields.length == 6) {
+            if (fields.length == 6 || fields.length == 7) {
+                String chinese = decode(fields[1]);
+                String definition = fields.length == 7 ? decode(fields[6]) : "";
+                if (looksLikeOnlineDefinitionPlaceholder(chinese)) {
+                    definition = extractDefinition(chinese);
+                    chinese = "";
+                }
                 entries.add(new DictionaryEntry(
                     decode(fields[0]),
-                    decode(fields[1]),
+                    chinese,
                     decode(fields[2]),
                     decode(fields[3]),
                     decode(fields[4]),
-                    decode(fields[5])
+                    decode(fields[5]),
+                    definition
                 ));
             }
         }
@@ -125,5 +133,21 @@ public class CachingDictionaryService implements DictionaryService {
 
     private String decode(String value) {
         return new String(Base64.getDecoder().decode(value), StandardCharsets.UTF_8);
+    }
+
+    private boolean looksLikeOnlineDefinitionPlaceholder(String value) {
+        return value != null && value.startsWith("请填写中文释义（English definition: ");
+    }
+
+    private String extractDefinition(String value) {
+        if (!looksLikeOnlineDefinitionPlaceholder(value)) {
+            return value == null ? "" : value;
+        }
+        String prefix = "请填写中文释义（English definition: ";
+        String definition = value.substring(prefix.length());
+        if (definition.endsWith("）")) {
+            definition = definition.substring(0, definition.length() - 1);
+        }
+        return definition.trim();
     }
 }

@@ -130,6 +130,7 @@ public class MainWindow {
     private TableView<WordCard> wordTable;
     private TableView<DeckRow> deckTable;
     private TableView<DeckRow> archivedDeckTable;
+    private ComboBox<Deck> addDeckSelector;
     private TextField searchField;
     private ComboBox<String> wordStatusFilter;
     private TextField tagFilterField;
@@ -269,6 +270,22 @@ public class MainWindow {
             currentDeck = selected;
             deckSelector.getSelectionModel().select(selected);
         }
+        refreshAddDeckSelector();
+    }
+
+    private void refreshAddDeckSelector() {
+        if (addDeckSelector == null) {
+            return;
+        }
+        List<Deck> decks = deckService.activeDecks();
+        addDeckSelector.getItems().setAll(decks);
+        Deck selected = decks.stream()
+            .filter(item -> currentDeck != null && item.getId() == currentDeck.getId())
+            .findFirst()
+            .orElse(decks.isEmpty() ? null : decks.get(0));
+        if (selected != null) {
+            addDeckSelector.getSelectionModel().select(selected);
+        }
     }
 
     private void createDeck() {
@@ -348,6 +365,7 @@ public class MainWindow {
         updateHeaderSubtitle();
         currentReviewWord = null;
         reviewService.resetSession(currentDeck.getId());
+        refreshAddDeckSelector();
         refreshAll();
         loadNextReviewWord();
     }
@@ -567,6 +585,11 @@ public class MainWindow {
         noteArea.setPrefRowCount(3);
         Label addStatus = new Label();
         addStatus.setWrapText(true);
+        addDeckSelector = new ComboBox<>();
+        addDeckSelector.setPrefWidth(260);
+        addDeckSelector.setCellFactory(list -> deckCell());
+        addDeckSelector.setButtonCell(deckCell());
+        refreshAddDeckSelector();
 
         Button addButton = new Button("Add word");
         addButton.setOnAction(event -> addWordFromForm(
@@ -575,24 +598,27 @@ public class MainWindow {
         GridPane addForm = new GridPane();
         addForm.setHgap(10);
         addForm.setVgap(10);
-        addForm.add(new Label("English"), 0, 0);
-        addForm.add(englishField, 1, 0);
-        addForm.add(new Label("Chinese"), 0, 1);
-        addForm.add(chineseField, 1, 1);
-        addForm.add(new Label("Phonetic"), 0, 2);
-        addForm.add(phoneticField, 1, 2);
-        addForm.add(new Label("POS"), 0, 3);
-        addForm.add(posField, 1, 3);
-        addForm.add(new Label("Tags"), 0, 4);
-        addForm.add(tagsField, 1, 4);
-        addForm.add(new Label("Example"), 0, 5);
-        addForm.add(exampleArea, 1, 5);
-        addForm.add(new Label("Notes"), 0, 6);
-        addForm.add(noteArea, 1, 6);
-        addForm.add(addButton, 1, 7);
-        addForm.add(addStatus, 1, 8);
+        addForm.add(new Label("Add to deck"), 0, 0);
+        addForm.add(addDeckSelector, 1, 0);
+        addForm.add(new Label("English"), 0, 1);
+        addForm.add(englishField, 1, 1);
+        addForm.add(new Label("Chinese"), 0, 2);
+        addForm.add(chineseField, 1, 2);
+        addForm.add(new Label("Phonetic"), 0, 3);
+        addForm.add(phoneticField, 1, 3);
+        addForm.add(new Label("POS"), 0, 4);
+        addForm.add(posField, 1, 4);
+        addForm.add(new Label("Tags"), 0, 5);
+        addForm.add(tagsField, 1, 5);
+        addForm.add(new Label("Example"), 0, 6);
+        addForm.add(exampleArea, 1, 6);
+        addForm.add(new Label("Notes"), 0, 7);
+        addForm.add(noteArea, 1, 7);
+        addForm.add(addButton, 1, 8);
+        addForm.add(addStatus, 1, 9);
 
-        VBox dictionaryBox = createDictionaryBox(englishField, chineseField, phoneticField, posField, exampleArea, tagsField);
+        VBox dictionaryBox = createDictionaryBox(englishField, chineseField, phoneticField, posField,
+            exampleArea, noteArea, tagsField);
         VBox ecdictBox = createEcdictSettingsBox();
         VBox aiBox = createAiSettingsBox();
         VBox importBox = createImportBox();
@@ -607,7 +633,8 @@ public class MainWindow {
     }
 
     private VBox createDictionaryBox(TextField englishField, TextField chineseField, TextField phoneticField,
-                                     TextField posField, TextArea exampleArea, TextField tagsField) {
+                                     TextField posField, TextArea exampleArea, TextArea noteArea,
+                                     TextField tagsField) {
         TextField lookupField = new TextField();
         lookupField.setPromptText("Enter an English word to look up");
         Button lookupButton = new Button("Lookup online");
@@ -623,18 +650,22 @@ public class MainWindow {
                 if (empty || item == null) {
                     setText(null);
                 } else {
-                    setText(item.english() + " | " + item.chinese() + " | " + item.source());
+                    String meaning = item.chinese() == null || item.chinese().isBlank()
+                        ? "English definition: " + item.definition()
+                        : item.chinese();
+                    setText(item.english() + " | " + meaning + " | " + item.source());
                 }
             }
         });
         results.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, entry) -> {
             if (entry != null) {
                 englishField.setText(entry.english());
-                chineseField.setText(entry.chinese());
+                chineseField.setText(entry.chinese() == null ? "" : entry.chinese());
                 phoneticField.setText(entry.phonetic());
                 posField.setText(entry.partOfSpeech());
                 exampleArea.setText(entry.example());
-                tagsField.setText("dictionary");
+                noteArea.setText(dictionaryNote(entry));
+                tagsField.setText(appendTag("dictionary", entry.source()));
             }
         });
         lookupButton.setOnAction(event -> runDictionaryLookup(lookupField, lookupButton, lookupStatus, results, false));
@@ -995,6 +1026,11 @@ public class MainWindow {
                                  TextField posField, TextArea exampleArea, TextArea noteArea,
                                  TextField tagsField, Label statusLabel) {
         try {
+            Deck targetDeck = addDeckSelector == null ? currentDeck : addDeckSelector.getValue();
+            if (targetDeck == null) {
+                statusLabel.setText("Please select a target deck first.");
+                return;
+            }
             ValidatedWord validated = validationService.validate(
                 englishField.getText(),
                 chineseField.getText(),
@@ -1004,8 +1040,9 @@ public class MainWindow {
                 noteArea.getText(),
                 tagsField.getText()
             );
-            if (wordRepository.findByEnglish(currentDeck.getId(), validated.english()).isPresent()) {
-                statusLabel.setText("Word already exists: " + validated.english() + ". Edit it in Word List.");
+            if (wordRepository.findByEnglish(targetDeck.getId(), validated.english()).isPresent()) {
+                statusLabel.setText("Word already exists in " + targetDeck.getName() + ": "
+                    + validated.english() + ". Edit it in Word List.");
                 return;
             }
             WordVerificationResult verification = dictionaryService.verify(validated.english());
@@ -1035,11 +1072,11 @@ public class MainWindow {
                     appendTag(appendTag(validated.tags(), "VERIFIED"), verification.source())
                 );
             }
-            WordCard word = WordCard.createNew(currentDeck.getId(), wordToSave.english(), wordToSave.chinese());
+            WordCard word = WordCard.createNew(targetDeck.getId(), wordToSave.english(), wordToSave.chinese());
             applyValidatedFields(word, wordToSave);
             wordRepository.save(word);
-            GoalUpdate update = goalService.recordNewWords(currentDeck.getId(), 1);
-            List<Achievement> unlocked = achievementService.evaluate(currentDeck.getId(), update.progress(), false, update.dailyGoalCompleted());
+            GoalUpdate update = goalService.recordNewWords(targetDeck.getId(), 1);
+            List<Achievement> unlocked = achievementService.evaluate(targetDeck.getId(), update.progress(), false, update.dailyGoalCompleted());
             englishField.clear();
             chineseField.clear();
             phoneticField.clear();
@@ -1047,7 +1084,7 @@ public class MainWindow {
             exampleArea.clear();
             noteArea.clear();
             tagsField.clear();
-            statusLabel.setText("Added: " + wordToSave.english()
+            statusLabel.setText("Added to " + targetDeck.getName() + ": " + wordToSave.english()
                 + (verification.found() ? " | Verified by " + verification.source() : " | Marked UNVERIFIED")
                 + achievementText(unlocked));
             refreshAll();
@@ -1584,10 +1621,27 @@ public class MainWindow {
 
     private String appendTag(String tags, String tag) {
         String clean = tags == null ? "" : tags.trim();
+        if (tag == null || tag.isBlank()) {
+            return clean;
+        }
         if (clean.toLowerCase().contains(tag.toLowerCase())) {
             return clean;
         }
         return clean.isBlank() ? tag : clean + "; " + tag;
+    }
+
+    private String dictionaryNote(DictionaryEntry entry) {
+        StringBuilder builder = new StringBuilder();
+        if (entry.definition() != null && !entry.definition().isBlank()) {
+            builder.append("English definition: ").append(entry.definition().trim());
+        }
+        if (entry.source() != null && !entry.source().isBlank()) {
+            if (builder.length() > 0) {
+                builder.append(System.lineSeparator());
+            }
+            builder.append("Dictionary source: ").append(entry.source().trim());
+        }
+        return builder.toString();
     }
 
     private String statusText(WordCard word) {

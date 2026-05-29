@@ -121,11 +121,12 @@ public class PublicOnlineDictionaryService implements DictionaryService {
                     if (!definition.isBlank()) {
                         entries.add(new DictionaryEntry(
                             english,
-                            "请填写中文释义（English definition: " + definition + "）",
+                            "",
                             pos,
                             phonetic,
                             text(definitionNode, "example"),
-                            "dictionaryapi.dev"
+                            "dictionaryapi.dev",
+                            definition
                         ));
                     }
                     if (entries.size() >= 5) {
@@ -155,11 +156,12 @@ public class PublicOnlineDictionaryService implements DictionaryService {
         if (!definition.isBlank()) {
             entries.add(new DictionaryEntry(
                 english,
-                "请填写中文释义（English definition: " + definition + "）",
+                "",
                 nextPos,
                 "",
                 "",
-                "Wiktionary"
+                "Wiktionary",
+                definition
             ));
             return;
         }

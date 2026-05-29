@@ -113,6 +113,8 @@ mvn javafx:run
 
 The app sends `GET {baseUrl}?word={english}` and includes the key in `Authorization: Bearer ...` and `X-API-Key`. If local and online dictionaries cannot verify a word, the UI shows "词条未找到" and lets you cancel or force-add it. Force-added words are tagged `UNVERIFIED`.
 
+Online English-only dictionaries fill English, phonetic, part of speech, example, source, and notes. They do not auto-fill the Chinese field; use the English definition shown in Notes as a reference and write your own Chinese meaning before adding. The Manual Add form also has an `Add to deck` selector so a looked-up word can be saved to any active deck.
+
 Expected useful JSON fields include `english` or `word`, `chinese` or `translation` or `meaning` or `definition`, `pos` or `partOfSpeech`, `phonetic`, `example`, and `source`.
 
 ## Optional AI Provider
@@ -255,7 +257,7 @@ Verified command:
 & 'C:\Program Files\JetBrains\IntelliJ IDEA 2025.3.1.1\plugins\maven\lib\maven3\bin\mvn.cmd' '-Dmaven.repo.local=.m2\repository' test
 ```
 
-Latest local result: 44 tests, 0 failures.
+Latest local result: 45 tests, 0 failures.
 
 ## GitHub Actions
 
