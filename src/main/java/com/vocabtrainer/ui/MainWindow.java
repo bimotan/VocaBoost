@@ -20,6 +20,7 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.AiService;
+import com.vocabtrainer.service.BackupService;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.GoalService;
@@ -69,6 +70,8 @@ import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.util.Duration;
 
+import java.awt.Desktop;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
@@ -89,6 +92,7 @@ public class MainWindow {
     private final AchievementService achievementService;
     private final DictionaryService dictionaryService;
     private final WordValidationService validationService;
+    private final BackupService backupService;
     private final AiService aiService;
     private final Path databasePath;
 
@@ -132,7 +136,7 @@ public class MainWindow {
                       ImportExportService importExportService, StatsService statsService,
                       GoalService goalService, AchievementService achievementService,
                       DictionaryService dictionaryService, WordValidationService validationService,
-                      AiService aiService, Path databasePath) {
+                      BackupService backupService, AiService aiService, Path databasePath) {
         this.currentDeck = deck;
         this.deckService = deckService;
         this.wordRepository = wordRepository;
@@ -143,6 +147,7 @@ public class MainWindow {
         this.achievementService = achievementService;
         this.dictionaryService = dictionaryService;
         this.validationService = validationService;
+        this.backupService = backupService;
         this.aiService = aiService;
         this.databasePath = databasePath;
     }
@@ -604,8 +609,19 @@ public class MainWindow {
         refreshButton.setOnAction(event -> refreshStatistics());
         Button exportButton = new Button("Export Markdown report");
         exportButton.setOnAction(event -> exportReport());
+        Button exportWordsButton = new Button("Export words CSV");
+        exportWordsButton.setOnAction(event -> exportWordsCsv());
+        Button exportLogsButton = new Button("Export review logs CSV");
+        exportLogsButton.setOnAction(event -> exportReviewLogsCsv());
+        Button exportBackupButton = new Button("Export JSON backup");
+        exportBackupButton.setOnAction(event -> exportJsonBackup());
+        Button importBackupButton = new Button("Import JSON backup");
+        importBackupButton.setOnAction(event -> importJsonBackup());
+        Button openDataDirButton = new Button("Open data folder");
+        openDataDirButton.setOnAction(event -> openDataFolder());
 
-        HBox buttons = new HBox(10, refreshButton, exportButton);
+        HBox buttons = new HBox(10, refreshButton, exportButton, exportWordsButton, exportLogsButton,
+            exportBackupButton, importBackupButton, openDataDirButton);
         VBox charts = new VBox(16, reviewCountChart, accuracyChart, memoryChart, overdueStatsLabel,
             sectionTitle("Hardest Words"), hardestWordsArea,
             sectionTitle("Portfolio Summary"), analyticsArea, buttons);
@@ -927,6 +943,76 @@ public class MainWindow {
             showInfo("Report exported: " + exported.toAbsolutePath());
         } catch (Exception e) {
             showError("Export failed", e.getMessage());
+        }
+    }
+
+    private void exportWordsCsv() {
+        exportBackupFile("Export words CSV", "vocaboost-words.csv", "CSV", "*.csv",
+            path -> backupService.exportWordsCsv(currentDeck.getId(), path));
+    }
+
+    private void exportReviewLogsCsv() {
+        exportBackupFile("Export review logs CSV", "vocaboost-review-logs.csv", "CSV", "*.csv",
+            path -> backupService.exportReviewLogsCsv(currentDeck.getId(), path));
+    }
+
+    private void exportJsonBackup() {
+        exportBackupFile("Export JSON backup", "vocaboost-backup.json", "JSON", "*.json",
+            path -> backupService.exportJsonBackup(currentDeck.getId(), path));
+    }
+
+    private void exportBackupFile(String title, String fileName, String extensionName, String extension,
+                                  java.util.function.Function<Path, Path> exporter) {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(title);
+        chooser.setInitialFileName(fileName);
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(extensionName, extension));
+        java.io.File file = chooser.showSaveDialog(reviewCountChart.getScene().getWindow());
+        if (file == null) {
+            return;
+        }
+        Path output = file.toPath();
+        runBackground(
+            () -> exporter.apply(output),
+            exported -> showInfo("Exported: " + exported.toAbsolutePath()),
+            error -> showError("Export failed", rootMessage(error)),
+            overdueStatsLabel,
+            "Exporting..."
+        );
+    }
+
+    private void importJsonBackup() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Import JSON backup");
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON", "*.json"));
+        java.io.File file = chooser.showOpenDialog(reviewCountChart.getScene().getWindow());
+        if (file == null) {
+            return;
+        }
+        long deckId = currentDeck.getId();
+        runBackground(
+            () -> backupService.importJsonBackup(file.toPath(), deckId),
+            result -> afterImport(result, overdueStatsLabel),
+            error -> showError("Import failed", rootMessage(error)),
+            overdueStatsLabel,
+            "Importing backup..."
+        );
+    }
+
+    private void openDataFolder() {
+        Path parent = databasePath.toAbsolutePath().getParent();
+        if (parent == null) {
+            showInfo("Data folder is unavailable.");
+            return;
+        }
+        try {
+            if (!Desktop.isDesktopSupported()) {
+                showInfo("Data folder: " + parent);
+                return;
+            }
+            Desktop.getDesktop().open(parent.toFile());
+        } catch (IOException e) {
+            showError("Open folder failed", e.getMessage());
         }
     }
 

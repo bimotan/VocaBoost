@@ -9,6 +9,7 @@ import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.AchievementService;
+import com.vocabtrainer.service.BackupService;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.DictionaryServiceFactory;
@@ -61,6 +62,7 @@ public class VocabTrainerApp extends Application {
             );
             StatsService statsService = new StatsService(wordRepository, reviewLogRepository, databaseManager);
             DictionaryService dictionaryService = DictionaryServiceFactory.create(dictionaryCacheRepository);
+            BackupService backupService = new BackupService(wordRepository, reviewLogRepository, databaseManager, validationService);
 
             MainWindow mainWindow = new MainWindow(
                 defaultDeck,
@@ -73,6 +75,7 @@ public class VocabTrainerApp extends Application {
                 achievementService,
                 dictionaryService,
                 validationService,
+                backupService,
                 new MockAiService(),
                 databaseManager.getDatabasePath()
             );

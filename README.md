@@ -5,12 +5,14 @@ VocaBoost is a Java 17 + JavaFX + SQLite desktop vocabulary trainer rebuilt from
 ## Highlights
 
 - JavaFX desktop app with SQLite persistence.
+- Multi-deck management: create, switch, rename, and archive decks from the header.
 - Spaced repetition scheduler based on SM-2 style intervals.
-- Typed answer review with similarity percentage and Again / Hard / Good / Easy self-rating.
+- Typed answer review with similarity percentage, Again / Hard / Good / Easy self-rating, English-to-Chinese, Chinese-to-English, and weak-word modes.
 - Similarity-aware scheduling: vague or low-similarity answers reduce easiness and increase future urgency.
 - Goals and achievements: daily review goal, daily new-word goal, session target, streak, XP, and badges.
 - Statistics page with JavaFX charts for daily review volume, accuracy trend, memory strength, hard words, and overdue count.
 - Portfolio-ready Markdown learning report export.
+- Data safety exports: words CSV, review-log CSV, JSON backup, and JSON backup import.
 - Manual add validation plus configurable dictionary lookup with offline Mock fallback.
 - Legacy txt import and GRE CSV starter-deck import.
 - Empty database bootstrap: first launch imports the bundled GRE starter sample so Word List and Review are immediately testable.
@@ -117,7 +119,7 @@ The bundled GRE starter deck is a small legally maintainable sample at:
 src/main/resources/data/gre_starter_sample.csv
 ```
 
-For a larger GRE list, prepare your own CSV in the format above and use `Add / Import -> Import GRE CSV`. Unknown or copyrighted 2000-word lists are intentionally not bundled.
+For a larger GRE list, prepare your own CSV in the format above and use `Add / Import -> Import GRE CSV`. Unknown or copyrighted 2000-word lists are intentionally not bundled. The bundled starter is an original, self-maintained sample of common GRE-style study words; use your own licensed CSV for a full 2000-word deck.
 
 GRE CSV import stops at 2000 imported words. The one-click GRE starter import refreshes Dashboard, Word List, and Review immediately after import.
 
@@ -172,10 +174,14 @@ Current tests cover:
 - `ReviewScheduler`
 - `WordSelector`
 - `WordValidationService`
+- `DeckService`
 - `GoalService`
 - `AchievementService`
 - `DictionaryService`
 - `ImportExportService`
+- `ReviewService`
+- `StatsService`
+- `BackupService`
 - SQLite repository CRUD and new persistence tables
 
 Verified command:
@@ -184,4 +190,8 @@ Verified command:
 & 'C:\Program Files\JetBrains\IntelliJ IDEA 2025.3.1.1\plugins\maven\lib\maven3\bin\mvn.cmd' '-Dmaven.repo.local=.m2\repository' test
 ```
 
-Latest local result: 23 tests, 0 failures.
+Latest local result: 32 tests, 0 failures.
+
+## GitHub Actions
+
+The repository includes `.github/workflows/maven-test.yml`, which runs `mvn test` on pushes and pull requests to `main`.
