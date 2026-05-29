@@ -153,6 +153,24 @@ public class WordRepository {
         }
     }
 
+    public List<WordCard> findWeak(long deckId, int limit) throws SQLException {
+        String sql = """
+            SELECT * FROM words
+            WHERE deck_id = ? AND archived = 0
+              AND (lapses > 0 OR consecutive_correct < 3 OR interval_days <= 3)
+            ORDER BY lapses DESC, consecutive_correct ASC, next_review_at ASC, id ASC
+            LIMIT ?
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            statement.setInt(2, limit);
+            try (ResultSet rs = statement.executeQuery()) {
+                return mapList(rs);
+            }
+        }
+    }
+
     public int countAll(long deckId) throws SQLException {
         return count("SELECT COUNT(*) FROM words WHERE deck_id = ? AND archived = 0", deckId, null);
     }

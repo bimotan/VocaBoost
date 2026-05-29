@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.Achievement;
 import com.vocabtrainer.domain.DailyGoalProgress;
 import com.vocabtrainer.domain.GoalUpdate;
 import com.vocabtrainer.domain.ReviewLog;
+import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewOutcome;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.ReviewSessionSummary;
@@ -65,25 +66,36 @@ public class ReviewService {
     }
 
     public Optional<WordCard> nextDueWord(long deckId) {
+        return nextWord(deckId, ReviewMode.EN_TO_ZH);
+    }
+
+    public Optional<WordCard> nextWord(long deckId, ReviewMode mode) {
         try {
             LocalDateTime now = LocalDateTime.now(clock);
-            List<WordCard> dueWords = wordRepository.findDue(deckId, now, 50);
-            return scheduler.selectNext(dueWords, now);
+            List<WordCard> candidates = mode == ReviewMode.WEAK_WORDS
+                ? wordRepository.findWeak(deckId, 50)
+                : wordRepository.findDue(deckId, now, 50);
+            return scheduler.selectNext(candidates, now);
         } catch (SQLException e) {
-            throw new IllegalStateException("Cannot read due words", e);
+            throw new IllegalStateException("Cannot read review words", e);
         }
     }
 
     public ReviewAnswer submitAnswer(long wordId, String userAnswer) {
+        return submitAnswer(wordId, userAnswer, ReviewMode.EN_TO_ZH);
+    }
+
+    public ReviewAnswer submitAnswer(long wordId, String userAnswer, ReviewMode mode) {
         try {
             WordCard word = wordRepository.findById(wordId)
                 .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
-            double similarity = similarityService.calculate(userAnswer, word.getChinese());
+            String correctAnswer = mode == ReviewMode.ZH_TO_EN ? word.getEnglish() : word.getChinese();
+            double similarity = similarityService.calculate(userAnswer, correctAnswer);
             ReviewAnswer answer = new ReviewAnswer(
                 wordId,
                 word.getEnglish(),
                 userAnswer == null ? "" : userAnswer.trim(),
-                word.getChinese(),
+                correctAnswer,
                 similarity,
                 LocalDateTime.now(clock)
             );

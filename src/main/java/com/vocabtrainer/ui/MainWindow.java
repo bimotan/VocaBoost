@@ -11,6 +11,7 @@ import com.vocabtrainer.domain.GoalUpdate;
 import com.vocabtrainer.domain.HardWordStat;
 import com.vocabtrainer.domain.MemoryBucketStat;
 import com.vocabtrainer.domain.ReviewOutcome;
+import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.ReviewSessionSummary;
 import com.vocabtrainer.domain.ValidatedWord;
@@ -115,6 +116,8 @@ public class MainWindow {
     private Button submitAnswerButton;
     private HBox ratingButtons;
     private WordCard currentReviewWord;
+    private ComboBox<ReviewMode> reviewModeSelector;
+    private Label sessionProgressLabel;
 
     private BarChart<String, Number> reviewCountChart;
     private LineChart<String, Number> accuracyChart;
@@ -342,6 +345,17 @@ public class MainWindow {
     }
 
     private Tab createReviewTab() {
+        reviewModeSelector = new ComboBox<>();
+        reviewModeSelector.getItems().setAll(ReviewMode.values());
+        reviewModeSelector.setCellFactory(list -> reviewModeCell());
+        reviewModeSelector.setButtonCell(reviewModeCell());
+        reviewModeSelector.getSelectionModel().select(ReviewMode.EN_TO_ZH);
+        reviewModeSelector.valueProperty().addListener((observable, oldMode, newMode) -> loadNextReviewWord());
+        sessionProgressLabel = new Label();
+        sessionProgressLabel.setStyle("-fx-text-fill: #4b5563;");
+        HBox modeBox = new HBox(10, new Label("Mode"), reviewModeSelector, sessionProgressLabel);
+        modeBox.setAlignment(Pos.CENTER_LEFT);
+
         reviewWordLabel = new Label("Loading...");
         reviewWordLabel.setStyle("-fx-font-size: 34px; -fx-font-weight: 700;");
         reviewMetaLabel = new Label();
@@ -368,13 +382,23 @@ public class MainWindow {
 
         HBox answerBox = new HBox(10, answerField, submitAnswerButton);
         answerBox.setAlignment(Pos.CENTER_LEFT);
-        VBox content = new VBox(16, reviewWordLabel, reviewMetaLabel, answerBox, reviewResultArea, ratingButtons);
+        VBox content = new VBox(16, modeBox, reviewWordLabel, reviewMetaLabel, answerBox, reviewResultArea, ratingButtons);
         content.setPadding(new Insets(28));
         VBox.setVgrow(reviewResultArea, Priority.ALWAYS);
 
         Tab tab = new Tab("Review", content);
         tab.setClosable(false);
         return tab;
+    }
+
+    private ListCell<ReviewMode> reviewModeCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(ReviewMode item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.getLabel());
+            }
+        };
     }
 
     private Button ratingButton(ReviewRating rating) {
@@ -736,7 +760,7 @@ public class MainWindow {
         if (currentReviewWord == null || submitAnswerButton.isDisabled()) {
             return;
         }
-        ReviewAnswer answer = reviewService.submitAnswer(currentReviewWord.getId(), answerField.getText());
+        ReviewAnswer answer = reviewService.submitAnswer(currentReviewWord.getId(), answerField.getText(), answerMode());
         reviewResultArea.setText("Correct answer: " + answer.correctAnswer()
             + System.lineSeparator() + "Your answer: " + answer.userAnswer()
             + System.lineSeparator() + "Answer similarity: " + formatPercent(answer.similarity())
@@ -760,18 +784,23 @@ public class MainWindow {
     }
 
     private void loadNextReviewWord() {
-        Optional<WordCard> next = reviewService.nextDueWord(currentDeck.getId());
+        Optional<WordCard> next = reviewService.nextWord(currentDeck.getId(), currentReviewMode());
         currentReviewWord = next.orElse(null);
         answerField.clear();
         reviewResultArea.clear();
         ratingButtons.setDisable(true);
         submitAnswerButton.setDisable(currentReviewWord == null);
         answerField.setDisable(currentReviewWord == null);
+        answerField.setPromptText(answerMode().getPrompt());
+        updateSessionProgress();
         if (currentReviewWord == null) {
             showReviewCompletion();
         } else {
-            reviewWordLabel.setText(currentReviewWord.getEnglish());
-            reviewMetaLabel.setText("Streak " + currentReviewWord.getConsecutiveCorrect()
+            reviewWordLabel.setText(answerMode() == ReviewMode.ZH_TO_EN
+                ? currentReviewWord.getChinese()
+                : currentReviewWord.getEnglish());
+            reviewMetaLabel.setText(answerMode().getLabel()
+                + " | Streak " + currentReviewWord.getConsecutiveCorrect()
                 + " | Interval " + currentReviewWord.getIntervalDays()
                 + " days | EF " + String.format("%.2f", currentReviewWord.getEasinessFactor())
                 + " | Lapses " + currentReviewWord.getLapses());
@@ -784,12 +813,34 @@ public class MainWindow {
         DailyGoalProgress progress = goalService.getTodayProgress();
         reviewWordLabel.setText("Review complete");
         reviewMetaLabel.setText("No due words right now.");
-        reviewResultArea.setText("Session completed: " + session.reviewedCount()
+        reviewResultArea.setText("Great session."
+            + System.lineSeparator() + "Session completed: " + session.reviewedCount()
             + System.lineSeparator() + "Session accuracy: " + formatPercent(session.accuracy())
             + System.lineSeparator() + "XP earned this session: " + session.xpEarned()
             + System.lineSeparator() + "Today review goal: " + progress.reviewedCount() + "/" + progress.reviewGoal()
             + System.lineSeparator() + "Today new-word goal: " + progress.newWordsCount() + "/" + progress.newWordGoal()
             + System.lineSeparator() + "Unlocked achievements: " + achievementNames(session.unlockedAchievements()));
+    }
+
+    private ReviewMode currentReviewMode() {
+        if (reviewModeSelector == null || reviewModeSelector.getValue() == null) {
+            return ReviewMode.EN_TO_ZH;
+        }
+        return reviewModeSelector.getValue();
+    }
+
+    private ReviewMode answerMode() {
+        return currentReviewMode() == ReviewMode.ZH_TO_EN ? ReviewMode.ZH_TO_EN : ReviewMode.EN_TO_ZH;
+    }
+
+    private void updateSessionProgress() {
+        if (sessionProgressLabel == null) {
+            return;
+        }
+        ReviewSessionSummary session = reviewService.sessionSummary();
+        sessionProgressLabel.setText("Session " + session.reviewedCount() + "/" + session.sessionGoal()
+            + " | Accuracy " + formatPercent(session.accuracy())
+            + " | XP " + session.xpEarned());
     }
 
     private void refreshAll() {
