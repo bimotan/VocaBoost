@@ -52,7 +52,7 @@ Online lookups run in background JavaFX tasks and cached results can be refreshe
 
 ## AI / Mock Design
 
-`AiService` is an interface. `AiServiceFactory` chooses `MockAiService` by default and switches to `OpenAiCompatibleAiService` only when `VOCABOOST_AI_PROVIDER`, `VOCABOOST_AI_BASE_URL`, `VOCABOOST_AI_API_KEY`, and `VOCABOOST_AI_MODEL` are configured. `CachingAiService` stores successful configured responses in `ai_cache`, while `FallbackAiService` keeps review usable if the provider fails.
+`AiService` is an interface. `AiServiceFactory` chooses `MockAiService` by default and switches to `OpenAiCompatibleAiService` when AI settings exist in SQLite or when `VOCABOOST_AI_BASE_URL`, `VOCABOOST_AI_API_KEY`, and `VOCABOOST_AI_MODEL` are configured. The Add / Import tab can save provider, base URL, API key, and model to the local `settings` table, then reload the service immediately. `CachingAiService` stores successful configured responses in `ai_cache`, while `FallbackAiService` keeps review usable if the provider fails.
 
 ## Review Sessions
 

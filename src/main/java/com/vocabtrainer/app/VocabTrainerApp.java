@@ -70,7 +70,7 @@ public class VocabTrainerApp extends Application {
             StatsService statsService = new StatsService(wordRepository, reviewLogRepository, databaseManager);
             DictionaryService dictionaryService = DictionaryServiceFactory.create(dictionaryCacheRepository, settingsService);
             BackupService backupService = new BackupService(wordRepository, reviewLogRepository, databaseManager, validationService);
-            AiService aiService = AiServiceFactory.create(aiCacheRepository);
+            AiService aiService = AiServiceFactory.create(aiCacheRepository, settingsService);
 
             MainWindow mainWindow = new MainWindow(
                 defaultDeck,
@@ -83,6 +83,7 @@ public class VocabTrainerApp extends Application {
                 achievementService,
                 dictionaryService,
                 dictionaryCacheRepository,
+                aiCacheRepository,
                 settingsService,
                 validationService,
                 backupService,

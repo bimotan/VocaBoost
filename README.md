@@ -117,7 +117,22 @@ Expected useful JSON fields include `english` or `word`, `chinese` or `translati
 
 ## Optional AI Provider
 
-By default VocaBoost uses `MockAiService`, so review explanations work offline. To enable a real OpenAI-compatible chat-completions provider, set these environment variables before launching:
+By default VocaBoost uses `MockAiService`, so review explanations work offline.
+
+Recommended setup from the UI:
+
+```text
+Add / Import -> AI Explanation Provider
+Provider: openai-compatible
+Base URL: https://your-provider.example/v1/chat/completions
+API key: your-key
+Model: your-model
+Save AI Settings -> Test AI Explanation
+```
+
+The saved settings stay in the local SQLite database and take effect immediately. They are not committed to Git because the database is ignored.
+
+You can also use environment variables before launching:
 
 ```powershell
 $env:VOCABOOST_AI_PROVIDER = 'openai-compatible'
@@ -127,7 +142,7 @@ $env:VOCABOOST_AI_MODEL = 'your-model'
 mvn javafx:run
 ```
 
-The app does not store or commit API keys. Responses are cached in the local `ai_cache` table by word, and failures fall back to Mock AI instead of blocking review. Use `Add / Import -> AI Explanation Provider -> Test AI Explanation` to verify configuration.
+The app never commits API keys. UI-saved keys stay in the local ignored SQLite database; environment keys stay outside the project. Responses are cached in the local `ai_cache` table by word, and failures fall back to Mock AI instead of blocking review. Use `Add / Import -> AI Explanation Provider -> Test AI Explanation` to verify configuration.
 
 ## Import Formats
 
@@ -240,7 +255,7 @@ Verified command:
 & 'C:\Program Files\JetBrains\IntelliJ IDEA 2025.3.1.1\plugins\maven\lib\maven3\bin\mvn.cmd' '-Dmaven.repo.local=.m2\repository' test
 ```
 
-Latest local result: 43 tests, 0 failures.
+Latest local result: 44 tests, 0 failures.
 
 ## GitHub Actions
 

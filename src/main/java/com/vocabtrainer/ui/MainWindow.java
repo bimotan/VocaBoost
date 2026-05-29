@@ -17,10 +17,12 @@ import com.vocabtrainer.domain.ReviewSessionSummary;
 import com.vocabtrainer.domain.ValidatedWord;
 import com.vocabtrainer.domain.WordVerificationResult;
 import com.vocabtrainer.domain.WordCard;
+import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.DictionaryCacheRepository;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.AiService;
+import com.vocabtrainer.service.AiServiceFactory;
 import com.vocabtrainer.service.BackupService;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
@@ -58,6 +60,7 @@ import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.PasswordField;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
@@ -103,7 +106,8 @@ public class MainWindow {
     private final SettingsService settingsService;
     private final WordValidationService validationService;
     private final BackupService backupService;
-    private final AiService aiService;
+    private AiService aiService;
+    private final AiCacheRepository aiCacheRepository;
     private final Path databasePath;
 
     private final ObservableList<WordCard> wordItems = FXCollections.observableArrayList();
@@ -158,7 +162,7 @@ public class MainWindow {
                       ImportExportService importExportService, StatsService statsService,
                       GoalService goalService, AchievementService achievementService,
                       DictionaryService dictionaryService, DictionaryCacheRepository dictionaryCacheRepository,
-                      SettingsService settingsService, WordValidationService validationService,
+                      AiCacheRepository aiCacheRepository, SettingsService settingsService, WordValidationService validationService,
                       BackupService backupService, AiService aiService, Path databasePath) {
         this.currentDeck = deck;
         this.deckService = deckService;
@@ -170,6 +174,7 @@ public class MainWindow {
         this.achievementService = achievementService;
         this.dictionaryService = dictionaryService;
         this.dictionaryCacheRepository = dictionaryCacheRepository;
+        this.aiCacheRepository = aiCacheRepository;
         this.settingsService = settingsService;
         this.validationService = validationService;
         this.backupService = backupService;
@@ -720,10 +725,45 @@ public class MainWindow {
     }
 
     private VBox createAiSettingsBox() {
-        Label statusLabel = new Label(aiService.isAvailable()
-            ? "AI provider configured. Explanations use cache and HTTP fallback."
-            : "AI provider not configured. Mock explanation is used offline.");
+        TextField providerField = new TextField(settingsService.getAiProvider().orElse("openai-compatible"));
+        providerField.setPromptText("openai-compatible");
+        TextField baseUrlField = new TextField(settingsService.getAiBaseUrl().orElse(""));
+        baseUrlField.setPromptText("https://your-provider.example/v1/chat/completions");
+        PasswordField apiKeyField = new PasswordField();
+        apiKeyField.setText(settingsService.getAiApiKey().orElse(""));
+        apiKeyField.setPromptText("API key");
+        TextField modelField = new TextField(settingsService.getAiModel().orElse(""));
+        modelField.setPromptText("model name");
+        Label statusLabel = new Label(aiStatusText());
         statusLabel.setWrapText(true);
+
+        Button saveButton = new Button("Save AI Settings");
+        saveButton.setOnAction(event -> {
+            try {
+                settingsService.saveAiSettings(
+                    providerField.getText(),
+                    baseUrlField.getText(),
+                    apiKeyField.getText(),
+                    modelField.getText()
+                );
+                reloadAiService();
+                statusLabel.setText("Saved. " + aiStatusText());
+            } catch (RuntimeException e) {
+                statusLabel.setText(rootMessage(e));
+            }
+        });
+
+        Button clearButton = new Button("Clear AI Settings");
+        clearButton.setOnAction(event -> {
+            settingsService.clearAiSettings();
+            providerField.setText("openai-compatible");
+            baseUrlField.clear();
+            apiKeyField.clear();
+            modelField.clear();
+            reloadAiService();
+            statusLabel.setText("Cleared. " + aiStatusText());
+        });
+
         Button testButton = new Button("Test AI Explanation");
         testButton.setOnAction(event -> {
             WordCard sample = WordCard.createNew(currentDeck.getId(), "lucid", "清晰的; 易懂的");
@@ -735,12 +775,41 @@ public class MainWindow {
                 "Testing AI explanation..."
             );
         });
-        return new VBox(10, sectionTitle("AI Explanation Provider"), statusLabel, testButton);
+
+        GridPane form = new GridPane();
+        form.setHgap(10);
+        form.setVgap(10);
+        form.add(new Label("Provider"), 0, 0);
+        form.add(providerField, 1, 0);
+        form.add(new Label("Base URL"), 0, 1);
+        form.add(baseUrlField, 1, 1);
+        form.add(new Label("API key"), 0, 2);
+        form.add(apiKeyField, 1, 2);
+        form.add(new Label("Model"), 0, 3);
+        form.add(modelField, 1, 3);
+        GridPane.setHgrow(providerField, Priority.ALWAYS);
+        GridPane.setHgrow(baseUrlField, Priority.ALWAYS);
+        GridPane.setHgrow(apiKeyField, Priority.ALWAYS);
+        GridPane.setHgrow(modelField, Priority.ALWAYS);
+        HBox buttons = new HBox(10, saveButton, clearButton, testButton);
+        return new VBox(10, sectionTitle("AI Explanation Provider"), form, buttons, statusLabel);
     }
 
     private void reloadDictionaryService() {
         dictionaryService = DictionaryServiceFactory.create(dictionaryCacheRepository, settingsService);
         updateHeaderSubtitle();
+    }
+
+    private void reloadAiService() {
+        aiService = AiServiceFactory.create(aiCacheRepository, settingsService);
+        updateHeaderSubtitle();
+    }
+
+    private String aiStatusText() {
+        if (aiService.isAvailable()) {
+            return "AI provider configured. Review explanations use HTTP provider with local cache.";
+        }
+        return "AI provider not configured. Mock explanation is used offline.";
     }
 
     private VBox createImportBox() {

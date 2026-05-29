@@ -3,6 +3,7 @@ package com.vocabtrainer.service;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.DatabaseManager;
+import com.vocabtrainer.repository.SettingsRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -45,5 +46,22 @@ class CachingAiServiceTest {
         AiService service = AiServiceFactory.create(null, java.util.Map.of());
 
         assertTrue(service instanceof MockAiService);
+    }
+
+    @Test
+    void factoryUsesLocalSettingsBeforeEnvironment() throws Exception {
+        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("ai-settings.db"));
+        databaseManager.initialize();
+        SettingsService settingsService = new SettingsService(new SettingsRepository(databaseManager));
+        settingsService.saveAiSettings(
+            "openai-compatible",
+            "https://example.test/v1/chat/completions",
+            "local-key",
+            "local-model"
+        );
+
+        AiService service = AiServiceFactory.create(null, settingsService, java.util.Map.of());
+
+        assertTrue(service.isAvailable());
     }
 }
