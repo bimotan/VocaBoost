@@ -37,14 +37,18 @@ public class CachingDictionaryService implements DictionaryService {
         try {
             var cached = cacheRepository.findPayload(key);
             if (cached.isPresent()) {
-                return DictionaryLookupResult.success("Loaded from dictionary cache.", deserialize(cached.get()));
+                List<DictionaryEntry> cachedEntries = deserialize(cached.get());
+                if (isUsableCache(cachedEntries)) {
+                    return DictionaryLookupResult.success("Loaded from dictionary cache.", cachedEntries);
+                }
+                cacheRepository.delete(key);
             }
         } catch (SQLException ignored) {
             // Cache errors should not block adding words.
         }
 
         DictionaryLookupResult result = delegate.lookup(key);
-        if (result.success() && !result.entries().isEmpty()) {
+        if (result.success() && isUsableCache(result.entries())) {
             try {
                 cacheRepository.save(key, serialize(result.entries()), "dictionary", LocalDateTime.now(clock));
             } catch (SQLException ignored) {
@@ -149,5 +153,27 @@ public class CachingDictionaryService implements DictionaryService {
             definition = definition.substring(0, definition.length() - 1);
         }
         return definition.trim();
+    }
+
+    private boolean isUsableCache(List<DictionaryEntry> entries) {
+        return entries != null && !entries.isEmpty()
+            && entries.stream().noneMatch(this::isMockFallbackEntry)
+            && entries.stream().anyMatch(entry -> hasText(entry.chinese()) || hasText(entry.definition()));
+    }
+
+    private boolean isMockFallbackEntry(DictionaryEntry entry) {
+        if (entry == null) {
+            return true;
+        }
+        String source = entry.source() == null ? "" : entry.source().trim();
+        String chinese = entry.chinese() == null ? "" : entry.chinese().trim();
+        return source.equalsIgnoreCase("Mock fallback")
+            || chinese.equals("请手动填写中文释义")
+            || (source.toLowerCase(java.util.Locale.ROOT).contains("mock fallback")
+                && !hasText(entry.definition()));
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }

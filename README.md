@@ -257,7 +257,7 @@ Verified command:
 & 'C:\Program Files\JetBrains\IntelliJ IDEA 2025.3.1.1\plugins\maven\lib\maven3\bin\mvn.cmd' '-Dmaven.repo.local=.m2\repository' test
 ```
 
-Latest local result: 45 tests, 0 failures.
+Latest local result: 46 tests, 0 failures.
 
 ## GitHub Actions
 

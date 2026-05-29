@@ -154,6 +154,50 @@ class DictionaryServiceTest {
         assertEquals("Something that a person likes.", result.entries().get(0).definition());
     }
 
+    @Test
+    void staleMockFallbackCacheIsIgnoredAndReplaced() throws Exception {
+        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("stale-mock-cache.db"));
+        databaseManager.initialize();
+        DictionaryCacheRepository cacheRepository = new DictionaryCacheRepository(databaseManager);
+        String stalePayload = String.join("\t",
+            b64("hi"),
+            b64("请手动填写中文释义"),
+            b64(""),
+            b64(""),
+            b64(""),
+            b64("Mock fallback")
+        );
+        cacheRepository.save("hi", stalePayload, "dictionary", LocalDateTime.now());
+        AtomicInteger calls = new AtomicInteger();
+        DictionaryService delegate = new DictionaryService() {
+            @Override
+            public DictionaryLookupResult lookup(String english) {
+                calls.incrementAndGet();
+                return DictionaryLookupResult.success("fresh", List.of(new DictionaryEntry(
+                    english,
+                    "",
+                    "interjection",
+                    "/haɪ/",
+                    "Hi, how are you?",
+                    "test",
+                    "used as a greeting"
+                )));
+            }
+
+            @Override
+            public boolean isConfigured() {
+                return true;
+            }
+        };
+        DictionaryService service = new CachingDictionaryService(delegate, cacheRepository);
+
+        DictionaryLookupResult result = service.lookup("hi");
+
+        assertEquals(1, calls.get());
+        assertEquals("test", result.entries().get(0).source());
+        assertEquals("used as a greeting", result.entries().get(0).definition());
+    }
+
     private String b64(String value) {
         return Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
     }
