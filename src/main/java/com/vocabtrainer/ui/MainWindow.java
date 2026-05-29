@@ -664,6 +664,7 @@ public class MainWindow {
         memoryChart = new PieChart();
         memoryChart.setTitle("Memory strength distribution");
         memoryChart.setPrefHeight(260);
+        memoryChart.setLabelsVisible(false);
 
         overdueStatsLabel = new Label("-");
         overdueStatsLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: 600;");
@@ -1102,6 +1103,7 @@ public class MainWindow {
         accuracyChart.getData().setAll(accuracySeries);
 
         List<PieChart.Data> memoryData = statsService.memoryDistribution(currentDeck.getId()).stream()
+            .filter(stat -> stat.count() > 0)
             .map(stat -> new PieChart.Data(stat.label(), stat.count()))
             .toList();
         memoryChart.getData().setAll(memoryData);
