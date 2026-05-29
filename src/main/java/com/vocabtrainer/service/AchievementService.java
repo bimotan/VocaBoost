@@ -26,8 +26,12 @@ public class AchievementService {
     }
 
     public List<Achievement> getUnlockedAchievements() {
+        return getUnlockedAchievements(0L);
+    }
+
+    public List<Achievement> getUnlockedAchievements(long deckId) {
         try {
-            return achievementRepository.findAll();
+            return achievementRepository.findAll(deckId);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read achievements", e);
         }
@@ -35,26 +39,31 @@ public class AchievementService {
 
     public List<Achievement> evaluate(DailyGoalProgress progress, boolean overdueRescued,
                                       boolean dailyGoalCompletedNow) {
+        return evaluate(0L, progress, overdueRescued, dailyGoalCompletedNow);
+    }
+
+    public List<Achievement> evaluate(long deckId, DailyGoalProgress progress, boolean overdueRescued,
+                                      boolean dailyGoalCompletedNow) {
         try {
             List<Achievement> unlocked = new ArrayList<>();
-            int totalReviews = goalService.totalReviews();
-            unlockIf(totalReviews >= 1, unlocked, definition(
+            int totalReviews = goalService.totalReviews(deckId);
+            unlockIf(deckId, totalReviews >= 1, unlocked, definition(
                 "first_review", "First Review", "Completed the first review.", 10));
-            unlockIf(totalReviews >= 10, unlocked, definition(
+            unlockIf(deckId, totalReviews >= 10, unlocked, definition(
                 "review_10", "10 Reviews", "Completed 10 total reviews.", 15));
-            unlockIf(totalReviews >= 50, unlocked, definition(
+            unlockIf(deckId, totalReviews >= 50, unlocked, definition(
                 "review_50", "50 Reviews", "Completed 50 total reviews.", 30));
-            unlockIf(totalReviews >= 100, unlocked, definition(
+            unlockIf(deckId, totalReviews >= 100, unlocked, definition(
                 "review_100", "100 Reviews", "Completed 100 total reviews.", 50));
-            unlockIf(progress.currentStreak() >= 3, unlocked, definition(
+            unlockIf(deckId, progress.currentStreak() >= 3, unlocked, definition(
                 "streak_3", "3-Day Streak", "Reviewed on 3 consecutive days.", 20));
-            unlockIf(progress.currentStreak() >= 7, unlocked, definition(
+            unlockIf(deckId, progress.currentStreak() >= 7, unlocked, definition(
                 "streak_7", "7-Day Streak", "Reviewed on 7 consecutive days.", 50));
-            unlockIf(progress.currentStreak() >= 30, unlocked, definition(
+            unlockIf(deckId, progress.currentStreak() >= 30, unlocked, definition(
                 "streak_30", "30-Day Streak", "Reviewed on 30 consecutive days.", 150));
-            unlockIf(dailyGoalCompletedNow, unlocked, definition(
+            unlockIf(deckId, dailyGoalCompletedNow, unlocked, definition(
                 "daily_goal", "Daily Goal", "Completed today's review and new-word goals.", 20));
-            unlockIf(overdueRescued, unlocked, definition(
+            unlockIf(deckId, overdueRescued, unlocked, definition(
                 "overdue_rescue", "Overdue Rescue", "Reviewed an overdue word.", 15));
             return unlocked;
         } catch (SQLException e) {
@@ -64,11 +73,16 @@ public class AchievementService {
 
     private void unlockIf(boolean condition, List<Achievement> unlocked, Achievement achievement)
         throws SQLException {
+        unlockIf(0L, condition, unlocked, achievement);
+    }
+
+    private void unlockIf(long deckId, boolean condition, List<Achievement> unlocked, Achievement achievement)
+        throws SQLException {
         if (!condition) {
             return;
         }
-        if (achievementRepository.insertIfAbsent(achievement)) {
-            goalService.awardXp(achievement.xpReward());
+        if (achievementRepository.insertIfAbsent(deckId, achievement)) {
+            goalService.awardXp(deckId, achievement.xpReward());
             unlocked.add(achievement);
         }
     }

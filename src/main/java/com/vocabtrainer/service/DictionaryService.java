@@ -6,6 +6,10 @@ import com.vocabtrainer.domain.WordVerificationResult;
 public interface DictionaryService {
     DictionaryLookupResult lookup(String english);
 
+    default DictionaryLookupResult refresh(String english) {
+        return lookup(english);
+    }
+
     default WordVerificationResult verify(String english) {
         DictionaryLookupResult result = lookup(english);
         if (result.success() && !result.entries().isEmpty()) {

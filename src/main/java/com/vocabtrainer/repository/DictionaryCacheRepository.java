@@ -48,4 +48,12 @@ public class DictionaryCacheRepository {
             statement.executeUpdate();
         }
     }
+
+    public void delete(String english) throws SQLException {
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement("DELETE FROM dictionary_cache WHERE english = ? COLLATE NOCASE")) {
+            statement.setString(1, english.trim());
+            statement.executeUpdate();
+        }
+    }
 }

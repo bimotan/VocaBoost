@@ -2,6 +2,8 @@
 
 VocaBoost is a Java 17 + JavaFX + SQLite desktop vocabulary trainer rebuilt from an older Java CLI spaced-repetition project. It focuses on a complete local learning loop: add/import words, review with typed retrieval practice, measure answer similarity, schedule future reviews adaptively, and track learning progress.
 
+It is suitable as a learning analytics prototype because each review produces structured evidence: typed recall, similarity score, rating, response time, scheduling state, daily goals, streak, XP, and deck-scoped progress. The Statistics and Markdown report views turn those logs into portfolio-friendly artifacts for explaining spaced repetition, retrieval practice, adaptive scheduling, and learner modeling.
+
 ## Highlights
 
 - JavaFX desktop app with SQLite persistence.
@@ -46,6 +48,15 @@ The app creates a local SQLite database automatically:
 Existing databases are migrated with `CREATE TABLE IF NOT EXISTS`; the app does not delete your saved words.
 
 ## Run in IntelliJ IDEA
+
+Clean clone setup:
+
+```powershell
+git clone https://github.com/bimotan/VocaBoost.git
+cd VocaBoost
+mvn test
+mvn javafx:run
+```
 
 Open `D:\java\VocaBoost` in IntelliJ IDEA, then run:
 
@@ -131,6 +142,8 @@ For a click-to-run Windows app folder with `VocaBoost.exe`, use:
 .\scripts\package-windows.ps1
 ```
 
+The packaging script uses the normal Maven cache by default. To force a custom local Maven cache, set `VOCABOOST_MAVEN_REPO`; project-local `.m2/` remains ignored by Git.
+
 Output:
 
 ```text
@@ -162,7 +175,13 @@ Supporting folders:
 ```text
 samples/       legacy import test data
 scripts/       local build and packaging scripts
+docs/          architecture, roadmap, screenshot placeholders
 ```
+
+More documentation:
+
+- `docs/ARCHITECTURE.md`
+- `docs/ROADMAP.md`
 
 Business logic does not depend on `Scanner`, `System.out`, `System.exit()`, or JavaFX controls.
 
@@ -190,7 +209,7 @@ Verified command:
 & 'C:\Program Files\JetBrains\IntelliJ IDEA 2025.3.1.1\plugins\maven\lib\maven3\bin\mvn.cmd' '-Dmaven.repo.local=.m2\repository' test
 ```
 
-Latest local result: 32 tests, 0 failures.
+Latest local result: 35 tests, 0 failures.
 
 ## GitHub Actions
 

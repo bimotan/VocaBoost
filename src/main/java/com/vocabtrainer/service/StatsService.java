@@ -1,6 +1,7 @@
 package com.vocabtrainer.service;
 
 import com.vocabtrainer.domain.DailyReviewStat;
+import com.vocabtrainer.domain.DailyGoalProgress;
 import com.vocabtrainer.domain.HardWordStat;
 import com.vocabtrainer.domain.MemoryBucketStat;
 import com.vocabtrainer.domain.WordCard;
@@ -197,9 +198,38 @@ public class StatsService {
         }
     }
 
+    public LocalDateTime latestReviewAt(long deckId) {
+        if (databaseManager == null) {
+            return null;
+        }
+        String sql = """
+            SELECT MAX(l.reviewed_at) AS latest
+            FROM review_logs l
+            JOIN words w ON w.id = l.word_id
+            WHERE w.deck_id = ?
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            try (ResultSet rs = statement.executeQuery()) {
+                if (rs.next()) {
+                    String latest = rs.getString("latest");
+                    return latest == null ? null : LocalDateTime.parse(latest);
+                }
+            }
+            return null;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot read latest review time", e);
+        }
+    }
+
     public Path exportMarkdownReport(long deckId, Path outputPath) {
+        return exportMarkdownReport(deckId, "Deck " + deckId, null, outputPath);
+    }
+
+    public Path exportMarkdownReport(long deckId, String deckName, DailyGoalProgress progress, Path outputPath) {
         try {
-            String markdown = buildMarkdownReport(deckId);
+            String markdown = buildMarkdownReport(deckId, deckName, progress);
             Path parent = outputPath.toAbsolutePath().getParent();
             if (parent != null) {
                 Files.createDirectories(parent);
@@ -212,15 +242,37 @@ public class StatsService {
     }
 
     public String buildMarkdownReport(long deckId) {
+        return buildMarkdownReport(deckId, "Deck " + deckId, null);
+    }
+
+    public String buildMarkdownReport(long deckId, String deckName, DailyGoalProgress progress) {
         DashboardStats dashboard = dashboardStats(deckId);
         StringBuilder builder = new StringBuilder();
         builder.append("# VocaBoost Learning Report").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Deck: ").append(deckName == null || deckName.isBlank() ? "Deck " + deckId : deckName)
+            .append(System.lineSeparator());
         builder.append("- Total words: ").append(dashboard.totalWords()).append(System.lineSeparator());
         builder.append("- Due words: ").append(dashboard.dueToday()).append(System.lineSeparator());
         builder.append("- Mastered words: ").append(dashboard.masteredWords()).append(System.lineSeparator());
         builder.append("- Reviews today: ").append(dashboard.reviewedToday()).append(System.lineSeparator());
         builder.append("- Accuracy today: ").append(percent(dashboard.accuracyToday())).append(System.lineSeparator());
         builder.append("- Overdue words: ").append(overdueCount(deckId)).append(System.lineSeparator()).append(System.lineSeparator());
+        if (progress != null) {
+            builder.append("## Goals").append(System.lineSeparator()).append(System.lineSeparator());
+            builder.append("- Review goal: ").append(progress.reviewedCount()).append("/")
+                .append(progress.reviewGoal()).append(System.lineSeparator());
+            builder.append("- New-word goal: ").append(progress.newWordsCount()).append("/")
+                .append(progress.newWordGoal()).append(System.lineSeparator());
+            builder.append("- Streak: ").append(progress.currentStreak()).append(" days").append(System.lineSeparator());
+            builder.append("- Deck XP: ").append(progress.totalXp()).append(System.lineSeparator()).append(System.lineSeparator());
+        }
+        builder.append("## Recent Review Curve").append(System.lineSeparator()).append(System.lineSeparator());
+        for (DailyReviewStat stat : dailyReviewStats(deckId, 14)) {
+            builder.append("- ").append(stat.date()).append(": ")
+                .append(stat.reviewCount()).append(" reviews, ")
+                .append(percent(stat.accuracy())).append(" accuracy").append(System.lineSeparator());
+        }
+        builder.append(System.lineSeparator());
         builder.append("## Learning Analytics").append(System.lineSeparator()).append(System.lineSeparator());
         builder.append("VocaBoost combines spaced repetition, retrieval practice, adaptive scheduling, ")
             .append("and review-log analytics to prioritize words that are due, weak, or repeatedly vague.")

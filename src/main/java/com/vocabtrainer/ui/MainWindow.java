@@ -82,6 +82,9 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class MainWindow {
+    private record DeckRow(Deck deck, String name, int words, int due, String latestReview) {
+    }
+
     private Deck currentDeck;
     private final DeckService deckService;
     private final WordRepository wordRepository;
@@ -97,6 +100,7 @@ public class MainWindow {
     private final Path databasePath;
 
     private final ObservableList<WordCard> wordItems = FXCollections.observableArrayList();
+    private final ObservableList<DeckRow> deckRows = FXCollections.observableArrayList();
     private final Label totalWordsLabel = new Label("-");
     private final Label dueTodayLabel = new Label("-");
     private final Label reviewedTodayLabel = new Label("-");
@@ -112,11 +116,18 @@ public class MainWindow {
     private final ProgressBar newWordProgress = new ProgressBar(0);
 
     private TableView<WordCard> wordTable;
+    private TableView<DeckRow> deckTable;
     private TextField searchField;
+    private ComboBox<String> wordStatusFilter;
+    private TextField tagFilterField;
+    private TextField posFilterField;
     private Label reviewWordLabel;
     private Label reviewMetaLabel;
     private TextField answerField;
     private TextArea reviewResultArea;
+    private VBox completionCard;
+    private Label completionTitleLabel;
+    private Label completionMetricsLabel;
     private Button submitAnswerButton;
     private HBox ratingButtons;
     private WordCard currentReviewWord;
@@ -158,6 +169,7 @@ public class MainWindow {
 
         TabPane tabs = new TabPane();
         tabs.getTabs().add(createDashboardTab());
+        tabs.getTabs().add(createDecksTab());
         tabs.getTabs().add(createReviewTab());
         tabs.getTabs().add(createAddImportTab());
         tabs.getTabs().add(createStatisticsTab());
@@ -349,6 +361,38 @@ public class MainWindow {
         grid.add(valueLabel, 1, row);
     }
 
+    private Tab createDecksTab() {
+        deckTable = new TableView<>(deckRows);
+        deckTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        TableColumn<DeckRow, String> nameCol = new TableColumn<>("Deck");
+        nameCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().name()));
+        TableColumn<DeckRow, String> wordsCol = new TableColumn<>("Words");
+        wordsCol.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().words())));
+        TableColumn<DeckRow, String> dueCol = new TableColumn<>("Due");
+        dueCol.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().due())));
+        TableColumn<DeckRow, String> latestCol = new TableColumn<>("Latest review");
+        latestCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().latestReview()));
+        deckTable.getColumns().addAll(nameCol, wordsCol, dueCol, latestCol);
+
+        Button switchButton = new Button("Switch selected");
+        switchButton.setOnAction(event -> {
+            DeckRow selected = deckTable.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                currentDeck = selected.deck();
+                refreshDeckSelector();
+                onDeckChanged();
+            }
+        });
+        Button refreshButton = new Button("Refresh");
+        refreshButton.setOnAction(event -> refreshDeckTable());
+        VBox content = new VBox(12, sectionTitle("Deck Manager"), deckTable, new HBox(10, switchButton, refreshButton));
+        content.setPadding(new Insets(24));
+        VBox.setVgrow(deckTable, Priority.ALWAYS);
+        Tab tab = new Tab("Decks", content);
+        tab.setClosable(false);
+        return tab;
+    }
+
     private Tab createReviewTab() {
         reviewModeSelector = new ComboBox<>();
         reviewModeSelector.getItems().setAll(ReviewMode.values());
@@ -377,6 +421,16 @@ public class MainWindow {
         reviewResultArea.setWrapText(true);
         reviewResultArea.setPrefRowCount(8);
 
+        completionTitleLabel = new Label("Review complete");
+        completionTitleLabel.setStyle("-fx-font-size: 22px; -fx-font-weight: 700;");
+        completionMetricsLabel = new Label();
+        completionMetricsLabel.setWrapText(true);
+        completionCard = new VBox(8, completionTitleLabel, completionMetricsLabel);
+        completionCard.setPadding(new Insets(16));
+        completionCard.setStyle("-fx-background-color: #ecfdf5; -fx-border-color: #10b981; -fx-border-radius: 6; -fx-background-radius: 6;");
+        completionCard.setVisible(false);
+        completionCard.setManaged(false);
+
         ratingButtons = new HBox(10,
             ratingButton(ReviewRating.AGAIN),
             ratingButton(ReviewRating.HARD),
@@ -387,7 +441,8 @@ public class MainWindow {
 
         HBox answerBox = new HBox(10, answerField, submitAnswerButton);
         answerBox.setAlignment(Pos.CENTER_LEFT);
-        VBox content = new VBox(16, modeBox, reviewWordLabel, reviewMetaLabel, answerBox, reviewResultArea, ratingButtons);
+        VBox content = new VBox(16, modeBox, reviewWordLabel, reviewMetaLabel, answerBox,
+            completionCard, reviewResultArea, ratingButtons);
         content.setPadding(new Insets(28));
         VBox.setVgrow(reviewResultArea, Priority.ALWAYS);
 
@@ -474,6 +529,7 @@ public class MainWindow {
         TextField lookupField = new TextField();
         lookupField.setPromptText("Enter an English word to look up");
         Button lookupButton = new Button("Lookup online");
+        Button refreshLookupButton = new Button("Refresh cache");
         Label lookupStatus = new Label();
         lookupStatus.setWrapText(true);
         ListView<DictionaryEntry> results = new ListView<>();
@@ -499,36 +555,40 @@ public class MainWindow {
                 tagsField.setText("dictionary");
             }
         });
-        lookupButton.setOnAction(event -> {
-            try {
-                String english = validationService.validateEnglishOnly(lookupField.getText());
-                lookupButton.setDisable(true);
-                runBackground(
-                    () -> dictionaryService.lookup(english),
-                    result -> {
-                        lookupStatus.setText(result.success()
-                            ? result.message()
-                            : "词条未找到。" + System.lineSeparator() + result.message());
-                        results.getItems().setAll(result.entries());
-                        if (!result.entries().isEmpty()) {
-                            results.getSelectionModel().selectFirst();
-                        }
-                        lookupButton.setDisable(false);
-                    },
-                    error -> {
-                        lookupStatus.setText("查词失败：" + rootMessage(error));
-                        lookupButton.setDisable(false);
-                    },
-                    lookupStatus,
-                    "Looking up..."
-                );
-            } catch (IllegalArgumentException e) {
-                lookupStatus.setText(e.getMessage());
-            }
-        });
-        HBox controls = new HBox(10, lookupField, lookupButton);
+        lookupButton.setOnAction(event -> runDictionaryLookup(lookupField, lookupButton, lookupStatus, results, false));
+        refreshLookupButton.setOnAction(event -> runDictionaryLookup(lookupField, refreshLookupButton, lookupStatus, results, true));
+        HBox controls = new HBox(10, lookupField, lookupButton, refreshLookupButton);
         HBox.setHgrow(lookupField, Priority.ALWAYS);
         return new VBox(10, sectionTitle("Dictionary Lookup"), controls, results, lookupStatus);
+    }
+
+    private void runDictionaryLookup(TextField lookupField, Button actionButton, Label lookupStatus,
+                                     ListView<DictionaryEntry> results, boolean refresh) {
+        try {
+            String english = validationService.validateEnglishOnly(lookupField.getText());
+            actionButton.setDisable(true);
+            runBackground(
+                () -> refresh ? dictionaryService.refresh(english) : dictionaryService.lookup(english),
+                result -> {
+                    lookupStatus.setText(result.success()
+                        ? result.message()
+                        : "词条未找到。" + System.lineSeparator() + result.message());
+                    results.getItems().setAll(result.entries());
+                    if (!result.entries().isEmpty()) {
+                        results.getSelectionModel().selectFirst();
+                    }
+                    actionButton.setDisable(false);
+                },
+                error -> {
+                    lookupStatus.setText("查词失败：" + rootMessage(error));
+                    actionButton.setDisable(false);
+                },
+                lookupStatus,
+                refresh ? "Refreshing dictionary cache..." : "Looking up..."
+            );
+        } catch (IllegalArgumentException e) {
+            lookupStatus.setText(e.getMessage());
+        }
     }
 
     private VBox createImportBox() {
@@ -549,12 +609,14 @@ public class MainWindow {
         });
         Button importLegacyButton = new Button("Import legacy txt");
         Button importCsvButton = new Button("Import GRE CSV");
+        Button previewCsvButton = new Button("Preview GRE CSV");
         Button importStarterButton = new Button("Import GRE starter deck");
         Label importStatus = new Label();
         importStatus.setWrapText(true);
 
         importLegacyButton.setOnAction(event -> importFromPath(importPathField, importStatus, true));
         importCsvButton.setOnAction(event -> importFromPath(importPathField, importStatus, false));
+        previewCsvButton.setOnAction(event -> previewGreCsv(importPathField, importStatus));
         importStarterButton.setOnAction(event -> {
             long deckId = currentDeck.getId();
             importStarterButton.setDisable(true);
@@ -573,7 +635,8 @@ public class MainWindow {
             );
         });
 
-        HBox controls = new HBox(10, importPathField, chooseButton, importLegacyButton, importCsvButton, importStarterButton);
+        HBox controls = new HBox(10, importPathField, chooseButton, importLegacyButton, previewCsvButton,
+            importCsvButton, importStarterButton);
         controls.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(importPathField, Priority.ALWAYS);
         return new VBox(10, sectionTitle("Import"), controls, importStatus);
@@ -642,9 +705,21 @@ public class MainWindow {
     private Tab createWordListTab() {
         searchField = new TextField();
         searchField.setPromptText("Search English, Chinese or tags");
+        wordStatusFilter = new ComboBox<>();
+        wordStatusFilter.getItems().setAll("All", "Due", "Weak", "Mastered", "Unverified");
+        wordStatusFilter.getSelectionModel().select("All");
+        tagFilterField = new TextField();
+        tagFilterField.setPromptText("Tag");
+        tagFilterField.setPrefWidth(120);
+        posFilterField = new TextField();
+        posFilterField.setPromptText("POS");
+        posFilterField.setPrefWidth(120);
         PauseTransition searchDebounce = new PauseTransition(Duration.millis(250));
         searchDebounce.setOnFinished(event -> refreshWordTable());
         searchField.textProperty().addListener((observable, oldValue, newValue) -> searchDebounce.playFromStart());
+        tagFilterField.textProperty().addListener((observable, oldValue, newValue) -> searchDebounce.playFromStart());
+        posFilterField.textProperty().addListener((observable, oldValue, newValue) -> searchDebounce.playFromStart());
+        wordStatusFilter.valueProperty().addListener((observable, oldValue, newValue) -> refreshWordTable());
         Button refreshButton = new Button("Refresh");
         refreshButton.setOnAction(event -> refreshWordTable());
         Button editButton = new Button("Edit selected");
@@ -652,7 +727,8 @@ public class MainWindow {
         Button deleteButton = new Button("Delete selected");
         deleteButton.setOnAction(event -> deleteSelectedWord());
 
-        HBox controls = new HBox(10, searchField, refreshButton, editButton, deleteButton);
+        HBox controls = new HBox(10, searchField, wordStatusFilter, tagFilterField, posFilterField,
+            refreshButton, editButton, deleteButton);
         HBox.setHgrow(searchField, Priority.ALWAYS);
 
         wordTable = new TableView<>(wordItems);
@@ -718,12 +794,22 @@ public class MainWindow {
                     validated.note(),
                     appendTag(validated.tags(), "UNVERIFIED")
                 );
+            } else {
+                wordToSave = new ValidatedWord(
+                    validated.english(),
+                    validated.chinese(),
+                    validated.phonetic(),
+                    validated.partOfSpeech(),
+                    validated.exampleSentence(),
+                    validated.note(),
+                    appendTag(appendTag(validated.tags(), "VERIFIED"), verification.source())
+                );
             }
             WordCard word = WordCard.createNew(currentDeck.getId(), wordToSave.english(), wordToSave.chinese());
             applyValidatedFields(word, wordToSave);
             wordRepository.save(word);
-            GoalUpdate update = goalService.recordNewWords(1);
-            List<Achievement> unlocked = achievementService.evaluate(update.progress(), false, update.dailyGoalCompleted());
+            GoalUpdate update = goalService.recordNewWords(currentDeck.getId(), 1);
+            List<Achievement> unlocked = achievementService.evaluate(currentDeck.getId(), update.progress(), false, update.dailyGoalCompleted());
             englishField.clear();
             chineseField.clear();
             phoneticField.clear();
@@ -764,10 +850,32 @@ public class MainWindow {
         }
     }
 
+    private void previewGreCsv(TextField importPathField, Label importStatus) {
+        if (importPathField.getText().isBlank()) {
+            importStatus.setText("Please choose a GRE CSV file first.");
+            return;
+        }
+        try {
+            Path path = Path.of(importPathField.getText().trim());
+            long deckId = currentDeck.getId();
+            runBackground(
+                () -> importExportService.previewGreCsv(path, deckId),
+                preview -> importStatus.setText("Deck: " + currentDeck.getName()
+                    + System.lineSeparator() + preview.toSummary()),
+                error -> showError("Preview failed", rootMessage(error)),
+                importStatus,
+                "Analyzing CSV..."
+            );
+        } catch (Exception e) {
+            showError("Preview failed", e.getMessage());
+        }
+    }
+
     private void afterImport(ImportResult result, Label importStatus) {
-        GoalUpdate update = goalService.recordNewWords(result.importedCount());
-        List<Achievement> unlocked = achievementService.evaluate(update.progress(), false, update.dailyGoalCompleted());
-        importStatus.setText(result.toSummary() + achievementText(unlocked));
+        GoalUpdate update = goalService.recordNewWords(currentDeck.getId(), result.importedCount());
+        List<Achievement> unlocked = achievementService.evaluate(currentDeck.getId(), update.progress(), false, update.dailyGoalCompleted());
+        importStatus.setText("Deck: " + currentDeck.getName() + System.lineSeparator()
+            + result.toSummary() + achievementText(unlocked));
         refreshAll();
         loadNextReviewWord();
     }
@@ -804,6 +912,10 @@ public class MainWindow {
         currentReviewWord = next.orElse(null);
         answerField.clear();
         reviewResultArea.clear();
+        if (completionCard != null) {
+            completionCard.setVisible(false);
+            completionCard.setManaged(false);
+        }
         ratingButtons.setDisable(true);
         submitAnswerButton.setDisable(currentReviewWord == null);
         answerField.setDisable(currentReviewWord == null);
@@ -826,16 +938,19 @@ public class MainWindow {
 
     private void showReviewCompletion() {
         ReviewSessionSummary session = reviewService.sessionSummary();
-        DailyGoalProgress progress = goalService.getTodayProgress();
+        DailyGoalProgress progress = goalService.getTodayProgress(currentDeck.getId());
         reviewWordLabel.setText("Review complete");
         reviewMetaLabel.setText("No due words right now.");
-        reviewResultArea.setText("Great session."
-            + System.lineSeparator() + "Session completed: " + session.reviewedCount()
-            + System.lineSeparator() + "Session accuracy: " + formatPercent(session.accuracy())
-            + System.lineSeparator() + "XP earned this session: " + session.xpEarned()
+        completionTitleLabel.setText("Session Complete");
+        completionMetricsLabel.setText("Completed: " + session.reviewedCount()
+            + " | Accuracy: " + formatPercent(session.accuracy())
+            + " | XP: " + session.xpEarned()
             + System.lineSeparator() + "Today review goal: " + progress.reviewedCount() + "/" + progress.reviewGoal()
-            + System.lineSeparator() + "Today new-word goal: " + progress.newWordsCount() + "/" + progress.newWordGoal()
-            + System.lineSeparator() + "Unlocked achievements: " + achievementNames(session.unlockedAchievements()));
+            + " | New words: " + progress.newWordsCount() + "/" + progress.newWordGoal()
+            + System.lineSeparator() + "Unlocked: " + achievementNames(session.unlockedAchievements()));
+        completionCard.setVisible(true);
+        completionCard.setManaged(true);
+        reviewResultArea.setText("Use Weak Words mode to keep working on your most fragile cards, or switch deck from the header.");
     }
 
     private ReviewMode currentReviewMode() {
@@ -861,6 +976,7 @@ public class MainWindow {
 
     private void refreshAll() {
         refreshDashboard();
+        refreshDeckTable();
         refreshWordTable();
         if (statisticsSelected) {
             refreshStatistics();
@@ -869,8 +985,8 @@ public class MainWindow {
 
     private void refreshDashboard() {
         DashboardStats stats = statsService.dashboardStats(currentDeck.getId());
-        DailyGoalProgress progress = goalService.getTodayProgress();
-        List<Achievement> achievements = achievementService.getUnlockedAchievements();
+        DailyGoalProgress progress = goalService.getTodayProgress(currentDeck.getId());
+        List<Achievement> achievements = achievementService.getUnlockedAchievements(currentDeck.getId());
         totalWordsLabel.setText(String.valueOf(stats.totalWords()));
         dueTodayLabel.setText(String.valueOf(stats.dueToday()));
         reviewedTodayLabel.setText(progress.reviewedCount() + " / " + progress.reviewGoal());
@@ -885,16 +1001,75 @@ public class MainWindow {
         databasePathLabel.setText("SQLite: " + databasePath.toAbsolutePath());
     }
 
+    private void refreshDeckTable() {
+        if (deckTable == null) {
+            return;
+        }
+        try {
+            LocalDateTime now = LocalDateTime.now();
+            List<DeckRow> rows = deckService.activeDecks().stream()
+                .map(deck -> {
+                    try {
+                        LocalDateTime latest = statsService.latestReviewAt(deck.getId());
+                        return new DeckRow(
+                            deck,
+                            deck.getName(),
+                            wordRepository.countAll(deck.getId()),
+                            wordRepository.countDue(deck.getId(), now),
+                            latest == null ? "-" : DateTimeUtil.toDisplay(latest)
+                        );
+                    } catch (SQLException e) {
+                        throw new IllegalStateException(e);
+                    }
+                })
+                .toList();
+            deckRows.setAll(rows);
+        } catch (RuntimeException e) {
+            showError("Refresh decks failed", rootMessage(e));
+        }
+    }
+
     private void refreshWordTable() {
         if (wordTable == null) {
             return;
         }
         try {
             List<WordCard> words = wordRepository.search(currentDeck.getId(), searchField == null ? "" : searchField.getText());
-            wordItems.setAll(words);
+            wordItems.setAll(words.stream().filter(this::matchesWordFilters).toList());
         } catch (SQLException e) {
             showError("Refresh failed", e.getMessage());
         }
+    }
+
+    private boolean matchesWordFilters(WordCard word) {
+        String status = wordStatusFilter == null ? "All" : wordStatusFilter.getValue();
+        if ("Due".equals(status) && !word.isDue(LocalDateTime.now())) {
+            return false;
+        }
+        if ("Weak".equals(status) && !isWeak(word)) {
+            return false;
+        }
+        if ("Mastered".equals(status) && !word.isMastered()) {
+            return false;
+        }
+        if ("Unverified".equals(status) && !containsIgnoreCase(word.getTags(), "UNVERIFIED")) {
+            return false;
+        }
+        String tag = tagFilterField == null ? "" : tagFilterField.getText();
+        if (tag != null && !tag.isBlank() && !containsIgnoreCase(word.getTags(), tag.trim())) {
+            return false;
+        }
+        String pos = posFilterField == null ? "" : posFilterField.getText();
+        return pos == null || pos.isBlank() || containsIgnoreCase(word.getPartOfSpeech(), pos.trim());
+    }
+
+    private boolean isWeak(WordCard word) {
+        return word.getLapses() > 0 || word.getConsecutiveCorrect() < 3 || word.getIntervalDays() <= 3;
+    }
+
+    private boolean containsIgnoreCase(String value, String needle) {
+        return value != null && needle != null
+            && value.toLowerCase(java.util.Locale.ROOT).contains(needle.toLowerCase(java.util.Locale.ROOT));
     }
 
     private void refreshStatistics() {
@@ -939,7 +1114,12 @@ public class MainWindow {
             return;
         }
         try {
-            Path exported = statsService.exportMarkdownReport(currentDeck.getId(), file.toPath());
+            Path exported = statsService.exportMarkdownReport(
+                currentDeck.getId(),
+                currentDeck.getName(),
+                goalService.getTodayProgress(currentDeck.getId()),
+                file.toPath()
+            );
             showInfo("Report exported: " + exported.toAbsolutePath());
         } catch (Exception e) {
             showError("Export failed", e.getMessage());

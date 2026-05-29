@@ -32,6 +32,7 @@ public class ReviewService {
     private final Clock clock;
     private final Map<Long, ReviewAnswer> pendingAnswers = new HashMap<>();
     private final List<Achievement> sessionAchievements = new ArrayList<>();
+    private long activeSessionDeckId;
     private int sessionReviewed;
     private int sessionCorrect;
     private int sessionXp;
@@ -71,10 +72,11 @@ public class ReviewService {
 
     public Optional<WordCard> nextWord(long deckId, ReviewMode mode) {
         try {
+            activeSessionDeckId = deckId;
             LocalDateTime now = LocalDateTime.now(clock);
             List<WordCard> candidates = mode == ReviewMode.WEAK_WORDS
-                ? wordRepository.findWeak(deckId, 50)
-                : wordRepository.findDue(deckId, now, 50);
+                ? wordRepository.findWeak(deckId, 250)
+                : wordRepository.findDue(deckId, now, 250);
             return scheduler.selectNext(candidates, now);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read review words", e);
@@ -132,17 +134,19 @@ public class ReviewService {
                 elapsed
             ));
 
+            long deckId = word.getDeckId();
+            activeSessionDeckId = deckId;
             GoalUpdate goalUpdate = goalService == null
                 ? null
-                : goalService.recordReview(rating, answer.similarity());
+                : goalService.recordReview(deckId, rating, answer.similarity());
             DailyGoalProgress progress = goalUpdate == null ? null : goalUpdate.progress();
             List<Achievement> unlocked = achievementService == null || progress == null
                 ? List.of()
-                : achievementService.evaluate(progress, overdueRescued, goalUpdate.dailyGoalCompleted());
+                : achievementService.evaluate(deckId, progress, overdueRescued, goalUpdate.dailyGoalCompleted());
             int achievementXp = unlocked.stream().mapToInt(Achievement::xpReward).sum();
             int earnedXp = (goalUpdate == null ? 0 : goalUpdate.xpEarned()) + achievementXp;
             if (goalService != null) {
-                progress = goalService.getTodayProgress();
+                progress = goalService.getTodayProgress(deckId);
             }
 
             sessionReviewed++;
@@ -160,7 +164,7 @@ public class ReviewService {
     public ReviewSessionSummary sessionSummary() {
         int sessionGoal = goalService == null
             ? GoalService.DEFAULT_SESSION_GOAL
-            : goalService.getTodayProgress().sessionGoal();
+            : goalService.getTodayProgress(activeSessionDeckId).sessionGoal();
         return new ReviewSessionSummary(
             sessionReviewed,
             sessionCorrect,

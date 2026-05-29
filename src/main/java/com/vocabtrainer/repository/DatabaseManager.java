@@ -7,6 +7,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
@@ -103,7 +105,8 @@ public class DatabaseManager {
                 """);
             statement.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS daily_goals (
-                    goal_date TEXT PRIMARY KEY,
+                    deck_id INTEGER NOT NULL DEFAULT 0,
+                    goal_date TEXT NOT NULL,
                     review_goal INTEGER NOT NULL,
                     new_word_goal INTEGER NOT NULL,
                     session_goal INTEGER NOT NULL,
@@ -111,16 +114,19 @@ public class DatabaseManager {
                     correct_count INTEGER NOT NULL DEFAULT 0,
                     new_words_count INTEGER NOT NULL DEFAULT 0,
                     xp_earned INTEGER NOT NULL DEFAULT 0,
-                    completed INTEGER NOT NULL DEFAULT 0
+                    completed INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(deck_id, goal_date)
                 )
                 """);
             statement.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS achievements (
-                    code TEXT PRIMARY KEY,
+                    deck_id INTEGER NOT NULL DEFAULT 0,
+                    code TEXT NOT NULL,
                     name TEXT NOT NULL,
                     description TEXT NOT NULL,
                     unlocked_at TEXT NOT NULL,
-                    xp_reward INTEGER NOT NULL
+                    xp_reward INTEGER NOT NULL,
+                    PRIMARY KEY(deck_id, code)
                 )
                 """);
             statement.executeUpdate("""
@@ -132,6 +138,10 @@ public class DatabaseManager {
                 )
                 """);
         }
+        try (Connection connection = getConnection()) {
+            migrateDailyGoalsToDeckScope(connection);
+            migrateAchievementsToDeckScope(connection);
+        }
     }
 
     private void addColumnIfMissing(Statement statement, String table, String column, String definition) throws SQLException {
@@ -142,6 +152,95 @@ public class DatabaseManager {
             if (!message.contains("duplicate column name")) {
                 throw e;
             }
+        }
+    }
+
+    private void migrateDailyGoalsToDeckScope(Connection connection) throws SQLException {
+        if (hasColumn(connection, "daily_goals", "deck_id")) {
+            return;
+        }
+        long deckId = firstDeckId(connection);
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("ALTER TABLE daily_goals RENAME TO daily_goals_old");
+            statement.executeUpdate("""
+                CREATE TABLE daily_goals (
+                    deck_id INTEGER NOT NULL DEFAULT 0,
+                    goal_date TEXT NOT NULL,
+                    review_goal INTEGER NOT NULL,
+                    new_word_goal INTEGER NOT NULL,
+                    session_goal INTEGER NOT NULL,
+                    reviewed_count INTEGER NOT NULL DEFAULT 0,
+                    correct_count INTEGER NOT NULL DEFAULT 0,
+                    new_words_count INTEGER NOT NULL DEFAULT 0,
+                    xp_earned INTEGER NOT NULL DEFAULT 0,
+                    completed INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(deck_id, goal_date)
+                )
+                """);
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+            INSERT OR IGNORE INTO daily_goals(deck_id, goal_date, review_goal, new_word_goal, session_goal,
+                reviewed_count, correct_count, new_words_count, xp_earned, completed)
+            SELECT ?, goal_date, review_goal, new_word_goal, session_goal,
+                reviewed_count, correct_count, new_words_count, xp_earned, completed
+            FROM daily_goals_old
+            """)) {
+            statement.setLong(1, deckId);
+            statement.executeUpdate();
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("DROP TABLE daily_goals_old");
+        }
+    }
+
+    private void migrateAchievementsToDeckScope(Connection connection) throws SQLException {
+        if (hasColumn(connection, "achievements", "deck_id")) {
+            return;
+        }
+        long deckId = firstDeckId(connection);
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("ALTER TABLE achievements RENAME TO achievements_old");
+            statement.executeUpdate("""
+                CREATE TABLE achievements (
+                    deck_id INTEGER NOT NULL DEFAULT 0,
+                    code TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    unlocked_at TEXT NOT NULL,
+                    xp_reward INTEGER NOT NULL,
+                    PRIMARY KEY(deck_id, code)
+                )
+                """);
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+            INSERT OR IGNORE INTO achievements(deck_id, code, name, description, unlocked_at, xp_reward)
+            SELECT ?, code, name, description, unlocked_at, xp_reward
+            FROM achievements_old
+            """)) {
+            statement.setLong(1, deckId);
+            statement.executeUpdate();
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("DROP TABLE achievements_old");
+        }
+    }
+
+    private boolean hasColumn(Connection connection, String table, String column) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("PRAGMA table_info(" + table + ")");
+             ResultSet rs = statement.executeQuery()) {
+            while (rs.next()) {
+                if (column.equalsIgnoreCase(rs.getString("name"))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private long firstDeckId(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("SELECT id FROM decks ORDER BY id LIMIT 1")) {
+            return rs.next() ? rs.getLong(1) : 0L;
         }
     }
 

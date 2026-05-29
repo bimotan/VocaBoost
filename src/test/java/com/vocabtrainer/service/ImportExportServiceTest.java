@@ -61,9 +61,13 @@ class ImportExportServiceTest {
         ), StandardCharsets.UTF_8);
 
         ImportResult result = service.importGreCsv(csvFile, deck.getId());
+        ImportPreview preview = service.previewGreCsv(csvFile, deck.getId());
 
         assertEquals(2, result.importedCount());
         assertEquals(2, result.skippedCount());
+        assertEquals(4, preview.totalRows());
+        assertEquals(0, preview.importableCount());
+        assertTrue(preview.duplicateCount() >= 2);
         assertTrue(wordRepository.findByEnglish(deck.getId(), "ABATE").isPresent());
         assertTrue(wordRepository.findByEnglish(deck.getId(), "lucid").isPresent());
     }
@@ -78,7 +82,7 @@ class ImportExportServiceTest {
 
         ImportResult result = service.importBundledGreStarter(deck.getId());
 
-        assertTrue(result.importedCount() >= 10);
+        assertTrue(result.importedCount() >= 200);
         assertTrue(result.importedCount() <= 2000);
         assertTrue(wordRepository.findByEnglish(deck.getId(), "abate").isPresent());
     }

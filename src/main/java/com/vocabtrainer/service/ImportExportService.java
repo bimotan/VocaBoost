@@ -15,7 +15,10 @@ import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 public class ImportExportService {
     private static final String GRE_STARTER_RESOURCE = "/data/gre_starter_sample.csv";
@@ -44,6 +47,21 @@ public class ImportExportService {
     public ImportResult importGreCsv(Path path, long deckId) {
         try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             return importGreCsv(reader, deckId);
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot read GRE CSV file: " + path, e);
+        }
+    }
+
+    public ImportPreview previewGreCsv(Path path, long deckId) {
+        try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            GreCsvAnalysis analysis = analyzeGreCsv(reader, deckId, false);
+            return new ImportPreview(
+                analysis.totalRows,
+                analysis.words.size(),
+                analysis.duplicates,
+                analysis.skipped - analysis.duplicates,
+                analysis.messages.stream().limit(10).toList()
+            );
         } catch (IOException e) {
             throw new IllegalStateException("Cannot read GRE CSV file: " + path, e);
         }
@@ -90,9 +108,23 @@ public class ImportExportService {
     }
 
     private ImportResult importGreCsv(BufferedReader reader, long deckId) throws IOException {
+        GreCsvAnalysis analysis = analyzeGreCsv(reader, deckId, true);
+        try {
+            int imported = wordRepository.insertAll(analysis.words);
+            return new ImportResult(imported, analysis.skipped, analysis.messages);
+        } catch (SQLException e) {
+            throw new IllegalStateException("GRE CSV transaction failed: " + e.getMessage(), e);
+        }
+    }
+
+    private GreCsvAnalysis analyzeGreCsv(BufferedReader reader, long deckId, boolean includeCards) throws IOException {
         int imported = 0;
         int skipped = 0;
+        int duplicates = 0;
+        int totalRows = 0;
         List<String> messages = new ArrayList<>();
+        List<WordCard> pendingWords = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
         String line;
         int lineNumber = 0;
         while ((line = reader.readLine()) != null) {
@@ -104,6 +136,7 @@ public class ImportExportService {
             if (lineNumber == 1 && !fields.isEmpty() && "english".equalsIgnoreCase(fields.get(0).trim())) {
                 continue;
             }
+            totalRows++;
             try {
                 if (imported >= MAX_GRE_IMPORT_WORDS) {
                     messages.add("GRE import stopped at " + MAX_GRE_IMPORT_WORDS + " imported words.");
@@ -116,8 +149,10 @@ public class ImportExportService {
                 String example = fields.size() > 3 ? fields.get(3) : "";
                 String tags = fields.size() > 4 ? fields.get(4) : "";
                 ValidatedWord validated = validationService.validate(fields.get(0), fields.get(1), "", pos, example, "", tags);
-                if (wordRepository.findByEnglish(deckId, validated.english()).isPresent()) {
+                String key = validated.english().toLowerCase(Locale.ROOT);
+                if (!seen.add(key) || wordRepository.findByEnglish(deckId, validated.english()).isPresent()) {
                     skipped++;
+                    duplicates++;
                     messages.add("Line " + lineNumber + " skipped: duplicate word " + validated.english());
                     continue;
                 }
@@ -125,14 +160,27 @@ public class ImportExportService {
                 word.setPartOfSpeech(validated.partOfSpeech());
                 word.setExampleSentence(validated.exampleSentence());
                 word.setTags(validated.tags());
-                wordRepository.insert(word);
+                if (includeCards) {
+                    pendingWords.add(word);
+                } else {
+                    pendingWords.add(word);
+                }
                 imported++;
             } catch (IllegalArgumentException | SQLException e) {
                 skipped++;
                 messages.add("Line " + lineNumber + " skipped: " + e.getMessage());
             }
         }
-        return new ImportResult(imported, skipped, messages);
+        return new GreCsvAnalysis(totalRows, skipped, duplicates, messages, pendingWords);
+    }
+
+    private record GreCsvAnalysis(
+        int totalRows,
+        int skipped,
+        int duplicates,
+        List<String> messages,
+        List<WordCard> words
+    ) {
     }
 
     private WordCard parseLegacyLine(String line, long deckId) {

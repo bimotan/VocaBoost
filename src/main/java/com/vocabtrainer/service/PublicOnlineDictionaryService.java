@@ -1,5 +1,7 @@
 package com.vocabtrainer.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.domain.WordVerificationResult;
@@ -14,16 +16,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class PublicOnlineDictionaryService implements DictionaryService {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
-    private static final Pattern DEFINITION_PATTERN = Pattern.compile("\"definition\"\\s*:\\s*\"(.*?)\"", Pattern.DOTALL);
-    private static final Pattern PHONETIC_PATTERN = Pattern.compile("\"phonetic\"\\s*:\\s*\"(.*?)\"", Pattern.DOTALL);
-    private static final Pattern PART_OF_SPEECH_PATTERN = Pattern.compile("\"partOfSpeech\"\\s*:\\s*\"(.*?)\"", Pattern.DOTALL);
 
     private final HttpClient httpClient;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public PublicOnlineDictionaryService() {
         this(HttpClient.newBuilder().connectTimeout(TIMEOUT).build());
@@ -69,24 +67,12 @@ public class PublicOnlineDictionaryService implements DictionaryService {
         URI uri = URI.create("https://api.dictionaryapi.dev/api/v2/entries/en/" + encoded);
         try {
             String json = get(uri);
-            List<String> definitions = values(DEFINITION_PATTERN, json);
-            if (definitions.isEmpty()) {
+            JsonNode root = objectMapper.readTree(json);
+            List<DictionaryEntry> entries = parseDictionaryApi(english, root);
+            if (entries.isEmpty()) {
                 return DictionaryLookupResult.failure("dictionaryapi.dev did not return definitions.");
             }
-            String phonetic = firstValue(PHONETIC_PATTERN, json);
-            String pos = firstValue(PART_OF_SPEECH_PATTERN, json);
-            List<DictionaryEntry> entries = definitions.stream()
-                .limit(5)
-                .map(definition -> new DictionaryEntry(
-                    english,
-                    "请填写中文释义（online: " + definition + "）",
-                    pos,
-                    phonetic,
-                    "",
-                    "dictionaryapi.dev"
-                ))
-                .toList();
-            return DictionaryLookupResult.success("Loaded from dictionaryapi.dev. Please edit the Chinese meaning.", entries);
+            return DictionaryLookupResult.success("Loaded from dictionaryapi.dev. 该来源主要返回英文释义，请确认或填写中文释义。", entries);
         } catch (Exception e) {
             return DictionaryLookupResult.failure("dictionaryapi.dev failed: " + e.getMessage());
         }
@@ -97,22 +83,12 @@ public class PublicOnlineDictionaryService implements DictionaryService {
         URI uri = URI.create("https://en.wiktionary.org/api/rest_v1/page/definition/" + encoded);
         try {
             String json = get(uri);
-            List<String> definitions = values(DEFINITION_PATTERN, json);
-            if (definitions.isEmpty()) {
+            JsonNode root = objectMapper.readTree(json);
+            List<DictionaryEntry> entries = parseWiktionary(english, root);
+            if (entries.isEmpty()) {
                 return DictionaryLookupResult.failure("Wiktionary did not return definitions.");
             }
-            List<DictionaryEntry> entries = new ArrayList<>();
-            for (String definition : definitions.stream().limit(5).toList()) {
-                entries.add(new DictionaryEntry(
-                    english,
-                    "请填写中文释义（online: " + definition + "）",
-                    "",
-                    "",
-                    "",
-                    "Wiktionary"
-                ));
-            }
-            return DictionaryLookupResult.success("Loaded from Wiktionary. Please edit the Chinese meaning.", entries);
+            return DictionaryLookupResult.success("Loaded from Wiktionary. 该来源主要返回英文释义，请确认或填写中文释义。", entries);
         } catch (Exception e) {
             return DictionaryLookupResult.failure("Wiktionary failed: " + e.getMessage());
         }
@@ -131,39 +107,77 @@ public class PublicOnlineDictionaryService implements DictionaryService {
         return response.body();
     }
 
-    private List<String> values(Pattern pattern, String json) {
-        List<String> result = new ArrayList<>();
-        Matcher matcher = pattern.matcher(json == null ? "" : json);
-        while (matcher.find()) {
-            result.add(unescapeJson(matcher.group(1)).trim());
+    private List<DictionaryEntry> parseDictionaryApi(String english, JsonNode root) {
+        List<DictionaryEntry> entries = new ArrayList<>();
+        if (!root.isArray()) {
+            return entries;
         }
-        return result;
-    }
-
-    private String firstValue(Pattern pattern, String json) {
-        Matcher matcher = pattern.matcher(json == null ? "" : json);
-        return matcher.find() ? unescapeJson(matcher.group(1)).trim() : "";
-    }
-
-    private String unescapeJson(String value) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < value.length(); i++) {
-            char current = value.charAt(i);
-            if (current == '\\' && i + 1 < value.length()) {
-                char next = value.charAt(++i);
-                if (next == 'u' && i + 4 < value.length()) {
-                    String hex = value.substring(i + 1, i + 5);
-                    builder.append((char) Integer.parseInt(hex, 16));
-                    i += 4;
-                } else if (next == 'n') {
-                    builder.append(' ');
-                } else {
-                    builder.append(next);
+        for (JsonNode wordNode : root) {
+            String phonetic = text(wordNode, "phonetic");
+            for (JsonNode meaning : wordNode.path("meanings")) {
+                String pos = text(meaning, "partOfSpeech");
+                for (JsonNode definitionNode : meaning.path("definitions")) {
+                    String definition = text(definitionNode, "definition");
+                    if (!definition.isBlank()) {
+                        entries.add(new DictionaryEntry(
+                            english,
+                            "请填写中文释义（English definition: " + definition + "）",
+                            pos,
+                            phonetic,
+                            text(definitionNode, "example"),
+                            "dictionaryapi.dev"
+                        ));
+                    }
+                    if (entries.size() >= 5) {
+                        return entries;
+                    }
                 }
-            } else {
-                builder.append(current);
             }
         }
-        return builder.toString().replaceAll("\\s+", " ");
+        return entries;
+    }
+
+    private List<DictionaryEntry> parseWiktionary(String english, JsonNode root) {
+        List<DictionaryEntry> entries = new ArrayList<>();
+        collectWiktionaryEntries(english, root, "", entries);
+        return entries.size() > 5 ? entries.subList(0, 5) : entries;
+    }
+
+    private void collectWiktionaryEntries(String english, JsonNode node, String pos, List<DictionaryEntry> entries) {
+        if (node == null || entries.size() >= 5) {
+            return;
+        }
+        String nextPos = text(node, "partOfSpeech");
+        if (nextPos.isBlank()) {
+            nextPos = pos;
+        }
+        String definition = text(node, "definition");
+        if (!definition.isBlank()) {
+            entries.add(new DictionaryEntry(
+                english,
+                "请填写中文释义（English definition: " + definition + "）",
+                nextPos,
+                "",
+                "",
+                "Wiktionary"
+            ));
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                collectWiktionaryEntries(english, child, nextPos, entries);
+            }
+        } else if (node.isObject()) {
+            for (JsonNode child : node) {
+                collectWiktionaryEntries(english, child, nextPos, entries);
+            }
+        }
+    }
+
+    private String text(JsonNode node, String field) {
+        if (node == null || !node.has(field) || node.get(field).isNull()) {
+            return "";
+        }
+        return node.get(field).asText("").replaceAll("\\s+", " ").trim();
     }
 }

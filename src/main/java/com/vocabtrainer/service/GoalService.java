@@ -27,12 +27,21 @@ public class GoalService {
     }
 
     public DailyGoalProgress getTodayProgress() {
-        return progressFor(LocalDate.now(clock));
+        return getTodayProgress(0L);
+    }
+
+    public DailyGoalProgress getTodayProgress(long deckId) {
+        return progressFor(deckId, LocalDate.now(clock));
     }
 
     public DailyGoalProgress progressFor(LocalDate date) {
+        return progressFor(0L, date);
+    }
+
+    public DailyGoalProgress progressFor(long deckId, LocalDate date) {
         try {
             GoalRepository.GoalRow row = goalRepository.ensure(
+                deckId,
                 date,
                 DEFAULT_REVIEW_GOAL,
                 DEFAULT_NEW_WORD_GOAL,
@@ -45,9 +54,14 @@ public class GoalService {
     }
 
     public GoalUpdate recordReview(ReviewRating rating, double similarity) {
+        return recordReview(0L, rating, similarity);
+    }
+
+    public GoalUpdate recordReview(long deckId, ReviewRating rating, double similarity) {
         LocalDate today = LocalDate.now(clock);
         try {
             GoalRepository.GoalRow before = goalRepository.ensure(
+                deckId,
                 today,
                 DEFAULT_REVIEW_GOAL,
                 DEFAULT_NEW_WORD_GOAL,
@@ -55,11 +69,11 @@ public class GoalService {
             );
             boolean correct = rating != ReviewRating.AGAIN && similarity >= 0.5;
             int xp = reviewXp(rating, similarity);
-            GoalRepository.GoalRow after = goalRepository.addProgress(today, 1, correct ? 1 : 0, 0, xp);
+            GoalRepository.GoalRow after = goalRepository.addProgress(deckId, today, 1, correct ? 1 : 0, 0, xp);
             boolean completedNow = !before.completed() && isComplete(after);
             if (completedNow) {
-                goalRepository.markCompleted(today);
-                after = goalRepository.find(today).orElse(after);
+                goalRepository.markCompleted(deckId, today);
+                after = goalRepository.find(deckId, today).orElse(after);
             }
             return new GoalUpdate(toProgress(after), xp, completedNow);
         } catch (SQLException e) {
@@ -68,23 +82,28 @@ public class GoalService {
     }
 
     public GoalUpdate recordNewWords(int count) {
+        return recordNewWords(0L, count);
+    }
+
+    public GoalUpdate recordNewWords(long deckId, int count) {
         if (count <= 0) {
-            return new GoalUpdate(getTodayProgress(), 0, false);
+            return new GoalUpdate(getTodayProgress(deckId), 0, false);
         }
         LocalDate today = LocalDate.now(clock);
         try {
             GoalRepository.GoalRow before = goalRepository.ensure(
+                deckId,
                 today,
                 DEFAULT_REVIEW_GOAL,
                 DEFAULT_NEW_WORD_GOAL,
                 DEFAULT_SESSION_GOAL
             );
             int xp = count * 2;
-            GoalRepository.GoalRow after = goalRepository.addProgress(today, 0, 0, count, xp);
+            GoalRepository.GoalRow after = goalRepository.addProgress(deckId, today, 0, 0, count, xp);
             boolean completedNow = !before.completed() && isComplete(after);
             if (completedNow) {
-                goalRepository.markCompleted(today);
-                after = goalRepository.find(today).orElse(after);
+                goalRepository.markCompleted(deckId, today);
+                after = goalRepository.find(deckId, today).orElse(after);
             }
             return new GoalUpdate(toProgress(after), xp, completedNow);
         } catch (SQLException e) {
@@ -93,13 +112,17 @@ public class GoalService {
     }
 
     public void awardXp(int xp) {
+        awardXp(0L, xp);
+    }
+
+    public void awardXp(long deckId, int xp) {
         if (xp <= 0) {
             return;
         }
         LocalDate today = LocalDate.now(clock);
         try {
-            goalRepository.ensure(today, DEFAULT_REVIEW_GOAL, DEFAULT_NEW_WORD_GOAL, DEFAULT_SESSION_GOAL);
-            goalRepository.addProgress(today, 0, 0, 0, xp);
+            goalRepository.ensure(deckId, today, DEFAULT_REVIEW_GOAL, DEFAULT_NEW_WORD_GOAL, DEFAULT_SESSION_GOAL);
+            goalRepository.addProgress(deckId, today, 0, 0, 0, xp);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot award XP", e);
         }
@@ -110,6 +133,22 @@ public class GoalService {
             return goalRepository.totalReviews();
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read total reviews", e);
+        }
+    }
+
+    public int totalReviews(long deckId) {
+        try {
+            return goalRepository.totalReviews(deckId);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot read deck total reviews", e);
+        }
+    }
+
+    public int totalXp(long deckId) {
+        try {
+            return goalRepository.totalXp(deckId);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot read deck XP", e);
         }
     }
 
@@ -133,15 +172,19 @@ public class GoalService {
             row.newWordsCount(),
             row.xpEarned(),
             row.completed(),
-            calculateStreak(row.date()),
-            goalRepository.totalXp()
+            calculateStreak(row.deckId(), row.date()),
+            goalRepository.totalXp(row.deckId())
         );
     }
 
     private int calculateStreak(LocalDate date) throws SQLException {
-        LocalDate cursor = goalRepository.hasReviewedOn(date) ? date : date.minusDays(1);
+        return calculateStreak(0L, date);
+    }
+
+    private int calculateStreak(long deckId, LocalDate date) throws SQLException {
+        LocalDate cursor = goalRepository.hasReviewedOn(deckId, date) ? date : date.minusDays(1);
         int streak = 0;
-        while (goalRepository.hasReviewedOn(cursor)) {
+        while (goalRepository.hasReviewedOn(deckId, cursor)) {
             streak++;
             cursor = cursor.minusDays(1);
         }

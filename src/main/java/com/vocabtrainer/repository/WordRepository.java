@@ -48,6 +48,38 @@ public class WordRepository {
         return word;
     }
 
+    public int insertAll(List<WordCard> words) throws SQLException {
+        if (words == null || words.isEmpty()) {
+            return 0;
+        }
+        String sql = """
+            INSERT INTO words(deck_id, english, chinese, phonetic, part_of_speech, example_sentence, note, tags,
+                              added_at, last_reviewed_at, next_review_at, easiness_factor, interval_days,
+                              repetitions, consecutive_correct, lapses, archived)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            boolean previousAutoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try {
+                int inserted = 0;
+                for (WordCard word : words) {
+                    bindWord(statement, word);
+                    statement.executeUpdate();
+                    inserted++;
+                }
+                connection.commit();
+                return inserted;
+            } catch (SQLException e) {
+                connection.rollback();
+                throw e;
+            } finally {
+                connection.setAutoCommit(previousAutoCommit);
+            }
+        }
+    }
+
     public void update(WordCard word) throws SQLException {
         String sql = """
             UPDATE words
@@ -139,7 +171,7 @@ public class WordRepository {
         String sql = """
             SELECT * FROM words
             WHERE deck_id = ? AND archived = 0 AND next_review_at <= ?
-            ORDER BY next_review_at ASC, id ASC
+            ORDER BY lapses DESC, consecutive_correct ASC, interval_days ASC, next_review_at ASC, id ASC
             LIMIT ?
             """;
         try (Connection connection = databaseManager.getConnection();

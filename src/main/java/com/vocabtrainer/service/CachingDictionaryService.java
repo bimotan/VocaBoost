@@ -55,6 +55,20 @@ public class CachingDictionaryService implements DictionaryService {
     }
 
     @Override
+    public DictionaryLookupResult refresh(String english) {
+        String key = english == null ? "" : english.trim();
+        if (key.isBlank()) {
+            return DictionaryLookupResult.failure("Please enter an English word first.");
+        }
+        try {
+            cacheRepository.delete(key);
+        } catch (SQLException ignored) {
+            // Cache refresh should still attempt a fresh lookup.
+        }
+        return lookup(key);
+    }
+
+    @Override
     public boolean isConfigured() {
         return delegate.isConfigured();
     }

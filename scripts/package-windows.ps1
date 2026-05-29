@@ -36,7 +36,11 @@ function Resolve-Maven {
 $mvn = Resolve-Maven $MavenPath
 New-Item -ItemType Directory -Force -Path $InputDir, $OutputDir | Out-Null
 
-& $mvn "-Dmaven.repo.local=.m2\repository" clean package dependency:copy-dependencies "-DincludeScope=runtime" "-DoutputDirectory=$InputDir"
+$mavenArgs = @("clean", "package", "dependency:copy-dependencies", "-DincludeScope=runtime", "-DoutputDirectory=$InputDir")
+if ($env:VOCABOOST_MAVEN_REPO) {
+    $mavenArgs = @("-Dmaven.repo.local=$env:VOCABOOST_MAVEN_REPO") + $mavenArgs
+}
+& $mvn @mavenArgs
 Copy-Item -LiteralPath (Join-Path $ProjectRoot "target\$JarName") -Destination (Join-Path $InputDir $JarName) -Force
 
 $jpackage = Get-Command jpackage -ErrorAction SilentlyContinue

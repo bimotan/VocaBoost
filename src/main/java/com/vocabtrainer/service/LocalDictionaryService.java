@@ -83,31 +83,41 @@ public class LocalDictionaryService implements DictionaryService {
         throws IOException {
         String line;
         int lineNumber = 0;
+        int wordIndex = 0;
+        int translationIndex = 1;
+        int phoneticIndex = -1;
+        int posIndex = 2;
+        int exampleIndex = 3;
         while ((line = reader.readLine()) != null) {
             lineNumber++;
             if (line.isBlank()) {
                 continue;
             }
             List<String> fields = parseCsvLine(line);
-            if (lineNumber == 1 && !fields.isEmpty()
-                && ("english".equalsIgnoreCase(fields.get(0).trim()) || "word".equalsIgnoreCase(fields.get(0).trim()))) {
+            if (lineNumber == 1 && looksLikeHeader(fields)) {
+                wordIndex = firstExistingIndex(fields, "word", "english");
+                translationIndex = firstExistingIndex(fields, "translation", "chinese", "definition");
+                phoneticIndex = firstExistingIndex(fields, "phonetic", "phonetics");
+                posIndex = firstExistingIndex(fields, "pos", "part_of_speech", "partOfSpeech", "tag", "tags");
+                exampleIndex = firstExistingIndex(fields, "example", "example_sentence", "sentence");
                 continue;
             }
-            if (fields.size() < 2) {
+            if (wordIndex < 0 || translationIndex < 0 || fields.size() <= Math.max(wordIndex, translationIndex)) {
                 continue;
             }
-            String english = fields.get(0).trim();
-            String chinese = fields.get(1).trim();
+            String english = fieldAt(fields, wordIndex);
+            String chinese = fieldAt(fields, translationIndex);
             if (english.isBlank() || chinese.isBlank()) {
                 continue;
             }
-            String pos = fields.size() > 2 ? fields.get(2).trim() : "";
-            String example = fields.size() > 3 ? fields.get(3).trim() : "";
+            String pos = fieldAt(fields, posIndex);
+            String example = fieldAt(fields, exampleIndex);
+            String phonetic = fieldAt(fields, phoneticIndex);
             target.putIfAbsent(normalizeKey(english), new DictionaryEntry(
                 english,
                 chinese,
                 pos,
-                "",
+                phonetic,
                 example,
                 source
             ));
@@ -136,6 +146,27 @@ public class LocalDictionaryService implements DictionaryService {
         }
         fields.add(current.toString());
         return fields;
+    }
+
+    private boolean looksLikeHeader(List<String> fields) {
+        return fields.stream()
+            .map(value -> value.trim().toLowerCase(Locale.ROOT))
+            .anyMatch(value -> value.equals("word") || value.equals("english") || value.equals("translation"));
+    }
+
+    private int firstExistingIndex(List<String> fields, String... names) {
+        for (String name : names) {
+            for (int i = 0; i < fields.size(); i++) {
+                if (name.equalsIgnoreCase(fields.get(i).trim())) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private String fieldAt(List<String> fields, int index) {
+        return index >= 0 && index < fields.size() ? fields.get(index).trim() : "";
     }
 
     private String normalizeKey(String value) {

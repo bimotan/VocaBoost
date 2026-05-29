@@ -7,6 +7,8 @@ import com.vocabtrainer.repository.DictionaryCacheRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -77,5 +79,53 @@ class DictionaryServiceTest {
         service.lookup("LUCID");
 
         assertEquals(1, calls.get());
+    }
+
+    @Test
+    void localDictionaryReadsEcdictStyleHeaders() throws Exception {
+        Path csv = tempDir.resolve("ecdict.csv");
+        Files.writeString(csv, String.join(System.lineSeparator(),
+            "word,phonetic,definition,translation,pos,tag",
+            "lucid,ˈluːsɪd,clear,清晰的,adjective,zk"
+        ), StandardCharsets.UTF_8);
+
+        DictionaryLookupResult result = new LocalDictionaryService(csv.toString()).lookup("lucid");
+
+        assertTrue(result.success());
+        assertEquals("清晰的", result.entries().get(0).chinese());
+        assertEquals("ˈluːsɪd", result.entries().get(0).phonetic());
+    }
+
+    @Test
+    void cacheRefreshCallsDelegateAgain() throws Exception {
+        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("refresh.db"));
+        databaseManager.initialize();
+        AtomicInteger calls = new AtomicInteger();
+        DictionaryService delegate = new DictionaryService() {
+            @Override
+            public DictionaryLookupResult lookup(String english) {
+                int call = calls.incrementAndGet();
+                return DictionaryLookupResult.success("ok", List.of(new DictionaryEntry(
+                    english,
+                    "释义" + call,
+                    "",
+                    "",
+                    "",
+                    "test"
+                )));
+            }
+
+            @Override
+            public boolean isConfigured() {
+                return true;
+            }
+        };
+        DictionaryService service = new CachingDictionaryService(delegate, new DictionaryCacheRepository(databaseManager));
+
+        service.lookup("abate");
+        DictionaryLookupResult refreshed = service.refresh("abate");
+
+        assertEquals(2, calls.get());
+        assertEquals("释义2", refreshed.entries().get(0).chinese());
     }
 }
