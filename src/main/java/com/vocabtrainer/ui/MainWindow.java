@@ -643,15 +643,23 @@ public class MainWindow {
     }
 
     private Tab createStatisticsTab() {
-        reviewCountChart = new BarChart<>(new CategoryAxis(), new NumberAxis());
+        CategoryAxis reviewDateAxis = new CategoryAxis();
+        reviewDateAxis.setTickLabelRotation(-35);
+        reviewCountChart = new BarChart<>(reviewDateAxis, new NumberAxis());
         reviewCountChart.setTitle("Daily review count");
         reviewCountChart.setLegendVisible(false);
-        reviewCountChart.setPrefHeight(240);
+        reviewCountChart.setAnimated(false);
+        reviewCountChart.setPrefHeight(280);
+        reviewCountChart.setMinHeight(280);
 
-        accuracyChart = new LineChart<>(new CategoryAxis(), new NumberAxis(0, 1, 0.25));
+        CategoryAxis accuracyDateAxis = new CategoryAxis();
+        accuracyDateAxis.setTickLabelRotation(-35);
+        accuracyChart = new LineChart<>(accuracyDateAxis, new NumberAxis(0, 1, 0.25));
         accuracyChart.setTitle("Accuracy trend");
         accuracyChart.setLegendVisible(false);
-        accuracyChart.setPrefHeight(240);
+        accuracyChart.setAnimated(false);
+        accuracyChart.setPrefHeight(280);
+        accuracyChart.setMinHeight(280);
 
         memoryChart = new PieChart();
         memoryChart.setTitle("Memory strength distribution");
@@ -1076,11 +1084,17 @@ public class MainWindow {
         if (reviewCountChart == null) {
             return;
         }
-        List<DailyReviewStat> dailyStats = statsService.dailyReviewStats(currentDeck.getId(), 14);
+        List<DailyReviewStat> dailyStats = statsService.dailyReviewStats(currentDeck.getId(), 7);
+        List<String> dayCategories = dailyStats.stream()
+            .map(stat -> stat.date().getMonthValue() + "/" + stat.date().getDayOfMonth())
+            .toList();
+        ((CategoryAxis) reviewCountChart.getXAxis()).setCategories(FXCollections.observableArrayList(dayCategories));
+        ((CategoryAxis) accuracyChart.getXAxis()).setCategories(FXCollections.observableArrayList(dayCategories));
         XYChart.Series<String, Number> reviewSeries = new XYChart.Series<>();
         XYChart.Series<String, Number> accuracySeries = new XYChart.Series<>();
-        for (DailyReviewStat stat : dailyStats) {
-            String day = stat.date().getMonthValue() + "/" + stat.date().getDayOfMonth();
+        for (int i = 0; i < dailyStats.size(); i++) {
+            DailyReviewStat stat = dailyStats.get(i);
+            String day = dayCategories.get(i);
             reviewSeries.getData().add(new XYChart.Data<>(day, stat.reviewCount()));
             accuracySeries.getData().add(new XYChart.Data<>(day, stat.accuracy()));
         }
