@@ -80,13 +80,17 @@ class ImportAndSettingsUiTest extends MainWindowUiTest {
         waitForBackgroundTasks();
         assertTrue(text("importStatusLabel").startsWith("Deck: " + STARTER_DECK + System.lineSeparator()),
             text("importStatusLabel"));
+        selectTab("dashboardTab");
         assertEquals(String.valueOf(STARTER_WORDS), text("totalWordsLabel"));
 
+        selectTab("addImportTab");
         click("importCsvButton");
         waitForBackgroundTasks();
         assertTrue(text("importStatusLabel").startsWith("Deck: " + STARTER_DECK + System.lineSeparator()
             + "Imported 2, skipped 1."), text("importStatusLabel"));
+        selectTab("dashboardTab");
         assertEquals(String.valueOf(STARTER_WORDS + 2), text("totalWordsLabel"));
+        selectTab("wordListTab");
         assertEquals(STARTER_WORDS + 2, rowCount("wordTable"));
         long deckId = currentDeck().getId();
         assertTrue(services.wordRepository().findByEnglish(deckId, "petrichor").isPresent());

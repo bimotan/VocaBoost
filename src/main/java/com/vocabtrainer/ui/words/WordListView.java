@@ -5,6 +5,7 @@ import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.Formats;
+import com.vocabtrainer.ui.LazyRefresh;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import com.vocabtrainer.util.DateTimeUtil;
@@ -42,6 +43,7 @@ public final class WordListView {
     private final TextField tagFilterField = new TextField();
     private final TextField posFilterField = new TextField();
     private final Tab tab;
+    private final LazyRefresh lazy;
 
     /** {@code clock} decides which words are due and how strong their memory is. */
     public WordListView(ViewContext context, WordRepository wordRepository, WordValidationService validationService,
@@ -51,12 +53,13 @@ public final class WordListView {
         this.clock = clock;
         this.editDialog = new WordEditDialog(context, wordRepository, validationService);
         this.tab = Widgets.tab("wordListTab", "Word List", createContent());
+        this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh failed", false);
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)) {
-                refresh();
+                lazy.markStale();
             }
         });
-        context.decks().onSwitch(deck -> refresh());
+        context.decks().onSwitch(deck -> lazy.markStale());
     }
 
     public Tab tab() {
@@ -76,14 +79,14 @@ public final class WordListView {
         posFilterField.setPromptText("POS");
         posFilterField.setPrefWidth(120);
         PauseTransition searchDebounce = new PauseTransition(Duration.millis(250));
-        searchDebounce.setOnFinished(event -> refresh());
+        searchDebounce.setOnFinished(event -> lazy.refreshNow());
         searchField.textProperty().addListener((observable, oldValue, newValue) -> searchDebounce.playFromStart());
         tagFilterField.textProperty().addListener((observable, oldValue, newValue) -> searchDebounce.playFromStart());
         posFilterField.textProperty().addListener((observable, oldValue, newValue) -> searchDebounce.playFromStart());
-        wordStatusFilter.valueProperty().addListener((observable, oldValue, newValue) -> refresh());
+        wordStatusFilter.valueProperty().addListener((observable, oldValue, newValue) -> lazy.refreshNow());
         Button refreshButton = new Button("Refresh");
         refreshButton.setId("refreshWordsButton");
-        refreshButton.setOnAction(event -> refresh());
+        refreshButton.setOnAction(event -> lazy.refreshNow());
         Button editButton = new Button("Edit selected");
         editButton.setId("editWordButton");
         editButton.setOnAction(event -> editSelectedWord());
@@ -119,7 +122,7 @@ public final class WordListView {
         return content;
     }
 
-    public void refresh() {
+    private void refresh() {
         try {
             List<WordCard> words = wordRepository.search(context.decks().currentId(), searchField.getText());
             WordListFilter filter = new WordListFilter(wordStatusFilter.getValue(), tagFilterField.getText(),

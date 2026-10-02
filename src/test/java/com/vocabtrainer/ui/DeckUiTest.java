@@ -29,9 +29,11 @@ class DeckUiTest extends MainWindowUiTest {
         assertEquals("Deck: TOEFL | Dictionary: starter/online fallback | AI: mock", headerSubtitle());
         assertEquals("0", text("totalWordsLabel"));
         assertEquals("0", text("dueTodayLabel"));
+        selectTab("wordListTab");
         assertEquals(0, rowCount("wordTable"));
         assertEquals("TOEFL", Fx.call(() -> this.<Deck>comboBox("addDeckSelector").getValue().getName()));
         assertEquals("Review complete", text("reviewWordLabel"));
+        selectTab("decksTab");
         assertEquals(List.of("TOEFL", STARTER_DECK), deckRowNames("deckTable"));
         assertEquals(toefl.getId(), services.settingsService().getLastDeckId().orElseThrow());
 
@@ -39,7 +41,9 @@ class DeckUiTest extends MainWindowUiTest {
 
         assertEquals(starterDeckId, currentDeck().getId());
         assertEquals("Deck: " + STARTER_DECK + " | Dictionary: starter/online fallback | AI: mock", headerSubtitle());
+        selectTab("dashboardTab");
         assertEquals(String.valueOf(STARTER_WORDS), text("totalWordsLabel"));
+        selectTab("wordListTab");
         assertEquals(STARTER_WORDS, rowCount("wordTable"));
         assertEquals(STARTER_DECK, Fx.call(() -> this.<Deck>comboBox("addDeckSelector").getValue().getName()));
         assertEquals(starterDeckId, services.settingsService().getLastDeckId().orElseThrow());
@@ -49,6 +53,7 @@ class DeckUiTest extends MainWindowUiTest {
         selectDeckRow("deckTable", "TOEFL");
         click("switchDeckButton");
         assertEquals("TOEFL", currentDeck().getName());
+        selectTab("dashboardTab");
         assertEquals("0", text("totalWordsLabel"));
     }
 
@@ -85,7 +90,9 @@ class DeckUiTest extends MainWindowUiTest {
         assertEquals("GRE 核心", currentDeck().getName());
         assertEquals(List.of("GRE 核心"), deckNames("deckSelector"));
         assertTrue(headerSubtitle().startsWith("Deck: GRE 核心 | "), headerSubtitle());
+        selectTab("decksTab");
         assertEquals(List.of("GRE 核心"), deckRowNames("deckTable"));
+        selectTab("dashboardTab");
         assertEquals(String.valueOf(STARTER_WORDS), text("totalWordsLabel"));
         assertEquals("GRE 核心", services.deckRepository().findById(deckId).orElseThrow().getName());
     }
@@ -105,6 +112,7 @@ class DeckUiTest extends MainWindowUiTest {
         assertEquals(STARTER_DECK, currentDeck().getName());
         assertEquals(List.of(STARTER_DECK), deckNames("deckSelector"));
         assertTrue(headerSubtitle().startsWith("Deck: " + STARTER_DECK + " | "), headerSubtitle());
+        selectTab("decksTab");
         assertEquals(1, rowCount("deckTable"));
         assertEquals(1, rowCount("archivedDeckTable"));
         assertEquals(List.of("Temp"), deckRowNames("archivedDeckTable"));
@@ -140,6 +148,7 @@ class DeckUiTest extends MainWindowUiTest {
         assertEquals("Archive deck failed", error.title());
         assertEquals("至少需要保留一个活动词库：请先新建或恢复另一个词库，再归档这个词库", error.content());
         assertEquals(deckId, currentDeck().getId());
+        selectTab("decksTab");
         assertEquals(0, rowCount("archivedDeckTable"));
         assertFalse(services.deckRepository().findById(deckId).orElseThrow().isArchived());
     }
@@ -154,6 +163,7 @@ class DeckUiTest extends MainWindowUiTest {
         click("archiveDeckButton");
 
         assertEquals(tempId, currentDeck().getId());
+        selectTab("decksTab");
         assertEquals(0, rowCount("archivedDeckTable"));
         assertFalse(services.deckRepository().findById(tempId).orElseThrow().isArchived());
     }

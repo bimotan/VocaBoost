@@ -4,6 +4,7 @@ import com.vocabtrainer.service.DeckOverview;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.ui.DataChange;
+import com.vocabtrainer.ui.LazyRefresh;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import com.vocabtrainer.util.DateTimeUtil;
@@ -31,19 +32,21 @@ public final class DecksView {
     private final TableView<DeckOverview> deckTable = new TableView<>(deckRows);
     private final TableView<DeckOverview> archivedDeckTable = new TableView<>(archivedDeckRows);
     private final Tab tab;
+    private final LazyRefresh lazy;
 
     public DecksView(ViewContext context, DeckService deckService, StatsService statsService) {
         this.context = context;
         this.deckService = deckService;
         this.statsService = statsService;
         this.tab = Widgets.tab("decksTab", "Decks", createContent());
+        this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh decks failed", false);
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
                 || changes.contains(DataChange.DECKS)) {
-                refresh();
+                lazy.markStale();
             }
         });
-        context.decks().onSwitch(deck -> refresh());
+        context.decks().onSwitch(deck -> lazy.markStale());
     }
 
     public Tab tab() {
@@ -73,7 +76,7 @@ public final class DecksView {
         restoreButton.setOnAction(event -> restoreSelectedArchivedDeck());
         Button refreshButton = new Button("Refresh");
         refreshButton.setId("refreshDecksButton");
-        refreshButton.setOnAction(event -> refresh());
+        refreshButton.setOnAction(event -> lazy.refreshNow());
         VBox content = new VBox(12,
             Widgets.sectionTitle("Active Decks"),
             deckTable,
@@ -112,7 +115,7 @@ public final class DecksView {
         });
     }
 
-    public void refresh() {
+    private void refresh() {
         try {
             deckRows.setAll(statsService.deckOverviews(deckService.activeDecks()));
             archivedDeckRows.setAll(statsService.deckOverviews(deckService.archivedDecks()));

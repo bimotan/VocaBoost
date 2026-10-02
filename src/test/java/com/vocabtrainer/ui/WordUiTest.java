@@ -35,8 +35,10 @@ class WordUiTest extends MainWindowUiTest {
             assertEquals("", text(field), field);
         }
 
+        selectTab("dashboardTab");
         assertEquals(String.valueOf(STARTER_WORDS + 1), text("totalWordsLabel"));
         assertEquals("1 / 5", text("newWordsTodayLabel"));
+        selectTab("wordListTab");
         assertEquals(STARTER_WORDS + 1, rowCount("wordTable"));
         assertTrue(wordListEnglish().contains("obfuscate"));
         assertTrue(dialogs.shown().isEmpty(), dialogs.shown().toString());
@@ -64,6 +66,7 @@ class WordUiTest extends MainWindowUiTest {
         waitForText("addWordStatusLabel", "Added to " + STARTER_DECK + ": snarkle | Marked UNVERIFIED");
         WordCard saved = services.wordRepository().findByEnglish(currentDeck().getId(), "snarkle").orElseThrow();
         assertEquals("UNVERIFIED", saved.getTags());
+        selectTab("dashboardTab");
         assertEquals(String.valueOf(STARTER_WORDS + 1), text("totalWordsLabel"));
 
         selectTab("wordListTab");
@@ -80,6 +83,7 @@ class WordUiTest extends MainWindowUiTest {
 
         waitForText("addWordStatusLabel", "Word already exists in " + STARTER_DECK + ": abate. Edit it in Word List.");
         assertEquals("abate", text("addEnglishField"));
+        selectTab("dashboardTab");
         assertEquals(String.valueOf(STARTER_WORDS), text("totalWordsLabel"));
     }
 
@@ -90,6 +94,7 @@ class WordUiTest extends MainWindowUiTest {
         click("addWordButton");
 
         assertEquals("Chinese meaning cannot be empty.", text("addWordStatusLabel"));
+        selectTab("dashboardTab");
         assertEquals(String.valueOf(STARTER_WORDS), text("totalWordsLabel"));
     }
 

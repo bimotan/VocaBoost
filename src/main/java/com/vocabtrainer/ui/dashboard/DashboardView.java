@@ -8,6 +8,7 @@ import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.Formats;
+import com.vocabtrainer.ui.LazyRefresh;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import javafx.geometry.Insets;
@@ -42,6 +43,7 @@ public final class DashboardView {
     private final ProgressBar reviewProgress = new ProgressBar(0);
     private final ProgressBar newWordProgress = new ProgressBar(0);
     private final Tab tab;
+    private final LazyRefresh lazy;
 
     public DashboardView(ViewContext context, StatsService statsService, GoalService goalService,
                          AchievementService achievementService, Path databasePath) {
@@ -51,12 +53,13 @@ public final class DashboardView {
         this.achievementService = achievementService;
         this.databasePath = databasePath;
         this.tab = Widgets.tab("dashboardTab", "Dashboard", createContent());
+        this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh failed", false);
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)) {
-                refresh();
+                lazy.markStale();
             }
         });
-        context.decks().onSwitch(deck -> refresh());
+        context.decks().onSwitch(deck -> lazy.markStale());
     }
 
     public Tab tab() {
@@ -96,7 +99,7 @@ public final class DashboardView {
         databasePathLabel.setStyle("-fx-text-fill: #6b7280;");
         Button refreshButton = new Button("Refresh");
         refreshButton.setId("refreshDashboardButton");
-        refreshButton.setOnAction(event -> context.errors().guard("Refresh failed", this::refresh));
+        refreshButton.setOnAction(event -> context.errors().guard("Refresh failed", () -> lazy.refreshNow()));
 
         VBox progressBox = new VBox(10,
             Widgets.sectionTitle("Daily Goals"),
@@ -122,7 +125,7 @@ public final class DashboardView {
         grid.add(valueLabel, 1, row);
     }
 
-    public void refresh() {
+    private void refresh() {
         long deckId = context.decks().currentId();
         DashboardStats stats = statsService.dashboardStats(deckId);
         DailyGoalProgress progress = goalService.getTodayProgress(deckId);

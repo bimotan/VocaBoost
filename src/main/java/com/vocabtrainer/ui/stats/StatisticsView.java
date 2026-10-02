@@ -6,6 +6,7 @@ import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.Formats;
+import com.vocabtrainer.ui.LazyRefresh;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import javafx.collections.FXCollections;
@@ -40,7 +41,7 @@ public final class StatisticsView {
     private final TextArea hardestWordsArea = new TextArea();
     private final TextArea analyticsArea = new TextArea();
     private final Tab tab;
-    private boolean visited;
+    private final LazyRefresh lazy;
 
     public StatisticsView(ViewContext context, StatsService statsService, GoalService goalService,
                           BackupService backupService, Path databasePath) {
@@ -85,7 +86,7 @@ public final class StatisticsView {
 
         Button refreshButton = new Button("Refresh statistics");
         refreshButton.setId("refreshStatisticsButton");
-        refreshButton.setOnAction(event -> context.errors().guard("Refresh statistics failed", this::refresh));
+        refreshButton.setOnAction(event -> context.errors().guard("Refresh statistics failed", this::refreshNow));
         DataActions actions = new DataActions(context, statsService, goalService, backupService, databasePath,
             overdueStatsLabel);
         List<Button> exportButtons = new ArrayList<>();
@@ -103,29 +104,25 @@ public final class StatisticsView {
         ScrollPane scrollPane = new ScrollPane(charts);
         scrollPane.setFitToWidth(true);
         tab = Widgets.tab("statisticsTab", "Statistics", scrollPane);
-        tab.setOnSelectionChanged(event -> {
-            if (tab.isSelected()) {
-                visited = true;
-                context.errors().guard("Refresh statistics failed", this::refresh);
-            }
-        });
+        // The charts depend on the clock (a 7-day window, due counts), so every visit recomputes them.
+        lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh statistics failed", true);
         context.changes().subscribe(changes -> {
-            if (visited && (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS))) {
-                refresh();
+            if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)) {
+                lazy.markStale();
             }
         });
-        context.decks().onSwitch(deck -> {
-            if (visited) {
-                refresh();
-            }
-        });
+        context.decks().onSwitch(deck -> lazy.markStale());
     }
 
     public Tab tab() {
         return tab;
     }
 
-    public void refresh() {
+    private void refreshNow() {
+        lazy.refreshNow();
+    }
+
+    private void refresh() {
         long deckId = context.decks().currentId();
         List<DailyReviewStat> dailyStats = statsService.dailyReviewStats(deckId, 7);
         List<String> dayCategories = dailyStats.stream()

@@ -37,7 +37,9 @@ class MainWindowSmokeTest extends MainWindowUiTest {
         assertEquals("None yet", text("badgesLabel"));
         assertEquals("SQLite: " + tempDir.resolve("vocab.db").toAbsolutePath(), text("databasePathLabel"));
 
+        selectTab("wordListTab");
         assertEquals(STARTER_WORDS, rowCount("wordTable"));
+        selectTab("decksTab");
         assertEquals(1, rowCount("deckTable"));
         assertEquals(0, rowCount("archivedDeckTable"));
         assertEquals(STARTER_DECK, Fx.call(() -> this.<Deck>comboBox("addDeckSelector").getValue().getName()));

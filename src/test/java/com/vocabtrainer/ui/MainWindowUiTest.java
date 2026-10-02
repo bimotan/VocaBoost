@@ -59,6 +59,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * Opens the real main window on a fresh database for each test, wired by {@link AppServices} like
  * the app, with {@link ScriptedDialogs} instead of blocking dialogs and with dictionary and AI
  * services that never use the network. Controls are found by the ids MainWindow gives them.
+ *
+ * <p>Dashboard, Decks, Statistics and Word List recompute their content only while their tab is
+ * shown, like a user would see them, so select the tab before reading its controls.
  */
 @Tag("ui")
 abstract class MainWindowUiTest {

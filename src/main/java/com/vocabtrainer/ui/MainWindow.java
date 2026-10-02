@@ -58,10 +58,8 @@ public class MainWindow {
         root.setTop(header.root());
         root.setCenter(tabs);
 
+        // The selected tab (Dashboard) has loaded itself; the others load when they are first shown.
         decks.reloadDecks();
-        dashboard.refresh();
-        decksView.refresh();
-        wordList.refresh();
         review.start();
         return new Scene(root, 1120, 780);
     }

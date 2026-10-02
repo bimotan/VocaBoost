@@ -44,8 +44,9 @@ class StatisticsAndBackupUiTest extends MainWindowUiTest {
         assertFalse(text("analyticsArea").isBlank());
         snapshot("after-two-reviews");
 
-        // While Statistics is open, a new review refreshes it.
+        // Coming back to Statistics after another review shows it.
         review(true, "rateGoodButton");
+        selectTab("statisticsTab");
         assertEquals(3, chartPoints("reviewCountChart").get(6).y());
     }
 
@@ -69,8 +70,10 @@ class StatisticsAndBackupUiTest extends MainWindowUiTest {
         click("newDeckButton");
         Deck restored = currentDeck();
         assertEquals("Restored", restored.getName());
+        selectTab("dashboardTab");
         assertEquals("0", text("totalWordsLabel"));
 
+        selectTab("statisticsTab");
         dialogs.openFile(backup).chooseButton("Keep current progress");
         click("importBackupButton");
 
@@ -85,7 +88,9 @@ class StatisticsAndBackupUiTest extends MainWindowUiTest {
         assertTrue(summary.content().contains("Words: " + STARTER_WORDS + " added, 0 updated"), summary.content());
         assertTrue(summary.content().contains("Review logs: 1 added, 0 already present."), summary.content());
 
+        selectTab("dashboardTab");
         assertEquals(String.valueOf(STARTER_WORDS), text("totalWordsLabel"));
+        selectTab("wordListTab");
         assertEquals(STARTER_WORDS, rowCount("wordTable"));
         List<ReviewLog> logs = services.reviewLogRepository().findByDeck(restored.getId());
         assertEquals(1, logs.size());
@@ -105,6 +110,7 @@ class StatisticsAndBackupUiTest extends MainWindowUiTest {
 
         waitForBackgroundTasks();
         assertFalse(dialogs.wasShown(ScriptedDialogs.Kind.TEXT));
+        selectTab("dashboardTab");
         assertEquals(String.valueOf(STARTER_WORDS), text("totalWordsLabel"));
     }
 

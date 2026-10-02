@@ -62,6 +62,7 @@ class ReviewUiTest extends MainWindowUiTest {
         assertEquals(0, saved.getLapses());
 
         assertTrue(text("sessionProgressLabel").startsWith("Session 1/20 | Accuracy 100% | XP "), text("sessionProgressLabel"));
+        selectTab("dashboardTab");
         assertEquals("1 / 20", text("reviewedTodayLabel"));
         assertEquals("100%", text("accuracyTodayLabel"));
         assertEquals(String.valueOf(services.goalService().totalXp(deckId())), text("xpLabel"));
@@ -70,6 +71,7 @@ class ReviewUiTest extends MainWindowUiTest {
         assertEquals(String.valueOf(STARTER_WORDS - 1), text("dueTodayLabel"));
 
         // The next card is ready for a new answer.
+        selectTab("reviewTab");
         assertNotEquals(word.getEnglish(), text("reviewWordLabel"));
         assertTrue(text("reviewResultArea").startsWith("Saved. XP +"), text("reviewResultArea"));
         assertEquals("", text("answerField"));
@@ -95,6 +97,7 @@ class ReviewUiTest extends MainWindowUiTest {
         assertEquals(ReviewRating.AGAIN, logs.get(0).getRating());
         assertEquals("完全错误", logs.get(0).getUserAnswer());
         assertEquals(1, services.wordRepository().findById(word.getId()).orElseThrow().getLapses());
+        selectTab("dashboardTab");
         assertEquals("1 / 20", text("reviewedTodayLabel"));
         assertEquals("0%", text("accuracyTodayLabel"));
     }
@@ -117,8 +120,10 @@ class ReviewUiTest extends MainWindowUiTest {
         assertTrue(services.reviewLogRepository().findByDeck(deckId()).isEmpty());
         WordCard unchanged = services.wordRepository().findById(word.getId()).orElseThrow();
         assertEquals(0, unchanged.getRepetitions());
+        selectTab("dashboardTab");
         assertEquals("0 / 20", text("reviewedTodayLabel"));
         // Same card, same answer, and the rating buttons are armed again.
+        selectTab("reviewTab");
         assertEquals(word.getEnglish(), text("reviewWordLabel"));
         assertEquals(result, text("reviewResultArea"));
         assertEquals(correctAnswer(word), text("answerField"));
@@ -134,6 +139,7 @@ class ReviewUiTest extends MainWindowUiTest {
         WordCard saved = services.wordRepository().findById(word.getId()).orElseThrow();
         assertEquals(1, saved.getRepetitions());
         assertEquals(0, saved.getLapses());
+        selectTab("dashboardTab");
         assertEquals("1 / 20", text("reviewedTodayLabel"));
         assertNotEquals(word.getEnglish(), text("reviewWordLabel"));
     }
