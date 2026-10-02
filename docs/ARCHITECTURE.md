@@ -2,8 +2,8 @@
 
 ## Layers
 
-- `app`: JavaFX startup and dependency wiring.
-- `ui`: Programmatic JavaFX screens for dashboard, deck management, review, import, statistics, and word list.
+- `app`: JavaFX startup and dependency wiring. `AppServices` opens one database and wires its repositories and services; the app and the UI tests both build the window through it.
+- `ui`: Programmatic JavaFX screens for dashboard, deck management, review, import, statistics, and word list. Every modal dialog and file chooser goes through the `Dialogs` interface (`JavaFxDialogs` in the app, a scripted fake in the UI tests), and key controls have stable ids (`node.setId`) that the UI tests look up.
 - `service`: Review scheduling, goals, achievements, dictionary lookup, import/export, backup, validation, and analytics.
 - `repository`: SQLite schema initialization, migration, and CRUD.
 - `domain`: Records and entities such as `WordCard`, `Deck`, `ReviewLog`, goals, achievements, dictionary entries, and statistics rows.

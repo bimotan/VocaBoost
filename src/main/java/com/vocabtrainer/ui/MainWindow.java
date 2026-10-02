@@ -17,8 +17,6 @@ import com.vocabtrainer.domain.ReviewSessionSummary;
 import com.vocabtrainer.domain.ValidatedWord;
 import com.vocabtrainer.domain.WordVerificationResult;
 import com.vocabtrainer.domain.WordCard;
-import com.vocabtrainer.repository.AiCacheRepository;
-import com.vocabtrainer.repository.DictionaryCacheRepository;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.AiService;
@@ -27,7 +25,6 @@ import com.vocabtrainer.service.BackupRestoreResult;
 import com.vocabtrainer.service.BackupService;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
-import com.vocabtrainer.service.DictionaryServiceFactory;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ImportExportService;
 import com.vocabtrainer.service.ImportResult;
@@ -55,12 +52,10 @@ import javafx.scene.chart.LineChart;
 import javafx.scene.chart.NumberAxis;
 import javafx.scene.chart.PieChart;
 import javafx.scene.chart.XYChart;
-import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
-import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -73,7 +68,6 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
-import javafx.scene.control.TextInputDialog;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
@@ -91,6 +85,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -109,14 +104,15 @@ public class MainWindow {
     private final StatsService statsService;
     private final GoalService goalService;
     private final AchievementService achievementService;
+    private final Supplier<DictionaryService> dictionaryServices;
     private DictionaryService dictionaryService;
-    private final DictionaryCacheRepository dictionaryCacheRepository;
     private final SettingsService settingsService;
     private final WordValidationService validationService;
     private final BackupService backupService;
+    private final Supplier<AiService> aiServices;
     private AiService aiService;
-    private final AiCacheRepository aiCacheRepository;
     private final Path databasePath;
+    private final Dialogs dialogs;
 
     private final ObservableList<WordCard> wordItems = FXCollections.observableArrayList();
     private final ObservableList<DeckRow> deckRows = FXCollections.observableArrayList();
@@ -167,12 +163,17 @@ public class MainWindow {
     private ComboBox<Deck> deckSelector;
     private boolean statisticsSelected;
 
+    /**
+     * {@code dictionaryServices} and {@code aiServices} build the dictionary and AI services from the
+     * saved settings; they are called again whenever those settings change. {@code dialogs} shows
+     * every modal dialog and file chooser.
+     */
     public MainWindow(Deck deck, DeckService deckService, WordRepository wordRepository, ReviewService reviewService,
                       ImportExportService importExportService, StatsService statsService,
                       GoalService goalService, AchievementService achievementService,
-                      DictionaryService dictionaryService, DictionaryCacheRepository dictionaryCacheRepository,
-                      AiCacheRepository aiCacheRepository, SettingsService settingsService, WordValidationService validationService,
-                      BackupService backupService, AiService aiService, Path databasePath) {
+                      Supplier<DictionaryService> dictionaryServices, SettingsService settingsService,
+                      WordValidationService validationService, BackupService backupService,
+                      Supplier<AiService> aiServices, Path databasePath, Dialogs dialogs) {
         this.currentDeck = deck;
         this.deckService = deckService;
         this.wordRepository = wordRepository;
@@ -181,14 +182,15 @@ public class MainWindow {
         this.statsService = statsService;
         this.goalService = goalService;
         this.achievementService = achievementService;
-        this.dictionaryService = dictionaryService;
-        this.dictionaryCacheRepository = dictionaryCacheRepository;
-        this.aiCacheRepository = aiCacheRepository;
+        this.dictionaryServices = dictionaryServices;
+        this.dictionaryService = dictionaryServices.get();
         this.settingsService = settingsService;
         this.validationService = validationService;
         this.backupService = backupService;
-        this.aiService = aiService;
+        this.aiServices = aiServices;
+        this.aiService = aiServices.get();
         this.databasePath = databasePath;
+        this.dialogs = dialogs;
     }
 
     public Scene createScene() {
@@ -196,6 +198,7 @@ public class MainWindow {
         root.setTop(createHeader());
 
         TabPane tabs = new TabPane();
+        tabs.setId("mainTabs");
         tabs.getTabs().add(createDashboardTab());
         tabs.getTabs().add(createDecksTab());
         tabs.getTabs().add(createReviewTab());
@@ -213,8 +216,10 @@ public class MainWindow {
         Label title = new Label("VocaBoost");
         title.setStyle("-fx-font-size: 24px; -fx-font-weight: 700;");
         headerSubtitleLabel.setStyle("-fx-text-fill: #4b5563;");
+        headerSubtitleLabel.setId("headerSubtitleLabel");
 
         deckSelector = new ComboBox<>();
+        deckSelector.setId("deckSelector");
         deckSelector.setPrefWidth(220);
         deckSelector.setCellFactory(list -> deckCell());
         deckSelector.setButtonCell(deckCell());
@@ -226,10 +231,13 @@ public class MainWindow {
         });
 
         Button newDeckButton = new Button("New deck");
+        newDeckButton.setId("newDeckButton");
         newDeckButton.setOnAction(event -> createDeck());
         Button renameDeckButton = new Button("Rename");
+        renameDeckButton.setId("renameDeckButton");
         renameDeckButton.setOnAction(event -> renameCurrentDeck());
         Button archiveDeckButton = new Button("Archive");
+        archiveDeckButton.setId("archiveDeckButton");
         archiveDeckButton.setOnAction(event -> archiveCurrentDeck());
 
         HBox deckControls = new HBox(8, new Label("Deck"), deckSelector, newDeckButton, renameDeckButton, archiveDeckButton);
@@ -297,12 +305,9 @@ public class MainWindow {
     }
 
     private void createDeck() {
-        TextInputDialog dialog = new TextInputDialog();
-        dialog.setTitle("New deck");
-        dialog.setHeaderText("Create a new deck");
-        dialog.setContentText("Deck name");
-        dialog.showAndWait().ifPresent(name -> guard("Create deck failed", () -> {
-            currentDeck = deckService.createDeck(name);
+        Optional<String> name = dialogs.askText("New deck", "Create a new deck", "Deck name", "");
+        name.ifPresent(value -> guard("Create deck failed", () -> {
+            currentDeck = deckService.createDeck(value);
             refreshDeckSelector();
             onDeckChanged();
         }));
@@ -312,12 +317,9 @@ public class MainWindow {
         if (currentDeck == null) {
             return;
         }
-        TextInputDialog dialog = new TextInputDialog(currentDeck.getName());
-        dialog.setTitle("Rename deck");
-        dialog.setHeaderText("Rename current deck");
-        dialog.setContentText("Deck name");
-        dialog.showAndWait().ifPresent(name -> guard("Rename deck failed", () -> {
-            currentDeck = deckService.renameDeck(currentDeck.getId(), name);
+        Optional<String> name = dialogs.askText("Rename deck", "Rename current deck", "Deck name", currentDeck.getName());
+        name.ifPresent(value -> guard("Rename deck failed", () -> {
+            currentDeck = deckService.renameDeck(currentDeck.getId(), value);
             refreshDeckSelector();
             onDeckChanged();
         }));
@@ -327,12 +329,9 @@ public class MainWindow {
         if (currentDeck == null) {
             return;
         }
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle("Archive deck");
-        confirm.setHeaderText("Archive " + currentDeck.getName() + "?");
-        confirm.setContentText("Words remain in SQLite, but the deck will be hidden from active study views.");
-        Optional<ButtonType> result = confirm.showAndWait();
-        if (result.isPresent() && result.get() == ButtonType.OK) {
+        boolean confirmed = dialogs.confirm("Archive deck", "Archive " + currentDeck.getName() + "?",
+            "Words remain in SQLite, but the deck will be hidden from active study views.");
+        if (confirmed) {
             guard("Archive deck failed", () -> {
                 currentDeck = deckService.archiveDeck(currentDeck.getId());
                 refreshDeckSelector();
@@ -382,6 +381,18 @@ public class MainWindow {
         grid.setHgap(18);
         grid.setVgap(14);
 
+        totalWordsLabel.setId("totalWordsLabel");
+        dueTodayLabel.setId("dueTodayLabel");
+        reviewedTodayLabel.setId("reviewedTodayLabel");
+        newWordsTodayLabel.setId("newWordsTodayLabel");
+        accuracyTodayLabel.setId("accuracyTodayLabel");
+        masteredWordsLabel.setId("masteredWordsLabel");
+        streakLabel.setId("streakLabel");
+        xpLabel.setId("xpLabel");
+        badgesLabel.setId("badgesLabel");
+        databasePathLabel.setId("databasePathLabel");
+        reviewProgress.setId("reviewGoalProgress");
+        newWordProgress.setId("newWordGoalProgress");
         addStat(grid, 0, "Total words", totalWordsLabel);
         addStat(grid, 1, "Due now", dueTodayLabel);
         addStat(grid, 2, "Reviews today", reviewedTodayLabel);
@@ -396,6 +407,7 @@ public class MainWindow {
         badgesLabel.setWrapText(true);
         databasePathLabel.setStyle("-fx-text-fill: #6b7280;");
         Button refreshButton = new Button("Refresh");
+        refreshButton.setId("refreshDashboardButton");
         refreshButton.setOnAction(event -> guard("Refresh failed", this::refreshAll));
 
         VBox progressBox = new VBox(10,
@@ -413,6 +425,7 @@ public class MainWindow {
         grid.add(progressBox, 0, 8, 2, 1);
 
         Tab tab = new Tab("Dashboard", grid);
+        tab.setId("dashboardTab");
         tab.setClosable(false);
         return tab;
     }
@@ -427,15 +440,18 @@ public class MainWindow {
 
     private Tab createDecksTab() {
         deckTable = new TableView<>(deckRows);
+        deckTable.setId("deckTable");
         deckTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         configureDeckTable(deckTable);
 
         archivedDeckTable = new TableView<>(archivedDeckRows);
+        archivedDeckTable.setId("archivedDeckTable");
         archivedDeckTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         configureDeckTable(archivedDeckTable);
         archivedDeckTable.setPrefHeight(180);
 
         Button switchButton = new Button("Switch selected");
+        switchButton.setId("switchDeckButton");
         switchButton.setOnAction(event -> {
             DeckRow selected = deckTable.getSelectionModel().getSelectedItem();
             if (selected != null) {
@@ -447,8 +463,10 @@ public class MainWindow {
             }
         });
         Button restoreButton = new Button("Restore selected archived deck");
+        restoreButton.setId("restoreDeckButton");
         restoreButton.setOnAction(event -> restoreSelectedArchivedDeck());
         Button refreshButton = new Button("Refresh");
+        refreshButton.setId("refreshDecksButton");
         refreshButton.setOnAction(event -> refreshDeckTable());
         VBox content = new VBox(12,
             sectionTitle("Active Decks"),
@@ -461,6 +479,7 @@ public class MainWindow {
         content.setPadding(new Insets(24));
         VBox.setVgrow(deckTable, Priority.ALWAYS);
         Tab tab = new Tab("Decks", content);
+        tab.setId("decksTab");
         tab.setClosable(false);
         return tab;
     }
@@ -479,6 +498,7 @@ public class MainWindow {
 
     private Tab createReviewTab() {
         reviewModeSelector = new ComboBox<>();
+        reviewModeSelector.setId("reviewModeSelector");
         reviewModeSelector.getItems().setAll(ReviewMode.values());
         reviewModeSelector.setCellFactory(list -> reviewModeCell());
         reviewModeSelector.setButtonCell(reviewModeCell());
@@ -489,22 +509,27 @@ public class MainWindow {
                 loadNextReviewWord();
             }));
         sessionSizeSelector = new ComboBox<>();
+        sessionSizeSelector.setId("sessionSizeSelector");
         sessionSizeSelector.getItems().setAll("10", "20", "50", "All Due", "Custom");
         sessionSizeSelector.getSelectionModel().select("20");
         customSessionSizeField = new TextField();
+        customSessionSizeField.setId("customSessionSizeField");
         customSessionSizeField.setPromptText("Custom");
         customSessionSizeField.setPrefWidth(90);
         customSessionSizeField.setDisable(true);
         sessionSizeSelector.valueProperty().addListener((observable, oldValue, newValue) ->
             customSessionSizeField.setDisable(!"Custom".equals(newValue)));
         Button startSessionButton = new Button("Start Session");
+        startSessionButton.setId("startSessionButton");
         startSessionButton.setOnAction(event -> startReviewSession());
         Button resetSessionButton = new Button("Reset Session");
+        resetSessionButton.setId("resetSessionButton");
         resetSessionButton.setOnAction(event -> guard("Reset session failed", () -> {
             reviewService.resetSession(currentDeck.getId());
             loadNextReviewWord();
         }));
         sessionProgressLabel = new Label();
+        sessionProgressLabel.setId("sessionProgressLabel");
         sessionProgressLabel.setStyle("-fx-text-fill: #4b5563;");
         HBox modeBox = new HBox(10, new Label("Mode"), reviewModeSelector, sessionProgressLabel);
         modeBox.setAlignment(Pos.CENTER_LEFT);
@@ -513,26 +538,34 @@ public class MainWindow {
         sessionBox.setAlignment(Pos.CENTER_LEFT);
 
         reviewWordLabel = new Label("Loading...");
+        reviewWordLabel.setId("reviewWordLabel");
         reviewWordLabel.setStyle("-fx-font-size: 34px; -fx-font-weight: 700;");
         reviewMetaLabel = new Label();
+        reviewMetaLabel.setId("reviewMetaLabel");
         reviewMetaLabel.setStyle("-fx-text-fill: #4b5563;");
         answerField = new TextField();
+        answerField.setId("answerField");
         answerField.setPromptText("Enter Chinese meaning");
         answerField.setPrefWidth(420);
         submitAnswerButton = new Button("Submit");
+        submitAnswerButton.setId("submitAnswerButton");
         submitAnswerButton.setOnAction(event -> guard("Submit answer failed", this::submitCurrentAnswer));
         answerField.setOnAction(event -> guard("Submit answer failed", this::submitCurrentAnswer));
 
         reviewResultArea = new TextArea();
+        reviewResultArea.setId("reviewResultArea");
         reviewResultArea.setEditable(false);
         reviewResultArea.setWrapText(true);
         reviewResultArea.setPrefRowCount(8);
 
         completionTitleLabel = new Label("Review complete");
+        completionTitleLabel.setId("completionTitleLabel");
         completionTitleLabel.setStyle("-fx-font-size: 22px; -fx-font-weight: 700;");
         completionMetricsLabel = new Label();
+        completionMetricsLabel.setId("completionMetricsLabel");
         completionMetricsLabel.setWrapText(true);
         completionCard = new VBox(8, completionTitleLabel, completionMetricsLabel);
+        completionCard.setId("completionCard");
         completionCard.setPadding(new Insets(16));
         completionCard.setStyle("-fx-background-color: #ecfdf5; -fx-border-color: #10b981; -fx-border-radius: 6; -fx-background-radius: 6;");
         completionCard.setVisible(false);
@@ -544,6 +577,7 @@ public class MainWindow {
             ratingButton(ReviewRating.GOOD),
             ratingButton(ReviewRating.EASY)
         );
+        ratingButtons.setId("ratingButtons");
         ratingButtons.setDisable(true);
 
         HBox answerBox = new HBox(10, answerField, submitAnswerButton);
@@ -554,8 +588,15 @@ public class MainWindow {
         VBox.setVgrow(reviewResultArea, Priority.ALWAYS);
 
         Tab tab = new Tab("Review", content);
+        tab.setId("reviewTab");
         tab.setClosable(false);
         return tab;
+    }
+
+    /** The id of a rating button: rateAgainButton, rateHardButton, rateGoodButton or rateEasyButton. */
+    private static String ratingButtonId(ReviewRating rating) {
+        String name = rating.name();
+        return "rate" + name.charAt(0) + name.substring(1).toLowerCase(java.util.Locale.ROOT) + "Button";
     }
 
     private ListCell<ReviewMode> reviewModeCell() {
@@ -570,6 +611,7 @@ public class MainWindow {
 
     private Button ratingButton(ReviewRating rating) {
         Button button = new Button(rating.getLabel());
+        button.setId(ratingButtonId(rating));
         button.setMinWidth(90);
         button.setOnAction(event -> rateCurrentWord(rating));
         return button;
@@ -577,30 +619,40 @@ public class MainWindow {
 
     private Tab createAddImportTab() {
         TextField englishField = new TextField();
+        englishField.setId("addEnglishField");
         englishField.setPromptText("English");
         TextField chineseField = new TextField();
+        chineseField.setId("addChineseField");
         chineseField.setPromptText("Chinese meaning");
         TextField phoneticField = new TextField();
+        phoneticField.setId("addPhoneticField");
         phoneticField.setPromptText("Phonetic");
         TextField posField = new TextField();
+        posField.setId("addPosField");
         posField.setPromptText("Part of speech");
         TextField tagsField = new TextField();
+        tagsField.setId("addTagsField");
         tagsField.setPromptText("Tags");
         TextArea exampleArea = new TextArea();
+        exampleArea.setId("addExampleArea");
         exampleArea.setPromptText("Example sentence");
         exampleArea.setPrefRowCount(2);
         TextArea noteArea = new TextArea();
+        noteArea.setId("addNoteArea");
         noteArea.setPromptText("Notes");
         noteArea.setPrefRowCount(3);
         Label addStatus = new Label();
+        addStatus.setId("addWordStatusLabel");
         addStatus.setWrapText(true);
         addDeckSelector = new ComboBox<>();
+        addDeckSelector.setId("addDeckSelector");
         addDeckSelector.setPrefWidth(260);
         addDeckSelector.setCellFactory(list -> deckCell());
         addDeckSelector.setButtonCell(deckCell());
         refreshAddDeckSelector();
 
         Button addButton = new Button("Add word");
+        addButton.setId("addWordButton");
         addButton.setOnAction(event -> addWordFromForm(
             englishField, chineseField, phoneticField, posField, exampleArea, noteArea, tagsField, addStatus));
 
@@ -637,6 +689,7 @@ public class MainWindow {
         ScrollPane scrollPane = new ScrollPane(content);
         scrollPane.setFitToWidth(true);
         Tab tab = new Tab("Add / Import", scrollPane);
+        tab.setId("addImportTab");
         tab.setClosable(false);
         return tab;
     }
@@ -645,12 +698,17 @@ public class MainWindow {
                                      TextField posField, TextArea exampleArea, TextArea noteArea,
                                      TextField tagsField) {
         TextField lookupField = new TextField();
+        lookupField.setId("lookupField");
         lookupField.setPromptText("Enter an English word to look up");
         Button lookupButton = new Button("Lookup online");
+        lookupButton.setId("lookupButton");
         Button refreshLookupButton = new Button("Refresh cache");
+        refreshLookupButton.setId("refreshLookupButton");
         Label lookupStatus = new Label();
+        lookupStatus.setId("lookupStatusLabel");
         lookupStatus.setWrapText(true);
         ListView<DictionaryEntry> results = new ListView<>();
+        results.setId("lookupResults");
         results.setPrefHeight(120);
         results.setCellFactory(list -> new ListCell<>() {
             @Override
@@ -715,25 +773,25 @@ public class MainWindow {
 
     private VBox createEcdictSettingsBox() {
         TextField pathField = new TextField(settingsService.getEcdictPath().orElse(""));
+        pathField.setId("ecdictPathField");
         pathField.setPromptText("Choose local ECDICT CSV");
         Label statusLabel = new Label(new LocalDictionaryService(pathField.getText()).status().toDisplayText());
+        statusLabel.setId("ecdictStatusLabel");
         statusLabel.setWrapText(true);
 
         Button chooseButton = new Button("Choose ECDICT CSV");
+        chooseButton.setId("chooseEcdictButton");
         chooseButton.setOnAction(event -> {
-            FileChooser chooser = new FileChooser();
-            chooser.setTitle("Choose ECDICT CSV");
-            chooser.getExtensionFilters().addAll(
+            List<FileChooser.ExtensionFilter> filters = List.of(
                 new FileChooser.ExtensionFilter("CSV", "*.csv"),
                 new FileChooser.ExtensionFilter("All Files", "*.*")
             );
-            java.io.File file = chooser.showOpenDialog(chooseButton.getScene().getWindow());
-            if (file != null) {
-                pathField.setText(file.toPath().toString());
-            }
+            dialogs.chooseOpenFile(chooseButton.getScene().getWindow(), "Choose ECDICT CSV", filters)
+                .ifPresent(file -> pathField.setText(file.toString()));
         });
 
         Button testButton = new Button("Test ECDICT");
+        testButton.setId("testEcdictButton");
         testButton.setOnAction(event -> {
             LocalDictionaryStatus status = new LocalDictionaryService(pathField.getText()).status();
             statusLabel.setText(status.toDisplayText()
@@ -741,6 +799,7 @@ public class MainWindow {
         });
 
         Button saveButton = new Button("Save Dictionary Path");
+        saveButton.setId("saveEcdictButton");
         saveButton.setOnAction(event -> guard("Save dictionary path failed", () -> {
             settingsService.saveEcdictPath(pathField.getText());
             LocalDictionaryService local = new LocalDictionaryService(pathField.getText());
@@ -752,6 +811,7 @@ public class MainWindow {
         }));
 
         Button clearButton = new Button("Clear Dictionary Path");
+        clearButton.setId("clearEcdictButton");
         clearButton.setOnAction(event -> guard("Clear dictionary path failed", () -> {
             settingsService.clearEcdictPath();
             pathField.clear();
@@ -766,18 +826,24 @@ public class MainWindow {
 
     private VBox createAiSettingsBox() {
         TextField providerField = new TextField(settingsService.getAiProvider().orElse("openai-compatible"));
+        providerField.setId("aiProviderField");
         providerField.setPromptText("openai-compatible");
         TextField baseUrlField = new TextField(settingsService.getAiBaseUrl().orElse(""));
+        baseUrlField.setId("aiBaseUrlField");
         baseUrlField.setPromptText("https://your-provider.example/v1/chat/completions");
         PasswordField apiKeyField = new PasswordField();
+        apiKeyField.setId("aiApiKeyField");
         apiKeyField.setText(settingsService.getAiApiKey().orElse(""));
         apiKeyField.setPromptText("API key");
         TextField modelField = new TextField(settingsService.getAiModel().orElse(""));
+        modelField.setId("aiModelField");
         modelField.setPromptText("model name");
         Label statusLabel = new Label(aiStatusText());
+        statusLabel.setId("aiStatusLabel");
         statusLabel.setWrapText(true);
 
         Button saveButton = new Button("Save AI Settings");
+        saveButton.setId("saveAiButton");
         saveButton.setOnAction(event -> {
             try {
                 settingsService.saveAiSettings(
@@ -795,6 +861,7 @@ public class MainWindow {
         });
 
         Button clearButton = new Button("Clear AI Settings");
+        clearButton.setId("clearAiButton");
         clearButton.setOnAction(event -> guard("Clear AI settings failed", () -> {
             settingsService.clearAiSettings();
             providerField.setText("openai-compatible");
@@ -806,6 +873,7 @@ public class MainWindow {
         }));
 
         Button testButton = new Button("Test AI Explanation");
+        testButton.setId("testAiButton");
         testButton.setOnAction(event -> {
             // Ask the saved provider directly: no cache, so a fixed key or model shows up at once,
             // and no mock fallback, so a failure shows the provider's error instead of mock text.
@@ -854,12 +922,12 @@ public class MainWindow {
     }
 
     private void reloadDictionaryService() {
-        dictionaryService = DictionaryServiceFactory.create(dictionaryCacheRepository, settingsService);
+        dictionaryService = dictionaryServices.get();
         updateHeaderSubtitle();
     }
 
     private void reloadAiService() {
-        aiService = AiServiceFactory.create(aiCacheRepository, settingsService);
+        aiService = aiServices.get();
         updateHeaderSubtitle();
     }
 
@@ -872,25 +940,28 @@ public class MainWindow {
 
     private VBox createImportBox() {
         TextField importPathField = new TextField();
+        importPathField.setId("importPathField");
         importPathField.setPromptText("Choose legacy txt or GRE CSV");
         Button chooseButton = new Button("Choose file");
+        chooseButton.setId("chooseImportFileButton");
         chooseButton.setOnAction(event -> {
-            FileChooser chooser = new FileChooser();
-            chooser.setTitle("Choose import file");
-            chooser.getExtensionFilters().addAll(
+            List<FileChooser.ExtensionFilter> filters = List.of(
                 new FileChooser.ExtensionFilter("Import Files", "*.txt", "*.csv"),
                 new FileChooser.ExtensionFilter("All Files", "*.*")
             );
-            java.io.File file = chooser.showOpenDialog(chooseButton.getScene().getWindow());
-            if (file != null) {
-                importPathField.setText(file.toPath().toString());
-            }
+            dialogs.chooseOpenFile(chooseButton.getScene().getWindow(), "Choose import file", filters)
+                .ifPresent(file -> importPathField.setText(file.toString()));
         });
         Button importLegacyButton = new Button("Import legacy txt");
+        importLegacyButton.setId("importLegacyButton");
         Button importCsvButton = new Button("Import GRE CSV");
+        importCsvButton.setId("importCsvButton");
         Button previewCsvButton = new Button("Preview GRE CSV");
+        previewCsvButton.setId("previewCsvButton");
         Button importStarterButton = new Button("Import GRE starter deck");
+        importStarterButton.setId("importStarterButton");
         Label importStatus = new Label();
+        importStatus.setId("importStatusLabel");
         importStatus.setWrapText(true);
 
         importLegacyButton.setOnAction(event -> importFromPath(importPathField, importStatus, true));
@@ -925,6 +996,7 @@ public class MainWindow {
         CategoryAxis reviewDateAxis = new CategoryAxis();
         reviewDateAxis.setTickLabelRotation(-35);
         reviewCountChart = new BarChart<>(reviewDateAxis, new NumberAxis());
+        reviewCountChart.setId("reviewCountChart");
         reviewCountChart.setTitle("Daily review count");
         reviewCountChart.setLegendVisible(false);
         reviewCountChart.setAnimated(false);
@@ -934,6 +1006,7 @@ public class MainWindow {
         CategoryAxis accuracyDateAxis = new CategoryAxis();
         accuracyDateAxis.setTickLabelRotation(-35);
         accuracyChart = new LineChart<>(accuracyDateAxis, new NumberAxis(0, 1, 0.25));
+        accuracyChart.setId("accuracyChart");
         accuracyChart.setTitle("Accuracy trend");
         accuracyChart.setLegendVisible(false);
         accuracyChart.setAnimated(false);
@@ -941,36 +1014,48 @@ public class MainWindow {
         accuracyChart.setMinHeight(280);
 
         memoryChart = new PieChart();
+        memoryChart.setId("memoryChart");
         memoryChart.setTitle("Memory strength distribution");
         memoryChart.setPrefHeight(260);
         memoryChart.setLabelsVisible(false);
 
         overdueStatsLabel = new Label("-");
+        overdueStatsLabel.setId("overdueStatsLabel");
         overdueStatsLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: 600;");
         hardestWordsArea = new TextArea();
+        hardestWordsArea.setId("hardestWordsArea");
         hardestWordsArea.setEditable(false);
         hardestWordsArea.setWrapText(true);
         hardestWordsArea.setPrefRowCount(8);
         analyticsArea = new TextArea();
+        analyticsArea.setId("analyticsArea");
         analyticsArea.setEditable(false);
         analyticsArea.setWrapText(true);
         analyticsArea.setPrefRowCount(8);
 
         Button refreshButton = new Button("Refresh statistics");
+        refreshButton.setId("refreshStatisticsButton");
         refreshButton.setOnAction(event -> guard("Refresh statistics failed", this::refreshStatistics));
         Button exportButton = new Button("Export Markdown report");
+        exportButton.setId("exportReportButton");
         exportButton.setOnAction(event -> exportReport());
         Button exportWordsButton = new Button("Export words CSV");
+        exportWordsButton.setId("exportWordsCsvButton");
         exportWordsButton.setOnAction(event -> exportWordsCsv());
         Button exportLogsButton = new Button("Export review logs CSV");
+        exportLogsButton.setId("exportReviewLogsCsvButton");
         exportLogsButton.setOnAction(event -> exportReviewLogsCsv());
         Button exportBackupButton = new Button("Export JSON backup");
+        exportBackupButton.setId("exportBackupButton");
         exportBackupButton.setOnAction(event -> exportJsonBackup());
         Button importBackupButton = new Button("Import JSON backup");
+        importBackupButton.setId("importBackupButton");
         importBackupButton.setOnAction(event -> importJsonBackup());
         Button openDataDirButton = new Button("Open data folder");
+        openDataDirButton.setId("openDataFolderButton");
         openDataDirButton.setOnAction(event -> openDataFolder());
         Button openLogDirButton = new Button("Open log folder");
+        openLogDirButton.setId("openLogFolderButton");
         openLogDirButton.setOnAction(event -> openLogFolder());
 
         HBox buttons = new HBox(10, refreshButton, exportButton, exportWordsButton, exportLogsButton,
@@ -979,10 +1064,12 @@ public class MainWindow {
         VBox charts = new VBox(16, reviewCountChart, accuracyChart, memoryChart, overdueStatsLabel,
             sectionTitle("Hardest Words"), hardestWordsArea,
             sectionTitle("Portfolio Summary"), analyticsArea, buttons, folderButtons);
+        charts.setId("statisticsCharts");
         charts.setPadding(new Insets(24));
         ScrollPane scrollPane = new ScrollPane(charts);
         scrollPane.setFitToWidth(true);
         Tab tab = new Tab("Statistics", scrollPane);
+        tab.setId("statisticsTab");
         tab.setClosable(false);
         tab.setOnSelectionChanged(event -> {
             if (tab.isSelected()) {
@@ -995,14 +1082,18 @@ public class MainWindow {
 
     private Tab createWordListTab() {
         searchField = new TextField();
+        searchField.setId("wordSearchField");
         searchField.setPromptText("Search English, Chinese or tags");
         wordStatusFilter = new ComboBox<>();
+        wordStatusFilter.setId("wordStatusFilter");
         wordStatusFilter.getItems().setAll("All", "Due", "Weak", "Mastered", "Unverified");
         wordStatusFilter.getSelectionModel().select("All");
         tagFilterField = new TextField();
+        tagFilterField.setId("wordTagFilterField");
         tagFilterField.setPromptText("Tag");
         tagFilterField.setPrefWidth(120);
         posFilterField = new TextField();
+        posFilterField.setId("wordPosFilterField");
         posFilterField.setPromptText("POS");
         posFilterField.setPrefWidth(120);
         PauseTransition searchDebounce = new PauseTransition(Duration.millis(250));
@@ -1012,10 +1103,13 @@ public class MainWindow {
         posFilterField.textProperty().addListener((observable, oldValue, newValue) -> searchDebounce.playFromStart());
         wordStatusFilter.valueProperty().addListener((observable, oldValue, newValue) -> refreshWordTable());
         Button refreshButton = new Button("Refresh");
+        refreshButton.setId("refreshWordsButton");
         refreshButton.setOnAction(event -> refreshWordTable());
         Button editButton = new Button("Edit selected");
+        editButton.setId("editWordButton");
         editButton.setOnAction(event -> editSelectedWord());
         Button deleteButton = new Button("Delete selected");
+        deleteButton.setId("deleteWordButton");
         deleteButton.setOnAction(event -> deleteSelectedWord());
 
         HBox controls = new HBox(10, searchField, wordStatusFilter, tagFilterField, posFilterField,
@@ -1023,6 +1117,7 @@ public class MainWindow {
         HBox.setHgrow(searchField, Priority.ALWAYS);
 
         wordTable = new TableView<>(wordItems);
+        wordTable.setId("wordTable");
         wordTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         TableColumn<WordCard, String> englishCol = new TableColumn<>("English");
         englishCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getEnglish()));
@@ -1042,6 +1137,7 @@ public class MainWindow {
         content.setPadding(new Insets(24));
         VBox.setVgrow(wordTable, Priority.ALWAYS);
         Tab tab = new Tab("Word List", content);
+        tab.setId("wordListTab");
         tab.setClosable(false);
         return tab;
     }
@@ -1483,12 +1579,9 @@ public class MainWindow {
     }
 
     private void exportReport() {
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("Export learning report");
-        chooser.setInitialFileName("vocaboost-learning-report.md");
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Markdown", "*.md"));
-        java.io.File file = chooser.showSaveDialog(reviewCountChart.getScene().getWindow());
-        if (file == null) {
+        Optional<Path> file = dialogs.chooseSaveFile(reviewCountChart.getScene().getWindow(), "Export learning report",
+            "vocaboost-learning-report.md", List.of(new FileChooser.ExtensionFilter("Markdown", "*.md")));
+        if (file.isEmpty()) {
             return;
         }
         try {
@@ -1496,7 +1589,7 @@ public class MainWindow {
                 currentDeck.getId(),
                 currentDeck.getName(),
                 goalService.getTodayProgress(currentDeck.getId()),
-                file.toPath()
+                file.get()
             );
             showInfo("Report exported: " + exported.toAbsolutePath());
         } catch (RuntimeException e) {
@@ -1521,15 +1614,12 @@ public class MainWindow {
 
     private void exportBackupFile(String title, String fileName, String extensionName, String extension,
                                   java.util.function.Function<Path, Path> exporter) {
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle(title);
-        chooser.setInitialFileName(fileName);
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(extensionName, extension));
-        java.io.File file = chooser.showSaveDialog(reviewCountChart.getScene().getWindow());
-        if (file == null) {
+        Optional<Path> file = dialogs.chooseSaveFile(reviewCountChart.getScene().getWindow(), title, fileName,
+            List.of(new FileChooser.ExtensionFilter(extensionName, extension)));
+        if (file.isEmpty()) {
             return;
         }
-        Path output = file.toPath();
+        Path output = file.get();
         runBackground(
             () -> exporter.apply(output),
             exported -> showInfo("Exported: " + exported.toAbsolutePath()),
@@ -1540,11 +1630,9 @@ public class MainWindow {
     }
 
     private void importJsonBackup() {
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("Import JSON backup");
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON", "*.json"));
-        java.io.File file = chooser.showOpenDialog(reviewCountChart.getScene().getWindow());
-        if (file == null) {
+        Optional<Path> file = dialogs.chooseOpenFile(reviewCountChart.getScene().getWindow(), "Import JSON backup",
+            List.of(new FileChooser.ExtensionFilter("JSON", "*.json")));
+        if (file.isEmpty()) {
             return;
         }
         Deck targetDeck = currentDeck;
@@ -1553,7 +1641,7 @@ public class MainWindow {
             return;
         }
         runBackground(
-            () -> backupService.importJsonBackup(file.toPath(), targetDeck.getId(), policy.get()),
+            () -> backupService.importJsonBackup(file.get(), targetDeck.getId(), policy.get()),
             result -> afterRestore(result, targetDeck),
             error -> showError("Import failed", rootMessage(error)),
             overdueStatsLabel,
@@ -1564,12 +1652,11 @@ public class MainWindow {
     private Optional<BackupService.ExistingWordPolicy> askExistingWordPolicy(Deck targetDeck) {
         ButtonType keepProgress = new ButtonType("Keep current progress", ButtonBar.ButtonData.OK_DONE);
         ButtonType useBackupProgress = new ButtonType("Use backup progress", ButtonBar.ButtonData.OTHER);
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, "", keepProgress, useBackupProgress, ButtonType.CANCEL);
-        confirm.setTitle("Import JSON backup");
-        confirm.setHeaderText("Restore the backup into " + targetDeck.getName() + "?");
-        confirm.setContentText("Words missing from this deck are added with the review schedule saved in the backup. "
-            + "For words already in the deck, keep their current review progress or replace it with the backup's.");
-        Optional<ButtonType> choice = confirm.showAndWait();
+        Optional<ButtonType> choice = dialogs.choose("Import JSON backup",
+            "Restore the backup into " + targetDeck.getName() + "?",
+            "Words missing from this deck are added with the review schedule saved in the backup. "
+                + "For words already in the deck, keep their current review progress or replace it with the backup's.",
+            keepProgress, useBackupProgress, ButtonType.CANCEL);
         if (choice.isEmpty() || choice.get() == ButtonType.CANCEL) {
             return Optional.empty();
         }
@@ -1584,15 +1671,8 @@ public class MainWindow {
             refreshAll();
             loadNextReviewWord();
         });
-        TextArea summary = new TextArea(result.toSummary());
-        summary.setEditable(false);
-        summary.setWrapText(true);
-        summary.setPrefRowCount(result.invalidRows().isEmpty() ? 5 : 12);
-        Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle("Import JSON backup");
-        alert.setHeaderText("Deck: " + targetDeck.getName());
-        alert.getDialogPane().setContent(summary);
-        alert.showAndWait();
+        dialogs.showText("Import JSON backup", "Deck: " + targetDeck.getName(), result.toSummary(),
+            result.invalidRows().isEmpty() ? 5 : 12);
     }
 
     private void openDataFolder() {
@@ -1657,12 +1737,7 @@ public class MainWindow {
         form.add(new Label("Notes"), 0, 5);
         form.add(noteArea, 1, 5);
 
-        Dialog<ButtonType> dialog = new Dialog<>();
-        dialog.setTitle("Edit word");
-        dialog.getDialogPane().setContent(form);
-        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
-        Optional<ButtonType> result = dialog.showAndWait();
-        if (result.isPresent() && result.get() == ButtonType.OK) {
+        if (dialogs.showForm("Edit word", form)) {
             try {
                 ValidatedWord validated = validationService.validate(
                     englishField.getText(),
@@ -1695,12 +1770,8 @@ public class MainWindow {
             showInfo("Please select a word to delete.");
             return;
         }
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle("Delete word");
-        confirm.setHeaderText("Delete " + selected.getEnglish() + "?");
-        confirm.setContentText("Related review logs will also be removed.");
-        Optional<ButtonType> result = confirm.showAndWait();
-        if (result.isPresent() && result.get() == ButtonType.OK) {
+        if (dialogs.confirm("Delete word", "Delete " + selected.getEnglish() + "?",
+            "Related review logs will also be removed.")) {
             try {
                 wordRepository.deleteById(selected.getId());
                 refreshAll();
@@ -1720,13 +1791,9 @@ public class MainWindow {
     }
 
     private boolean confirmUnverifiedAdd(String english, String message) {
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle("词条未找到");
-        confirm.setHeaderText("词条未找到：" + english);
-        confirm.setContentText((message == null || message.isBlank() ? "本地和在线词典都未验证该词条。" : message)
-            + System.lineSeparator() + "是否强制添加并标记为 UNVERIFIED？");
-        Optional<ButtonType> result = confirm.showAndWait();
-        return result.isPresent() && result.get() == ButtonType.OK;
+        return dialogs.confirm("词条未找到", "词条未找到：" + english,
+            (message == null || message.isBlank() ? "本地和在线词典都未验证该词条。" : message)
+                + System.lineSeparator() + "是否强制添加并标记为 UNVERIFIED？");
     }
 
     private String appendTag(String tags, String tag) {
@@ -1857,11 +1924,7 @@ public class MainWindow {
     }
 
     private void showError(String title, String message) {
-        Alert alert = new Alert(Alert.AlertType.ERROR);
-        alert.setTitle(title);
-        alert.setHeaderText(title);
-        alert.setContentText(message == null ? "Unknown error" : message);
-        alert.showAndWait();
+        dialogs.showError(title, message == null ? "Unknown error" : message);
     }
 
     private String rootMessage(Throwable throwable) {
@@ -1869,10 +1932,6 @@ public class MainWindow {
     }
 
     private void showInfo(String message) {
-        Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle("Info");
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-        alert.showAndWait();
+        dialogs.showInfo(message);
     }
 }
