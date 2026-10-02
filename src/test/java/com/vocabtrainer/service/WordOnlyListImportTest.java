@@ -153,7 +153,7 @@ class WordOnlyListImportTest {
         assertEquals("english (no header row)", preview.columns());
         assertEquals(List.of(
                 "Meaning from " + LocalDictionaryService.ECDICT_SOURCE,
-                "Not in the local dictionary: will be skipped",
+                "Not in the local dictionary: skipped",
                 "Meaning from " + LocalDictionaryService.STARTER_SOURCE),
             preview.rows().stream().map(ImportPreview.Row::status).toList());
         assertEquals("减弱; 减少", preview.rows().get(2).chinese());

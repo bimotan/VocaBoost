@@ -108,7 +108,7 @@ class WordListOnlineLookupTest {
 
         assertEquals(List.of(), server.paths(), "no request in offline mode");
         assertEquals(0, chainsBuilt.get());
-        assertEquals("Not in the local dictionary: will be skipped", preview.rows().get(1).status());
+        assertEquals("Not in the local dictionary: skipped", preview.rows().get(1).status());
         assertEquals(1, result.importedCount());
         assertTrue(result.messages().get(0).contains("is not in the local dictionary"), result.messages().toString());
     }
@@ -120,7 +120,7 @@ class WordListOnlineLookupTest {
 
         ImportPreview preview = service(chainsBuilt).previewWordList(list, deck.getId(), online);
         assertEquals(List.of(), server.paths(), "a preview never asks online");
-        assertEquals("Not in the local dictionary: will be looked up online", preview.rows().get(1).status());
+        assertEquals("Not in the local dictionary: looked up online", preview.rows().get(1).status());
 
         ImportResult result = service(chainsBuilt).importWordList(list, deck.getId(), online, progress -> { },
             () -> false);

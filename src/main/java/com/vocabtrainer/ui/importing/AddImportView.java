@@ -15,7 +15,10 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
 import javafx.scene.layout.VBox;
 
-/** The Add / Import tab: manual add with dictionary lookup, dictionary and AI settings, and file imports. */
+/**
+ * The Add / Import tab: manual add with dictionary lookup, dictionary and AI settings, file imports and
+ * exports for other apps.
+ */
 public final class AddImportView {
     private final Tab tab;
 
@@ -26,9 +29,10 @@ public final class AddImportView {
         AddWordBox addWord = new AddWordBox(context, wordRepository, validationService, configured);
         EcdictSettingsBox ecdict = new EcdictSettingsBox(context, settingsService, ecdictImportService, localDictionary);
         AiSettingsBox ai = new AiSettingsBox(context, settingsService, aiCacheRepository, configured);
-        ImportBox imports = new ImportBox(context, importExportService);
+        ImportBox imports = new ImportBox(context, importExportService, settingsService);
+        WordListExportBox exports = new WordListExportBox(context, importExportService);
 
-        VBox content = new VBox(24, addWord.root(), ecdict.root(), ai.root(), imports.root());
+        VBox content = new VBox(24, addWord.root(), ecdict.root(), ai.root(), imports.root(), exports.root());
         content.setPadding(new Insets(24));
         ScrollPane scrollPane = new ScrollPane(content);
         scrollPane.setFitToWidth(true);

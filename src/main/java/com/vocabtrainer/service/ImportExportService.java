@@ -479,8 +479,8 @@ public class ImportExportService {
                     phonetic = orElse(phonetic, entry.get().phonetic());
                     status = "Meaning from " + entry.get().source();
                 } else {
-                    status = online ? "Not in the local dictionary: will be looked up online"
-                        : "Not in the local dictionary: will be skipped";
+                    status = online ? "Not in the local dictionary: looked up online"
+                        : "Not in the local dictionary: skipped";
                 }
             }
             rows.add(new ImportPreview.Row(row.line, fields.get(WordColumn.ENGLISH), chinese, pos, phonetic,
