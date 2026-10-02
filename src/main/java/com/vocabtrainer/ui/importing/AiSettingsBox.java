@@ -1,6 +1,7 @@
 package com.vocabtrainer.ui.importing;
 
 import com.vocabtrainer.domain.WordCard;
+import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.service.AiService;
 import com.vocabtrainer.service.AiServiceFactory;
 import com.vocabtrainer.service.SettingsService;
@@ -19,19 +20,23 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
+import java.sql.SQLException;
 import java.util.Optional;
 
-/** Saves, clears and tests the optional AI provider used for review explanations. */
+/** Saves, clears and tests the optional AI provider used for review explanations, and clears its cache. */
 final class AiSettingsBox {
     private final ViewContext context;
     private final SettingsService settingsService;
+    private final AiCacheRepository aiCacheRepository;
     private final ConfiguredServices configured;
     private final Label statusLabel = new Label();
     private final VBox root;
 
-    AiSettingsBox(ViewContext context, SettingsService settingsService, ConfiguredServices configured) {
+    AiSettingsBox(ViewContext context, SettingsService settingsService, AiCacheRepository aiCacheRepository,
+                  ConfiguredServices configured) {
         this.context = context;
         this.settingsService = settingsService;
+        this.aiCacheRepository = aiCacheRepository;
         this.configured = configured;
 
         TextField providerField = new TextField(settingsService.getAiProvider().orElse("openai-compatible"));
@@ -39,7 +44,7 @@ final class AiSettingsBox {
         providerField.setPromptText("openai-compatible");
         TextField baseUrlField = new TextField(settingsService.getAiBaseUrl().orElse(""));
         baseUrlField.setId("aiBaseUrlField");
-        baseUrlField.setPromptText("https://your-provider.example/v1/chat/completions");
+        baseUrlField.setPromptText("https://api.example.com/v1 (/chat/completions is added)");
         PasswordField apiKeyField = new PasswordField();
         apiKeyField.setId("aiApiKeyField");
         apiKeyField.setText(settingsService.getAiApiKey().orElse(""));
@@ -47,6 +52,9 @@ final class AiSettingsBox {
         TextField modelField = new TextField(settingsService.getAiModel().orElse(""));
         modelField.setId("aiModelField");
         modelField.setPromptText("model name");
+        TextField temperatureField = new TextField(settingsService.getAiTemperature().map(String::valueOf).orElse(""));
+        temperatureField.setId("aiTemperatureField");
+        temperatureField.setPromptText("provider default (0 to 2)");
         statusLabel.setText(aiStatusText());
         statusLabel.setId("aiStatusLabel");
         statusLabel.setWrapText(true);
@@ -59,7 +67,8 @@ final class AiSettingsBox {
                     providerField.getText(),
                     baseUrlField.getText(),
                     apiKeyField.getText(),
-                    modelField.getText()
+                    modelField.getText(),
+                    temperatureField.getText()
                 );
                 reloadAiService();
                 statusLabel.setText("Saved. " + aiStatusText());
@@ -77,6 +86,7 @@ final class AiSettingsBox {
             baseUrlField.clear();
             apiKeyField.clear();
             modelField.clear();
+            temperatureField.clear();
             reloadAiService();
             statusLabel.setText("Cleared. " + aiStatusText());
         }));
@@ -84,6 +94,10 @@ final class AiSettingsBox {
         Button testButton = new Button("Test AI Explanation");
         testButton.setId("testAiButton");
         testButton.setOnAction(event -> testProvider(testButton));
+
+        Button clearCacheButton = new Button("Clear AI cache");
+        clearCacheButton.setId("clearAiCacheButton");
+        clearCacheButton.setOnAction(event -> clearCache());
 
         GridPane form = new GridPane();
         form.setHgap(10);
@@ -96,11 +110,13 @@ final class AiSettingsBox {
         form.add(apiKeyField, 1, 2);
         form.add(new Label("Model"), 0, 3);
         form.add(modelField, 1, 3);
+        form.add(new Label("Temperature"), 0, 4);
+        form.add(temperatureField, 1, 4);
         GridPane.setHgrow(providerField, Priority.ALWAYS);
         GridPane.setHgrow(baseUrlField, Priority.ALWAYS);
         GridPane.setHgrow(apiKeyField, Priority.ALWAYS);
         GridPane.setHgrow(modelField, Priority.ALWAYS);
-        HBox buttons = new HBox(10, saveButton, clearButton, testButton);
+        HBox buttons = new HBox(10, saveButton, clearButton, testButton, clearCacheButton);
         root = new VBox(10, Widgets.sectionTitle("AI Explanation Provider"), form, buttons, statusLabel);
     }
 
@@ -135,6 +151,20 @@ final class AiSettingsBox {
             "Testing AI explanation...",
             testButton
         );
+    }
+
+    /** Deletes every cached explanation, so each word is explained afresh the next time. */
+    private void clearCache() {
+        if (!context.dialogs().confirm("Clear AI cache", "Delete all cached AI explanations?",
+            "Every word is explained afresh by the AI provider the next time it is answered.")) {
+            return;
+        }
+        try {
+            int deleted = aiCacheRepository.deleteAll();
+            statusLabel.setText("Cleared " + deleted + " cached AI explanation" + (deleted == 1 ? "." : "s."));
+        } catch (SQLException e) {
+            context.errors().reportFailure("Clear AI cache failed", e);
+        }
     }
 
     private void reloadAiService() {

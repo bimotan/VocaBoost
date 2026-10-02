@@ -28,18 +28,32 @@ public class FallbackAiService implements AiService {
 
     @Override
     public String explain(WordCard word) {
+        return explain(ExplanationRequest.of(word));
+    }
+
+    @Override
+    public String explain(ExplanationRequest request) {
+        return ask(request, false);
+    }
+
+    @Override
+    public String regenerate(ExplanationRequest request) {
+        return ask(request, true);
+    }
+
+    private String ask(ExplanationRequest request, boolean regenerate) {
         if (!primary.isAvailable()) {
-            return fallback.explain(word);
+            return fallback.explain(request);
         }
         try {
-            String response = primary.explain(word);
+            String response = regenerate ? primary.regenerate(request) : primary.explain(request);
             if (response != null && !response.isBlank()) {
                 return response;
             }
-            return fallback.explain(word);
+            return fallback.explain(request);
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "AI provider failed; using the mock explanation instead", e);
-            return fallback.explain(word) + System.lineSeparator() + PROVIDER_FAILED_NOTE;
+            return fallback.explain(request) + System.lineSeparator() + PROVIDER_FAILED_NOTE;
         }
     }
 }

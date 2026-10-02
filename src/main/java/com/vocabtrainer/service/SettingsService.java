@@ -11,6 +11,10 @@ public class SettingsService {
     public static final String AI_BASE_URL_KEY = "ai.baseUrl";
     public static final String AI_API_KEY_KEY = "ai.apiKey";
     public static final String AI_MODEL_KEY = "ai.model";
+    /** The sampling temperature sent to the AI provider; when not set, none is sent. */
+    public static final String AI_TEMPERATURE_KEY = "ai.temperature";
+    /** The highest temperature OpenAI-compatible providers accept. */
+    public static final double MAX_AI_TEMPERATURE = 2.0;
     public static final String LAST_DECK_ID_KEY = "ui.lastDeckId";
     public static final String STARTER_IMPORTED_KEY = "starter.imported";
 
@@ -53,18 +57,44 @@ public class SettingsService {
         return get(AI_MODEL_KEY).filter(value -> !value.isBlank());
     }
 
+    /** The saved temperature; empty when none is saved, so the provider uses its default. */
+    public Optional<Double> getAiTemperature() {
+        return get(AI_TEMPERATURE_KEY).flatMap(SettingsService::parseTemperature);
+    }
+
+    /** Saves the AI settings without a temperature, so the provider uses its default. */
     public void saveAiSettings(String provider, String baseUrl, String apiKey, String model) {
+        saveAiSettings(provider, baseUrl, apiKey, model, "");
+    }
+
+    /**
+     * Saves the AI settings after checking them.
+     *
+     * @param temperature a number from 0 to 2, or blank to send none
+     * @throws IllegalArgumentException with a message for the user if a value is missing or invalid
+     */
+    public void saveAiSettings(String provider, String baseUrl, String apiKey, String model, String temperature) {
         String cleanProvider = provider == null || provider.isBlank() ? "openai-compatible" : provider.trim();
         String cleanBaseUrl = baseUrl == null ? "" : baseUrl.trim();
         String cleanApiKey = apiKey == null ? "" : apiKey.trim();
         String cleanModel = model == null ? "" : model.trim();
+        String cleanTemperature = temperature == null ? "" : temperature.trim();
         if (cleanBaseUrl.isBlank() || cleanApiKey.isBlank() || cleanModel.isBlank()) {
             throw new IllegalArgumentException("AI base URL, API key, and model are required.");
+        }
+        AiEndpoint.chatCompletions(cleanBaseUrl);
+        if (!cleanTemperature.isEmpty() && parseTemperature(cleanTemperature).isEmpty()) {
+            throw new IllegalArgumentException("Temperature must be a number from 0 to 2, or empty for the provider's default.");
         }
         save(AI_PROVIDER_KEY, cleanProvider);
         save(AI_BASE_URL_KEY, cleanBaseUrl);
         save(AI_API_KEY_KEY, cleanApiKey);
         save(AI_MODEL_KEY, cleanModel);
+        if (cleanTemperature.isEmpty()) {
+            delete(AI_TEMPERATURE_KEY);
+        } else {
+            save(AI_TEMPERATURE_KEY, cleanTemperature);
+        }
     }
 
     public void clearAiSettings() {
@@ -72,6 +102,17 @@ public class SettingsService {
         delete(AI_BASE_URL_KEY);
         delete(AI_API_KEY_KEY);
         delete(AI_MODEL_KEY);
+        delete(AI_TEMPERATURE_KEY);
+    }
+
+    /** A temperature from 0 to {@link #MAX_AI_TEMPERATURE}; empty for anything else. */
+    static Optional<Double> parseTemperature(String value) {
+        try {
+            double parsed = Double.parseDouble(value == null ? "" : value.trim());
+            return parsed >= 0 && parsed <= MAX_AI_TEMPERATURE ? Optional.of(parsed) : Optional.empty();
+        } catch (NumberFormatException e) {
+            return Optional.empty();
+        }
     }
 
     /** The deck the user last worked in; empty if never saved or not a valid id. */

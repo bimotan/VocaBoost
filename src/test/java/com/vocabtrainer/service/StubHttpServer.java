@@ -21,8 +21,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * A local HTTP server on 127.0.0.1 that answers the online dictionaries' requests from a script,
- * so their HTTP handling is tested without the network. Paths are matched exactly (decoded);
+ * A local HTTP server on 127.0.0.1 that answers the online dictionaries' and the AI provider's
+ * requests from a script, so their HTTP handling is tested without the network. Paths are matched exactly (decoded);
  * unscripted paths answer 404.
  */
 final class StubHttpServer implements AutoCloseable {
@@ -43,8 +43,8 @@ final class StubHttpServer implements AutoCloseable {
         }
     }
 
-    /** A request the server received: the decoded and the raw path, the raw query and the headers. */
-    record Request(String path, String rawPath, String rawQuery, Headers headers) {
+    /** A request the server received: the decoded and the raw path, the raw query, the headers and the body. */
+    record Request(String path, String rawPath, String rawQuery, Headers headers, String body) {
     }
 
     private final HttpServer server;
@@ -99,7 +99,9 @@ final class StubHttpServer implements AutoCloseable {
     private void handle(HttpExchange exchange) throws IOException {
         try (exchange) {
             URI uri = exchange.getRequestURI();
-            requests.add(new Request(uri.getPath(), uri.getRawPath(), uri.getRawQuery(), exchange.getRequestHeaders()));
+            String requestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            requests.add(new Request(uri.getPath(), uri.getRawPath(), uri.getRawQuery(), exchange.getRequestHeaders(),
+                requestBody));
             firstRequest.countDown();
             Answer answer = answers.getOrDefault(uri.getPath(),
                 Answer.json(404, "{\"title\":\"Not found\"}"));

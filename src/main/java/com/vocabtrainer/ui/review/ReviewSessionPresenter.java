@@ -7,6 +7,7 @@ import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.ReviewSessionSummary;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.service.AiService;
+import com.vocabtrainer.service.ExplanationRequest;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ReviewAnswer;
 import com.vocabtrainer.service.ReviewService;
@@ -71,6 +72,10 @@ public final class ReviewSessionPresenter {
     private final FailureReporter failures;
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
     private final LatestRequest explanations = new LatestRequest();
+    /** What the AI explains for the answered card on screen, and the checked answer shown above it. */
+    private ExplanationRequest explanationRequest;
+    private String checkedText = "";
+    private boolean explanationLoading;
 
     private long deckId;
     private ReviewMode mode = ReviewMode.EN_TO_ZH;
@@ -160,21 +165,22 @@ public final class ReviewSessionPresenter {
         }
         WordCard answered = card;
         ReviewAnswer checked = reviewService.submitAnswer(answered.getId(), answer, questionMode);
-        String checkedText = "Correct answer: " + checked.correctAnswer()
+        checkedText = "Correct answer: " + checked.correctAnswer()
             + System.lineSeparator() + "Your answer: " + checked.userAnswer()
             + System.lineSeparator() + "Answer similarity: " + Formats.percent(checked.similarity());
-        String separator = System.lineSeparator() + System.lineSeparator();
-        result = checkedText + separator + "AI explanation: loading...";
         state = State.ANSWERED;
-        long ticket = explanations.next();
-        AiService ai = aiServices.get();
-        fireChanged();
-        tasks.run(
-            () -> ai.explain(answered),
-            explanation -> showExplanation(ticket, checkedText + separator + explanation),
-            error -> showExplanation(ticket, checkedText + separator
-                + "AI explanation unavailable: " + ErrorMessages.rootMessage(error))
-        );
+        explanationRequest = new ExplanationRequest(answered, checked.userAnswer(), questionMode);
+        requestExplanation(false);
+    }
+
+    /**
+     * Asks the AI provider again for the answered card's explanation, bypassing the cache. Does
+     * nothing unless {@link #canRegenerateExplanation()}.
+     */
+    public void regenerateExplanation() {
+        if (canRegenerateExplanation()) {
+            requestExplanation(true);
+        }
     }
 
     /** Saves the rating of the answered card and shows the next card; does nothing before an answer was submitted. */
@@ -273,6 +279,19 @@ public final class ReviewSessionPresenter {
         return state == State.COMPLETE;
     }
 
+    /**
+     * Whether the explanation of the answered card can be asked for again: it has arrived, and an AI
+     * provider is configured and may be used.
+     */
+    public boolean canRegenerateExplanation() {
+        return canRate() && explanationRequest != null && !explanationLoading && usesAiProvider();
+    }
+
+    /** Whether explanations come from an AI provider, rather than the offline mock text. */
+    public boolean usesAiProvider() {
+        return aiServices.get().isAvailable();
+    }
+
     public String answer() {
         return answer;
     }
@@ -332,6 +351,8 @@ public final class ReviewSessionPresenter {
 
     private void loadNextCard() {
         explanations.invalidate();
+        explanationRequest = null;
+        explanationLoading = false;
         card = null;
         answer = "";
         result = "";
@@ -381,11 +402,30 @@ public final class ReviewSessionPresenter {
         result = "Use Weak Words mode to keep working on your most fragile cards, or switch deck from the header.";
     }
 
+    /** Shows the checked answer with "loading" and asks the AI service for its explanation. */
+    private void requestExplanation(boolean regenerate) {
+        String separator = System.lineSeparator() + System.lineSeparator();
+        String shownAnswer = checkedText;
+        ExplanationRequest request = explanationRequest;
+        result = shownAnswer + separator + "AI explanation: loading...";
+        explanationLoading = true;
+        long ticket = explanations.next();
+        AiService ai = aiServices.get();
+        fireChanged();
+        tasks.run(
+            () -> regenerate ? ai.regenerate(request) : ai.explain(request),
+            explanation -> showExplanation(ticket, shownAnswer + separator + explanation),
+            error -> showExplanation(ticket, shownAnswer + separator
+                + "AI explanation unavailable: " + ErrorMessages.rootMessage(error))
+        );
+    }
+
     /** Shows an explanation only for the answer it was requested for, never on a later card. */
     private void showExplanation(long ticket, String text) {
         if (explanations.isLatest(ticket) && (state == State.ANSWERED || state == State.SAVING
             || state == State.RATING_FAILED)) {
             result = text;
+            explanationLoading = false;
             fireChanged();
         }
     }

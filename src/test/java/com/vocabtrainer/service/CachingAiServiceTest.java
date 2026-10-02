@@ -1,5 +1,6 @@
 package com.vocabtrainer.service;
 
+import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.DatabaseManager;
@@ -13,6 +14,8 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.Statement;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -52,6 +55,65 @@ class CachingAiServiceTest {
     }
 
     @Test
+    void eachAnswerGetsItsOwnExplanationAndSpacingOrCaseDoNotMatter() throws Exception {
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("ai-answers.db"));
+        List<String> asked = new ArrayList<>();
+        CachingAiService service = new CachingAiService(recordingAi(asked), new AiCacheRepository(databaseManager),
+            "provider-a");
+        WordCard word = WordCard.createNew(1, "abandon", "放纵; 放弃");
+
+        String first = service.explain(new ExplanationRequest(word, "放弃", ReviewMode.EN_TO_ZH));
+        assertEquals(first, service.explain(new ExplanationRequest(word, " 放弃 ", ReviewMode.EN_TO_ZH)));
+        service.explain(new ExplanationRequest(word, "放纵", ReviewMode.EN_TO_ZH));
+        service.explain(new ExplanationRequest(word, "Abandon", ReviewMode.ZH_TO_EN));
+        assertEquals("explanation 3 for Abandon",
+            service.explain(new ExplanationRequest(word, "abandon  ", ReviewMode.ZH_TO_EN)));
+        service.explain(ExplanationRequest.of(word));
+
+        assertEquals(List.of("放弃", "放纵", "Abandon", "(none)"), asked,
+            "an explanation written for one answer is never shown for another");
+    }
+
+    @Test
+    void regenerateAsksAgainAndReplacesTheCachedExplanation() throws Exception {
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("ai-regenerate.db"));
+        List<String> asked = new ArrayList<>();
+        AiCacheRepository repository = new AiCacheRepository(databaseManager);
+        CachingAiService service = new CachingAiService(recordingAi(asked), repository, "provider-a");
+        ExplanationRequest request = new ExplanationRequest(WordCard.createNew(1, "lucid", "清晰的"), "清楚",
+            ReviewMode.EN_TO_ZH);
+
+        assertEquals("explanation 1 for 清楚", service.explain(request));
+        assertEquals("explanation 1 for 清楚", service.explain(request));
+        assertEquals("explanation 2 for 清楚", service.regenerate(request), "regenerate bypasses the cache");
+        assertEquals("explanation 2 for 清楚", service.explain(request), "the new explanation replaced the old one");
+        assertEquals(2, asked.size());
+
+        assertEquals(1, repository.deleteAll());
+        assertEquals("explanation 3 for 清楚", service.explain(request), "a cleared cache asks again");
+    }
+
+    private static AiService recordingAi(List<String> asked) {
+        return new AiService() {
+            @Override
+            public boolean isAvailable() {
+                return true;
+            }
+
+            @Override
+            public String explain(WordCard word) {
+                return explain(ExplanationRequest.of(word));
+            }
+
+            @Override
+            public String explain(ExplanationRequest request) {
+                asked.add(request.hasAnswer() ? request.typedAnswer() : "(none)");
+                return "explanation " + asked.size() + " for " + asked.get(asked.size() - 1);
+            }
+        };
+    }
+
+    @Test
     void cacheKeyChangesWithProviderIdentityAndPromptFields() {
         AiService delegate = new MockAiService();
         CachingAiService modelA = new CachingAiService(delegate, null, "openai-compatible|prompt-v1|https://a.test|model-a");
@@ -61,11 +123,12 @@ class CachingAiServiceTest {
         WordCard withExample = WordCard.createNew(1, "lucid", "清晰的");
         withExample.setExampleSentence("Her lucid explanation helped.");
 
-        String key = modelA.cacheKey(word);
+        String key = modelA.cacheKey(ExplanationRequest.of(word));
 
-        assertEquals(key, modelARebuilt.cacheKey(word), "same provider and word must hit the same row");
-        assertNotEquals(key, modelB.cacheKey(word), "another model must not reuse this explanation");
-        assertNotEquals(key, modelA.cacheKey(withExample), "the prompt sends the example, so it is part of the key");
+        assertEquals(key, modelARebuilt.cacheKey(ExplanationRequest.of(word)), "same provider and word must hit the same row");
+        assertNotEquals(key, modelB.cacheKey(ExplanationRequest.of(word)), "another model must not reuse this explanation");
+        assertNotEquals(key, modelA.cacheKey(ExplanationRequest.of(withExample)),
+            "the prompt sends the example, so it is part of the key");
         assertTrue(key.startsWith("explain:v2:lucid:"), key);
         assertEquals("explain:v2:lucid:".length() + 64, key.length());
     }

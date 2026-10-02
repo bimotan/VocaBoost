@@ -52,7 +52,12 @@ public class CachingAiService implements AiService {
 
     @Override
     public String explain(WordCard word) {
-        String key = cacheKey(word);
+        return explain(ExplanationRequest.of(word));
+    }
+
+    @Override
+    public String explain(ExplanationRequest request) {
+        String key = cacheKey(request);
         if (delegate.isAvailable()) {
             try {
                 var cached = cacheRepository.find(key);
@@ -64,7 +69,17 @@ public class CachingAiService implements AiService {
                 LOGGER.log(Level.WARNING, "Cannot read AI explanation cache; asking the provider instead", e);
             }
         }
-        String response = delegate.explain(word);
+        return askAndSave(key, request);
+    }
+
+    /** Asks the provider again, whatever is cached, and replaces the cached explanation. */
+    @Override
+    public String regenerate(ExplanationRequest request) {
+        return askAndSave(cacheKey(request), request);
+    }
+
+    private String askAndSave(String key, ExplanationRequest request) {
+        String response = delegate.explain(request);
         if (delegate.isAvailable() && response != null && !response.isBlank()) {
             try {
                 cacheRepository.save(key, response, LocalDateTime.now(clock));
@@ -77,14 +92,18 @@ public class CachingAiService implements AiService {
     }
 
     /**
-     * {@code explain:v2:<english>:<sha-256>}. The hash covers the provider identity and every word
-     * field the prompt sends, so the key stays short and the base URL is not stored in clear text.
+     * {@code explain:v2:<english>:<sha-256>}. The hash covers the provider identity and everything
+     * the prompt sends ({@link OpenAiCompatibleAiService#prompt}): the word's fields, the question's
+     * direction and the learner's answer, so the key stays short, an explanation written for one
+     * answer is not shown for another, and the base URL is not stored in clear text.
      */
-    String cacheKey(WordCard word) {
-        String english = word == null ? "" : clean(word.getEnglish()).toLowerCase(Locale.ROOT);
-        String chinese = word == null ? "" : clean(word.getChinese());
-        String example = word == null ? "" : clean(word.getExampleSentence());
-        String hashed = String.join("\0", providerIdentity, english, chinese, example);
+    String cacheKey(ExplanationRequest request) {
+        WordCard word = request.word();
+        String english = clean(word.getEnglish()).toLowerCase(Locale.ROOT);
+        String direction = request.hasAnswer() ? request.direction().name() : "";
+        String answer = request.hasAnswer() ? request.normalizedAnswer() : "";
+        String hashed = String.join("\0", providerIdentity, english, clean(word.getChinese()),
+            clean(word.getExampleSentence()), clean(word.getPartOfSpeech()), direction, answer);
         return KEY_PREFIX + english + ":" + sha256(hashed);
     }
 
