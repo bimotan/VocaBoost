@@ -38,7 +38,8 @@ class WordUiTest extends MainWindowUiTest {
 
         selectTab("dashboardTab");
         assertEquals(String.valueOf(STARTER_WORDS + 1), text("totalWordsLabel"));
-        assertEquals("1 / 5", text("newWordsTodayLabel"));
+        assertEquals("0 / 5", text("newWordsTodayLabel"), "a word counts as new when it is first reviewed");
+        assertEquals("0", text("xpLabel"), "adding a word earns no XP");
         selectTab("wordListTab");
         assertEquals(STARTER_WORDS + 1, rowCount("wordTable"));
         assertTrue(wordListEnglish().contains("obfuscate"));

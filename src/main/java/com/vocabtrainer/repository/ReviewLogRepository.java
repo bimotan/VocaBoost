@@ -28,11 +28,28 @@ public class ReviewLogRepository {
      */
     static final String CORRECT = "(CASE WHEN l.effective_rating IS NOT NULL THEN l.effective_rating <> 'AGAIN'"
         + " ELSE l.rating <> 'AGAIN' AND l.similarity >= " + ReviewRating.MIN_SIMILARITY_HARD + " END)";
+    /**
+     * A review_logs row aliased {@code l} is a review: not the practice of a word that was not due
+     * ({@link ReviewKind#PRACTICE}), which counts towards no goal, accuracy or streak.
+     */
+    static final String IS_REVIEW = "l.kind <> 'PRACTICE'";
 
     private final DatabaseManager databaseManager;
 
-    /** Reviews on one day, and how many of them were correct ({@link ReviewLog#isCorrect()}). */
-    public record DailyCount(LocalDate day, int reviews, int correct) {
+    /**
+     * The reviews of one study day: how many there were, how many were correct
+     * ({@link ReviewLog#isCorrect()}) and how many were the first review of a new word
+     * ({@link ReviewKind#LEARN}). Practice is not counted.
+     */
+    public record DailyCount(LocalDate day, int reviews, int correct, int newWords) {
+        public static DailyCount none(LocalDate day) {
+            return new DailyCount(day, 0, 0, 0);
+        }
+
+        /** Correct reviews over all reviews; 0 on a day without reviews. */
+        public double accuracy() {
+            return reviews == 0 ? 0.0 : correct / (double) reviews;
+        }
     }
 
     public ReviewLogRepository(DatabaseManager databaseManager) {
@@ -239,42 +256,94 @@ public class ReviewLogRepository {
     }
 
     /**
-     * Review counts per day since {@code since}, oldest day first; days without reviews are left
-     * out. A {@code deckId} of 0 or less counts every deck.
+     * The reviews of each study day from {@code from} (inclusive) to {@code to} (exclusive), oldest
+     * day first; days without reviews are left out. This is where every daily number of the app
+     * comes from: the dashboard, the daily goal, the statistics and the report.
+     *
+     * @param deckId       the deck whose reviews count; 0 or less counts every deck
+     * @param rolloverHour the hour (0 to 23) at which a study day starts, so a review at 1 am counts
+     *                     for the day before when it is 4 (see {@code StudyDay})
      */
-    public List<DailyCount> dailyCounts(long deckId, LocalDateTime since) throws SQLException {
-        String sql = deckId <= 0 ? """
-            SELECT substr(l.reviewed_at, 1, 10) AS day,
+    public List<DailyCount> dailyCounts(long deckId, LocalDateTime from, LocalDateTime to, int rolloverHour)
+        throws SQLException {
+        if (rolloverHour < 0 || rolloverHour > 23) {
+            throw new IllegalArgumentException("The day rollover hour must be from 0 to 23: " + rolloverHour);
+        }
+        String deckJoin = deckId > 0 ? "JOIN words w ON w.id = l.word_id" : "";
+        String deckFilter = deckId > 0 ? "w.deck_id = ? AND" : "";
+        String sql = """
+            SELECT date(l.reviewed_at, ?) AS day,
                    COUNT(*) AS reviews,
-                   SUM(CASE WHEN %s THEN 1 ELSE 0 END) AS correct
+                   SUM(CASE WHEN %s THEN 1 ELSE 0 END) AS correct,
+                   SUM(CASE WHEN l.kind = 'LEARN' THEN 1 ELSE 0 END) AS new_words
             FROM review_logs l
-            WHERE l.reviewed_at >= ?
+            %s
+            WHERE %s l.reviewed_at >= ? AND l.reviewed_at < ? AND %s
             GROUP BY day
             ORDER BY day
-            """.formatted(CORRECT) : """
-            SELECT substr(l.reviewed_at, 1, 10) AS day,
-                   COUNT(*) AS reviews,
-                   SUM(CASE WHEN %s THEN 1 ELSE 0 END) AS correct
-            FROM review_logs l
-            JOIN words w ON w.id = l.word_id
-            WHERE w.deck_id = ? AND l.reviewed_at >= ?
-            GROUP BY day
-            ORDER BY day
-            """.formatted(CORRECT);
+            """.formatted(CORRECT, deckJoin, deckFilter, IS_REVIEW);
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             int index = 1;
+            // SQLite's date() moves the time back by the rollover hour, so the date is the study day.
+            statement.setString(index++, "-" + rolloverHour + " hours");
             if (deckId > 0) {
                 statement.setLong(index++, deckId);
             }
-            statement.setString(index, DateTimeUtil.toDatabase(since));
+            statement.setString(index++, DateTimeUtil.toDatabase(from));
+            statement.setString(index, DateTimeUtil.toDatabase(to));
             try (ResultSet rs = statement.executeQuery()) {
                 List<DailyCount> counts = new ArrayList<>();
                 while (rs.next()) {
                     counts.add(new DailyCount(DateTimeUtil.dateFromDatabase(rs.getString("day")), rs.getInt("reviews"),
-                        rs.getInt("correct")));
+                        rs.getInt("correct"), rs.getInt("new_words")));
                 }
                 return counts;
+            }
+        }
+    }
+
+    /**
+     * When the newest review in any deck before {@code before} was, not counting practice; empty if
+     * there is none. One indexed lookup, so the streak can step back day by day.
+     */
+    public Optional<LocalDateTime> latestReviewBefore(LocalDateTime before) throws SQLException {
+        String sql = """
+            SELECT l.reviewed_at
+            FROM review_logs l
+            WHERE l.reviewed_at < ? AND %s
+            ORDER BY l.reviewed_at DESC
+            LIMIT 1
+            """.formatted(IS_REVIEW);
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, DateTimeUtil.toDatabase(before));
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? Optional.of(DateTimeUtil.fromDatabase(rs.getString(1))) : Optional.empty();
+            }
+        }
+    }
+
+    /**
+     * How many reviews the deck's words had, archived words included and practice not; counting
+     * stops at {@code atMost}, so asking whether there were at least 100 reads at most 100 logs.
+     */
+    public int countReviews(long deckId, int atMost) throws SQLException {
+        String sql = """
+            SELECT COUNT(*) FROM (
+                SELECT 1
+                FROM review_logs l
+                JOIN words w ON w.id = l.word_id
+                WHERE w.deck_id = ? AND %s
+                LIMIT ?
+            )
+            """.formatted(IS_REVIEW);
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            statement.setInt(2, Math.max(0, atMost));
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
             }
         }
     }
@@ -341,34 +410,6 @@ public class ReviewLogRepository {
         }
     }
 
-    public int countSince(LocalDateTime since) throws SQLException {
-        return scalarInt("SELECT COUNT(*) FROM review_logs WHERE reviewed_at >= ?", since);
-    }
-
-    /** Correct reviews ({@link ReviewLog#isCorrect()}) since {@code since}, in every deck. */
-    public int countCorrectSince(LocalDateTime since) throws SQLException {
-        return scalarInt("SELECT COUNT(*) FROM review_logs l WHERE l.reviewed_at >= ? AND " + CORRECT, since);
-    }
-
-    public int countSince(long deckId, LocalDateTime since) throws SQLException {
-        return scalarInt("""
-            SELECT COUNT(*)
-            FROM review_logs l
-            JOIN words w ON w.id = l.word_id
-            WHERE w.deck_id = ? AND l.reviewed_at >= ?
-            """, deckId, since);
-    }
-
-    /** Correct reviews ({@link ReviewLog#isCorrect()}) of the deck since {@code since}. */
-    public int countCorrectSince(long deckId, LocalDateTime since) throws SQLException {
-        return scalarInt("""
-            SELECT COUNT(*)
-            FROM review_logs l
-            JOIN words w ON w.id = l.word_id
-            WHERE w.deck_id = ? AND l.reviewed_at >= ? AND %s
-            """.formatted(CORRECT), deckId, since);
-    }
-
     public int countByRating(ReviewRating rating) throws SQLException {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement("SELECT COUNT(*) FROM review_logs WHERE rating = ?")) {
@@ -395,16 +436,6 @@ public class ReviewLogRepository {
                 latest.put(rs.getLong("deck_id"), DateTimeUtil.fromDatabase(rs.getString("latest")));
             }
             return latest;
-        }
-    }
-
-    private int scalarInt(String sql, LocalDateTime since) throws SQLException {
-        try (Connection connection = databaseManager.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, DateTimeUtil.toDatabase(since));
-            try (ResultSet rs = statement.executeQuery()) {
-                return rs.next() ? rs.getInt(1) : 0;
-            }
         }
     }
 

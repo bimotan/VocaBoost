@@ -1,93 +1,100 @@
 package com.vocabtrainer.service;
 
 import com.vocabtrainer.domain.DailyGoalProgress;
+import com.vocabtrainer.domain.GoalTargets;
 import com.vocabtrainer.domain.GoalUpdate;
+import com.vocabtrainer.domain.ReviewKind;
 import com.vocabtrainer.domain.ReviewLog;
-import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.repository.GoalRepository;
+import com.vocabtrainer.repository.ReviewLogRepository;
+import com.vocabtrainer.repository.ReviewLogRepository.DailyCount;
+import com.vocabtrainer.service.scheduling.StudyDay;
 
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Optional;
 
+/**
+ * Daily goals, XP and the study streak.
+ *
+ * <p>A day is a study day, which starts at the rollover hour (see {@link StudyDay}). The day's
+ * reviews, correct answers and new words are read from the review logs, like every other daily
+ * number of the app (see {@link DailyReviews}): a review is any rating except the practice of a word
+ * that was not due, and a new word is one reviewed for the first time ({@link ReviewKind#LEARN}).
+ * Adding, importing or restoring words earns no XP and counts no new words. The {@code daily_goals}
+ * row of a deck's day keeps what the logs cannot tell: the goals of that day, the XP earned and
+ * whether the goal was completed (its counters are still written, for older versions).
+ *
+ * <p>A day's goals are those of its row; a day without one has the default goals. The streak counts
+ * the study days with a review in any deck: a user studies, not a deck.
+ */
 public class GoalService {
     public static final int DEFAULT_REVIEW_GOAL = 20;
     public static final int DEFAULT_NEW_WORD_GOAL = 5;
-    public static final int DEFAULT_SESSION_GOAL = 10;
+    /** The session size until the user chooses one. */
+    public static final int DEFAULT_SESSION_GOAL = ReviewSettings.DEFAULT_SESSION_SIZE;
+    private static final GoalTargets DEFAULT_GOALS = new GoalTargets(DEFAULT_REVIEW_GOAL, DEFAULT_NEW_WORD_GOAL);
 
     private final GoalRepository goalRepository;
+    private final ReviewLogRepository reviewLogRepository;
+    private final StudyDay studyDay;
     private final Clock clock;
 
-    public GoalService(GoalRepository goalRepository) {
-        this(goalRepository, Clock.systemDefaultZone());
+    /** Study days starting at 4 am. */
+    public GoalService(GoalRepository goalRepository, ReviewLogRepository reviewLogRepository, Clock clock) {
+        this(goalRepository, reviewLogRepository, new StudyDay(), clock);
     }
 
-    public GoalService(GoalRepository goalRepository, Clock clock) {
+    /** @param studyDay when a study day starts; the scheduler's, so "today" is the same day everywhere */
+    public GoalService(GoalRepository goalRepository, ReviewLogRepository reviewLogRepository, StudyDay studyDay,
+                       Clock clock) {
         this.goalRepository = goalRepository;
+        this.reviewLogRepository = reviewLogRepository;
+        this.studyDay = studyDay;
         this.clock = clock;
     }
 
-    public DailyGoalProgress getTodayProgress() {
-        return getTodayProgress(0L);
+    /** The study day it is now. */
+    public LocalDate today() {
+        return studyDay.of(LocalDateTime.now(clock));
     }
 
     public DailyGoalProgress getTodayProgress(long deckId) {
-        return progressFor(deckId, LocalDate.now(clock));
+        return progressFor(deckId, today());
     }
 
-    public DailyGoalProgress progressFor(LocalDate date) {
-        return progressFor(0L, date);
-    }
-
-    /**
-     * The deck's progress on {@code date}. Only reads: a day without a stored row has the default
-     * goals and no progress yet, and its row is created by the first review or new word.
-     */
-    public DailyGoalProgress progressFor(long deckId, LocalDate date) {
+    /** The deck's progress on the study day {@code day}. Only reads: a day without reviews has no row yet. */
+    public DailyGoalProgress progressFor(long deckId, LocalDate day) {
         try {
-            GoalRepository.GoalRow row = goalRepository.find(deckId, date)
-                .orElseGet(() -> emptyDay(deckId, date));
-            return toProgress(row);
+            Optional<GoalRepository.GoalRow> row = goalRepository.find(deckId, day);
+            DailyCount reviews = DailyReviews.on(reviewLogRepository, studyDay, deckId, day);
+            return progress(deckId, day, row.orElse(null), reviews);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read goal progress", e);
         }
     }
 
-    public GoalUpdate recordReview(ReviewRating rating, double similarity) {
-        return recordReview(0L, rating, similarity);
-    }
-
     /**
-     * Records a review rated {@code rating} whose answer had {@code similarity}, counted like a log
-     * that recorded no effective rating (see {@link ReviewLog#getEffectiveRating()}).
-     */
-    public GoalUpdate recordReview(long deckId, ReviewRating rating, double similarity) {
-        return recordReview(deckId, answered(rating, similarity));
-    }
-
-    /**
-     * Records the review saved as {@code log}: one more review, a correct one if
-     * {@link ReviewLog#isCorrect()}, and its XP.
+     * Records the review saved as {@code log}, which must already be stored (in the same
+     * transaction): its XP, and the daily goal if this review completed it.
      */
     public GoalUpdate recordReview(long deckId, ReviewLog log) {
-        LocalDate today = LocalDate.now(clock);
+        LocalDate day = studyDay.of(log.getReviewedAt());
         try {
-            GoalRepository.GoalRow before = goalRepository.ensure(
-                deckId,
-                today,
-                DEFAULT_REVIEW_GOAL,
-                DEFAULT_NEW_WORD_GOAL,
-                DEFAULT_SESSION_GOAL
-            );
             int xp = reviewXp(log);
-            GoalRepository.GoalRow after = goalRepository.addProgress(deckId, today, 1, log.isCorrect() ? 1 : 0, 0, xp);
-            boolean completedNow = !before.completed() && isComplete(after);
+            GoalRepository.GoalRow row = addProgress(deckId, day, 1, log.isCorrect() ? 1 : 0,
+                log.getKind() == ReviewKind.LEARN ? 1 : 0, xp);
+            DailyCount reviews = DailyReviews.on(reviewLogRepository, studyDay, deckId, day);
+            GoalTargets goals = new GoalTargets(row.reviewGoal(), row.newWordGoal());
+            boolean completedNow = !row.completed() && reviews.reviews() >= goals.reviewGoal()
+                && reviews.newWords() >= goals.newWordGoal();
             if (completedNow) {
-                goalRepository.markCompleted(deckId, today);
-                after = goalRepository.find(deckId, today).orElse(after);
+                goalRepository.markCompleted(deckId, day);
+                row = goalRepository.find(deckId, day).orElse(row);
             }
-            return new GoalUpdate(toProgress(after), xp, completedNow);
+            return new GoalUpdate(progress(deckId, day, row, reviews), xp, completedNow);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot update review goal progress", e);
         }
@@ -99,77 +106,35 @@ public class GoalService {
      * accuracy or the streak.
      */
     public GoalUpdate recordPractice(long deckId, ReviewLog log) {
-        LocalDate today = LocalDate.now(clock);
+        LocalDate day = studyDay.of(log.getReviewedAt());
         try {
-            goalRepository.ensure(deckId, today, DEFAULT_REVIEW_GOAL, DEFAULT_NEW_WORD_GOAL, DEFAULT_SESSION_GOAL);
             int xp = practiceXp(log);
-            GoalRepository.GoalRow after = goalRepository.addProgress(deckId, today, 0, 0, 0, xp);
-            return new GoalUpdate(toProgress(after), xp, false);
+            GoalRepository.GoalRow row = addProgress(deckId, day, 0, 0, 0, xp);
+            return new GoalUpdate(progress(deckId, day, row, DailyReviews.on(reviewLogRepository, studyDay, deckId, day)),
+                xp, false);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot record practice XP", e);
         }
     }
 
-    public GoalUpdate recordNewWords(int count) {
-        return recordNewWords(0L, count);
-    }
-
-    public GoalUpdate recordNewWords(long deckId, int count) {
-        if (count <= 0) {
-            return new GoalUpdate(getTodayProgress(deckId), 0, false);
-        }
-        LocalDate today = LocalDate.now(clock);
-        try {
-            GoalRepository.GoalRow before = goalRepository.ensure(
-                deckId,
-                today,
-                DEFAULT_REVIEW_GOAL,
-                DEFAULT_NEW_WORD_GOAL,
-                DEFAULT_SESSION_GOAL
-            );
-            int xp = count * 2;
-            GoalRepository.GoalRow after = goalRepository.addProgress(deckId, today, 0, 0, count, xp);
-            boolean completedNow = !before.completed() && isComplete(after);
-            if (completedNow) {
-                goalRepository.markCompleted(deckId, today);
-                after = goalRepository.find(deckId, today).orElse(after);
-            }
-            return new GoalUpdate(toProgress(after), xp, completedNow);
-        } catch (SQLException e) {
-            throw new IllegalStateException("Cannot update new-word goal progress", e);
-        }
-    }
-
-    public void awardXp(int xp) {
-        awardXp(0L, xp);
-    }
-
+    /** Adds XP to the deck's day, such as an achievement's reward. */
     public void awardXp(long deckId, int xp) {
         if (xp <= 0) {
             return;
         }
-        LocalDate today = LocalDate.now(clock);
         try {
-            goalRepository.ensure(deckId, today, DEFAULT_REVIEW_GOAL, DEFAULT_NEW_WORD_GOAL, DEFAULT_SESSION_GOAL);
-            goalRepository.addProgress(deckId, today, 0, 0, 0, xp);
+            addProgress(deckId, today(), 0, 0, 0, xp);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot award XP", e);
         }
     }
 
-    public int totalReviews() {
+    /** The deck's reviews so far, practice not included, counting at most {@code atMost}. */
+    public int reviewCount(long deckId, int atMost) {
         try {
-            return goalRepository.totalReviews();
+            return reviewLogRepository.countReviews(deckId, atMost);
         } catch (SQLException e) {
-            throw new IllegalStateException("Cannot read total reviews", e);
-        }
-    }
-
-    public int totalReviews(long deckId) {
-        try {
-            return goalRepository.totalReviews(deckId);
-        } catch (SQLException e) {
-            throw new IllegalStateException("Cannot read deck total reviews", e);
+            throw new IllegalStateException("Cannot count the deck's reviews", e);
         }
     }
 
@@ -193,44 +158,59 @@ public class GoalService {
         return reviewXp(log) / 2;
     }
 
-    /** A log of a review rated {@code rating} for an answer of {@code similarity}, with no effective rating recorded. */
-    private ReviewLog answered(ReviewRating rating, double similarity) {
-        return new ReviewLog(0, 0, LocalDateTime.now(clock), "", "", similarity, rating, 0);
+    /** Adds to the deck's row of {@code day}; a new row gets the default goals. */
+    private GoalRepository.GoalRow addProgress(long deckId, LocalDate day, int reviews, int correct, int newWords,
+                                               int xp) throws SQLException {
+        GoalRepository.GoalRow row = goalRepository.find(deckId, day).orElse(null);
+        GoalTargets goals = row == null ? DEFAULT_GOALS : new GoalTargets(row.reviewGoal(), row.newWordGoal());
+        int sessionGoal = row == null ? DEFAULT_SESSION_GOAL : row.sessionGoal();
+        return goalRepository.recordProgress(deckId, day, goals.reviewGoal(), goals.newWordGoal(), sessionGoal,
+            reviews, correct, newWords, xp);
     }
 
-    private static GoalRepository.GoalRow emptyDay(long deckId, LocalDate date) {
-        return new GoalRepository.GoalRow(deckId, date, DEFAULT_REVIEW_GOAL, DEFAULT_NEW_WORD_GOAL,
-            DEFAULT_SESSION_GOAL, 0, 0, 0, 0, false);
-    }
-
-    private boolean isComplete(GoalRepository.GoalRow row) {
-        return row.reviewedCount() >= row.reviewGoal() && row.newWordsCount() >= row.newWordGoal();
-    }
-
-    private DailyGoalProgress toProgress(GoalRepository.GoalRow row) throws SQLException {
+    /** {@code row} is the day's stored row, or null if it has none. */
+    private DailyGoalProgress progress(long deckId, LocalDate day, GoalRepository.GoalRow row, DailyCount reviews)
+        throws SQLException {
+        GoalTargets goals = row == null ? DEFAULT_GOALS : new GoalTargets(row.reviewGoal(), row.newWordGoal());
         return new DailyGoalProgress(
-            row.date(),
-            row.reviewGoal(),
-            row.newWordGoal(),
-            row.sessionGoal(),
-            row.reviewedCount(),
-            row.correctCount(),
-            row.newWordsCount(),
-            row.xpEarned(),
-            row.completed(),
-            calculateStreak(row.deckId(), row.date()),
-            goalRepository.totalXp(row.deckId())
+            day,
+            goals.reviewGoal(),
+            goals.newWordGoal(),
+            row == null ? DEFAULT_SESSION_GOAL : row.sessionGoal(),
+            reviews.reviews(),
+            reviews.correct(),
+            reviews.newWords(),
+            row == null ? 0 : row.xpEarned(),
+            row != null && row.completed(),
+            streak(day),
+            goalRepository.totalXp(deckId)
         );
     }
 
     /**
-     * Consecutive days with reviews up to {@code date}. A day still in progress does not break the
-     * streak: until the first review of the day, the streak that ended yesterday still counts.
+     * Study days in a row, up to {@code day}, with a review in any deck; practice does not count.
+     * A day still in progress does not break the streak: until its first review, the run that ended
+     * the day before counts. Steps back with one indexed lookup per day of the streak.
      */
-    private int calculateStreak(long deckId, LocalDate date) throws SQLException {
-        return goalRepository.latestReviewRun(deckId, date)
-            .filter(run -> !run.lastDay().isBefore(date.minusDays(1)))
-            .map(GoalRepository.ReviewRun::days)
-            .orElse(0);
+    private int streak(LocalDate day) throws SQLException {
+        int days = 0;
+        LocalDate expected = day;
+        LocalDateTime before = studyDay.start(day.plusDays(1));
+        while (true) {
+            Optional<LocalDateTime> latest = reviewLogRepository.latestReviewBefore(before);
+            if (latest.isEmpty()) {
+                return days;
+            }
+            LocalDate reviewed = studyDay.of(latest.get());
+            if (days == 0 && reviewed.equals(day.minusDays(1))) {
+                expected = reviewed;
+            }
+            if (!reviewed.equals(expected)) {
+                return days;
+            }
+            days++;
+            expected = reviewed.minusDays(1);
+            before = studyDay.start(reviewed);
+        }
     }
 }

@@ -1,14 +1,11 @@
 package com.vocabtrainer.ui.importing;
 
-import com.vocabtrainer.domain.Achievement;
 import com.vocabtrainer.domain.Deck;
-import com.vocabtrainer.domain.GoalUpdate;
 import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ImportExportService;
 import com.vocabtrainer.service.ImportResult;
 import com.vocabtrainer.ui.DataChange;
-import com.vocabtrainer.ui.Formats;
 import com.vocabtrainer.ui.UiErrors;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
@@ -29,8 +26,6 @@ import java.util.List;
 final class ImportBox {
     private final ViewContext context;
     private final ImportExportService importExportService;
-    private final GoalService goalService;
-    private final AchievementService achievementService;
     private final TextField importPathField = new TextField();
     private final Label importStatus = new Label();
     private final Button importLegacyButton = new Button("Import legacy txt");
@@ -43,8 +38,6 @@ final class ImportBox {
               AchievementService achievementService) {
         this.context = context;
         this.importExportService = importExportService;
-        this.goalService = goalService;
-        this.achievementService = achievementService;
 
         importPathField.setId("importPathField");
         importPathField.setPromptText("Choose legacy txt or GRE CSV");
@@ -142,17 +135,12 @@ final class ImportBox {
         }
     }
 
-    /** Credits the new words to {@code deck}, the deck the words went into, whichever deck is current now. */
+    /** Shows the summary for {@code deck}, the deck the words went into, whichever deck is current now. */
     private void afterImport(ImportResult result, Deck deck) {
-        // The import itself has finished; show its summary even if the progress update below fails.
-        String summary = "Deck: " + deck.getName() + System.lineSeparator() + result.toSummary();
-        importStatus.setText(summary);
-        context.errors().guard("Import finished, but updating progress failed", () -> {
-            GoalUpdate update = goalService.recordNewWords(deck.getId(), result.importedCount());
-            List<Achievement> unlocked = achievementService.evaluate(deck.getId(), update.progress(), false,
-                update.dailyGoalCompleted());
-            importStatus.setText(summary + Formats.unlockedSuffix(unlocked));
-            context.changes().publish(DataChange.WORDS);
-        });
+        // The import itself has finished; show its summary even if refreshing the views fails. Importing
+        // earns no XP and no new words: a word counts as new on the day of its first review.
+        importStatus.setText("Deck: " + deck.getName() + System.lineSeparator() + result.toSummary());
+        context.errors().guard("Import finished, but refreshing the views failed",
+            () -> context.changes().publish(DataChange.WORDS));
     }
 }

@@ -22,7 +22,11 @@ import javafx.scene.layout.VBox;
 import java.nio.file.Path;
 import java.util.List;
 
-/** The Dashboard tab: today's counts, goals, streak, XP and badges for the current deck. */
+/**
+ * The Dashboard tab: today's counts, goals, XP and badges for the current deck, and the streak of
+ * every deck. Today is the study day; the counts are read from the review logs, like the Statistics
+ * tab's.
+ */
 public final class DashboardView {
     private final ViewContext context;
     private final StatsService statsService;
@@ -98,7 +102,7 @@ public final class DashboardView {
         addStat(grid, 5, "New words today", newWordsTodayLabel);
         addStat(grid, 6, "Accuracy today", accuracyTodayLabel);
         addStat(grid, 7, "Mastered words", masteredWordsLabel);
-        addStat(grid, 8, "Streak", streakLabel);
+        addStat(grid, 8, "Streak (all decks)", streakLabel);
         addStat(grid, 9, "XP", xpLabel);
 
         reviewProgress.setPrefWidth(420);

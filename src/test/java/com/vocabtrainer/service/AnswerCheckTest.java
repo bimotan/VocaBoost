@@ -66,7 +66,7 @@ class AnswerCheckTest {
         deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         words = new WordRepository(databaseManager);
         logs = new ReviewLogRepository(databaseManager);
-        goals = new GoalService(new GoalRepository(databaseManager), clock);
+        goals = new GoalService(new GoalRepository(databaseManager), logs, clock);
         AchievementService achievements = new AchievementService(new AchievementRepository(databaseManager), goals, clock);
         stats = new StatsService(words, logs, clock);
         service = new ReviewService(words, logs, new SimilarityService(), new ReviewScheduler(), goals, achievements,

@@ -74,7 +74,7 @@ class RepositoryCrudTest {
         LocalDate date = LocalDate.of(2026, 5, 28);
         goalRepository.ensure(date, 20, 5, 10);
         goalRepository.addProgress(date, 1, 1, 2, 9);
-        assertEquals(1, goalRepository.totalReviews());
+        assertEquals(1, goalRepository.find(date).orElseThrow().reviewedCount());
         assertEquals(9, goalRepository.totalXp());
 
         Achievement achievement = new Achievement(

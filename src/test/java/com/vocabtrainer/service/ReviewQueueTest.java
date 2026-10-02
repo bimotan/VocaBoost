@@ -63,7 +63,7 @@ class ReviewQueueTest {
         deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         words = new WordRepository(databaseManager);
         logs = new ReviewLogRepository(databaseManager);
-        goals = new GoalService(new GoalRepository(databaseManager), clock);
+        goals = new GoalService(new GoalRepository(databaseManager), logs, clock);
         achievements = new AchievementService(new AchievementRepository(databaseManager), goals, clock);
         settings = new ReviewSettings(new SettingsService(new SettingsRepository(databaseManager)));
         service = newService();

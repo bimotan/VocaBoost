@@ -65,8 +65,10 @@ class LateResultsUiTest extends MainWindowUiTest {
         assertFalse(isDisabled("importCsvButton"));
         assertTrue(services.wordRepository().findByEnglish(starterId, "petrichor").isPresent());
         assertTrue(services.wordRepository().findByEnglish(toefl.getId(), "petrichor").isEmpty());
-        assertEquals(2, services.goalService().getTodayProgress(starterId).newWordsCount());
-        assertEquals(0, services.goalService().getTodayProgress(toefl.getId()).newWordsCount());
+        // Importing is not learning: no new words and no XP in either deck.
+        assertEquals(0, services.goalService().getTodayProgress(starterId).newWordsCount());
+        assertEquals(0, services.goalService().totalXp(starterId));
+        assertEquals(0, services.goalService().totalXp(toefl.getId()));
         assertEquals(toefl.getId(), currentDeck().getId());
         selectTab("dashboardTab");
         assertEquals("0", text("totalWordsLabel"));

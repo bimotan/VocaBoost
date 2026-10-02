@@ -55,7 +55,7 @@ class ReviewSessionSettingsTest {
         other = decks.create("Other");
         words = new WordRepository(databaseManager);
         logs = new ReviewLogRepository(databaseManager);
-        goals = new GoalService(new GoalRepository(databaseManager));
+        goals = new GoalService(new GoalRepository(databaseManager), logs, Clock.systemDefaultZone());
         achievements = new AchievementService(new AchievementRepository(databaseManager), goals);
         settingsService = new SettingsService(new SettingsRepository(databaseManager));
         for (String english : new String[] {"lucid", "abate", "laud"}) {

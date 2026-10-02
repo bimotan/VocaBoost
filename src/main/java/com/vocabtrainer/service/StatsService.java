@@ -73,20 +73,18 @@ public class StatsService {
         this(wordRepository, reviewLogRepository, clock);
     }
 
+    /** The deck's counts now; today's reviews and accuracy are those of the study day, see {@link DailyReviews}. */
     public DashboardStats dashboardStats(long deckId) {
         try {
             LocalDateTime now = LocalDateTime.now(clock);
-            LocalDateTime startOfDay = LocalDate.now(clock).atStartOfDay();
-            int reviewedToday = reviewLogRepository.countSince(deckId, startOfDay);
-            int correctToday = reviewLogRepository.countCorrectSince(deckId, startOfDay);
-            double accuracy = reviewedToday == 0 ? 0.0 : (double) correctToday / reviewedToday;
+            ReviewLogRepository.DailyCount today = DailyReviews.on(reviewLogRepository, studyDay, deckId, studyDay.of(now));
             ReviewQueueCounts queue = queueCounts(deckId, now);
             return new DashboardStats(
                 wordRepository.countAll(deckId),
                 queue.dueToday(),
                 wordRepository.countMastered(deckId),
-                reviewedToday,
-                accuracy,
+                today.reviews(),
+                today.accuracy(),
                 queue.dueReviews(),
                 queue.newAvailableToday()
             );
@@ -99,29 +97,20 @@ public class StatsService {
         return dailyReviewStats(0, days);
     }
 
-    /** One entry per day for the last {@code days} days, today last; a deckId of 0 or less covers every deck. */
+    /**
+     * One entry per study day for the last {@code days} days, today last; a deckId of 0 or less
+     * covers every deck. Practice is not counted, see {@link DailyReviews}.
+     */
     public List<DailyReviewStat> dailyReviewStats(long deckId, int days) {
-        LocalDate end = LocalDate.now(clock);
+        LocalDate end = studyDay.of(LocalDateTime.now(clock));
         LocalDate start = end.minusDays(Math.max(1, days) - 1L);
-        Map<LocalDate, ReviewLogRepository.DailyCount> counts = new LinkedHashMap<>();
-        for (int i = 0; i < days; i++) {
-            LocalDate day = start.plusDays(i);
-            counts.put(day, new ReviewLogRepository.DailyCount(day, 0, 0));
-        }
         try {
-            for (ReviewLogRepository.DailyCount count : reviewLogRepository.dailyCounts(deckId, start.atStartOfDay())) {
-                counts.replace(count.day(), count);
-            }
+            return DailyReviews.between(reviewLogRepository, studyDay, deckId, start, end).stream()
+                .map(count -> new DailyReviewStat(count.day(), count.reviews(), count.accuracy()))
+                .toList();
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read daily review stats", e);
         }
-        return counts.values().stream()
-            .map(count -> new DailyReviewStat(
-                count.day(),
-                count.reviews(),
-                count.reviews() == 0 ? 0.0 : count.correct() / (double) count.reviews()
-            ))
-            .toList();
     }
 
     /**
@@ -261,7 +250,8 @@ public class StatsService {
                 .append(progress.reviewGoal()).append(System.lineSeparator());
             builder.append("- New-word goal: ").append(progress.newWordsCount()).append("/")
                 .append(progress.newWordGoal()).append(System.lineSeparator());
-            builder.append("- Streak: ").append(progress.currentStreak()).append(" days").append(System.lineSeparator());
+            builder.append("- Streak (all decks): ").append(progress.currentStreak()).append(" days")
+                .append(System.lineSeparator());
             builder.append("- Deck XP: ").append(progress.totalXp()).append(System.lineSeparator()).append(System.lineSeparator());
         }
         builder.append("## Recent Review Curve").append(System.lineSeparator()).append(System.lineSeparator());

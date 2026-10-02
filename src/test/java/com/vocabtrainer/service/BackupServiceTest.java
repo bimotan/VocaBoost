@@ -279,26 +279,28 @@ class BackupServiceTest {
         Deck sourceDeck = source.decks.ensureDefaultDeck();
         seedTrickyDeck(source, sourceDeck.getId());
         Path json = source.backup.exportJsonBackup(sourceDeck.getId(), tempDir.resolve("backup.json"));
-        GoalService sourceGoals = new GoalService(source.goals, CLOCK);
+        GoalService sourceGoals = new GoalService(source.goals, source.logs, CLOCK);
         int savedXp = sourceGoals.totalXp(sourceDeck.getId());
 
         // A fresh install: the dashboard has already created an empty row for today.
         Db fresh = new Db(tempDir.resolve("fresh.db"));
         Deck freshDeck = fresh.decks.ensureDefaultDeck();
-        GoalService freshGoals = new GoalService(fresh.goals, CLOCK);
+        GoalService freshGoals = new GoalService(fresh.goals, fresh.logs, CLOCK);
         assertEquals(0, freshGoals.getTodayProgress(freshDeck.getId()).xpEarned());
 
         fresh.backup.importJsonBackup(json, freshDeck.getId());
 
         assertEquals(savedXp, freshGoals.totalXp(freshDeck.getId()), "saved XP comes back, nothing is added");
-        assertEquals(sourceGoals.getTodayProgress(sourceDeck.getId()).newWordsCount(),
-            freshGoals.getTodayProgress(freshDeck.getId()).newWordsCount());
+        assertEquals(0, freshGoals.getTodayProgress(freshDeck.getId()).newWordsCount(),
+            "restored words are not new words of today: none of their reviews is from today");
 
         // A deck with its own progress today keeps it; only missing days are added, once.
         Db busy = new Db(tempDir.resolve("busy.db"));
         Deck busyDeck = busy.decks.ensureDefaultDeck();
-        GoalService busyGoals = new GoalService(busy.goals, CLOCK);
-        busyGoals.recordReview(busyDeck.getId(), ReviewRating.GOOD, 1.0);
+        GoalService busyGoals = new GoalService(busy.goals, busy.logs, CLOCK);
+        WordCard reviewed = busy.words.insert(card(busyDeck.getId(), "laud", "赞扬"));
+        busyGoals.recordReview(busyDeck.getId(), busy.logs.insert(new ReviewLog(0, reviewed.getId(), NOW, "赞扬",
+            "赞扬", 1.0, ReviewRating.GOOD, 900)));
         int todayXp = busyGoals.totalXp(busyDeck.getId());
 
         busy.backup.importJsonBackup(json, busyDeck.getId());

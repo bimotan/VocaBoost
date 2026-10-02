@@ -32,10 +32,6 @@ public class GoalRepository {
     ) {
     }
 
-    /** A run of consecutive days with at least one review, ending on {@code lastDay}. */
-    public record ReviewRun(LocalDate lastDay, int days) {
-    }
-
     public GoalRow ensure(LocalDate date, int reviewGoal, int newWordGoal, int sessionGoal) throws SQLException {
         return ensure(0L, date, reviewGoal, newWordGoal, sessionGoal);
     }
@@ -133,6 +129,43 @@ public class GoalRepository {
         }
     }
 
+    /**
+     * Adds to the deck's row of {@code date} and returns the row afterwards. A day without a row gets
+     * one; either way the row is given the goals passed in, so it keeps the goals that were in effect
+     * at the day's last review. The counters are only kept for older versions and backups: the app
+     * reads the day's reviews and new words from the review logs.
+     */
+    public GoalRow recordProgress(long deckId, LocalDate date, int reviewGoal, int newWordGoal, int sessionGoal,
+                                  int reviewDelta, int correctDelta, int newWordDelta, int xpDelta) throws SQLException {
+        String sql = """
+            INSERT INTO daily_goals(deck_id, goal_date, review_goal, new_word_goal, session_goal,
+                reviewed_count, correct_count, new_words_count, xp_earned)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(deck_id, goal_date) DO UPDATE SET
+                review_goal = excluded.review_goal,
+                new_word_goal = excluded.new_word_goal,
+                session_goal = excluded.session_goal,
+                reviewed_count = daily_goals.reviewed_count + excluded.reviewed_count,
+                correct_count = daily_goals.correct_count + excluded.correct_count,
+                new_words_count = daily_goals.new_words_count + excluded.new_words_count,
+                xp_earned = daily_goals.xp_earned + excluded.xp_earned
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            statement.setString(2, DateTimeUtil.toDatabaseDate(date));
+            statement.setInt(3, reviewGoal);
+            statement.setInt(4, newWordGoal);
+            statement.setInt(5, sessionGoal);
+            statement.setInt(6, reviewDelta);
+            statement.setInt(7, correctDelta);
+            statement.setInt(8, newWordDelta);
+            statement.setInt(9, xpDelta);
+            statement.executeUpdate();
+        }
+        return find(deckId, date).orElseThrow(() -> new SQLException("Daily goal was not written: " + date));
+    }
+
     public GoalRow addProgress(LocalDate date, int reviewDelta, int correctDelta,
                                int newWordDelta, int xpDelta) throws SQLException {
         return addProgress(0L, date, reviewDelta, correctDelta, newWordDelta, xpDelta);
@@ -175,53 +208,9 @@ public class GoalRepository {
         }
     }
 
-    public boolean hasReviewedOn(LocalDate date) throws SQLException {
-        return hasReviewedOn(0L, date);
-    }
-
-    public boolean hasReviewedOn(long deckId, LocalDate date) throws SQLException {
-        return scalarInt("SELECT reviewed_count FROM daily_goals WHERE deck_id = ? AND goal_date = ?", deckId, date) > 0;
-    }
-
-    /**
-     * The deck's most recent run of consecutive days with reviews, among days up to {@code date}.
-     * One query: the days are read newest first and reading stops at the first gap.
-     */
-    public Optional<ReviewRun> latestReviewRun(long deckId, LocalDate date) throws SQLException {
-        String sql = """
-            SELECT goal_date FROM daily_goals
-            WHERE deck_id = ? AND goal_date <= ? AND reviewed_count > 0
-            ORDER BY goal_date DESC
-            """;
-        try (Connection connection = databaseManager.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setLong(1, deckId);
-            statement.setString(2, DateTimeUtil.toDatabaseDate(date));
-            try (ResultSet rs = statement.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                LocalDate lastDay = DateTimeUtil.dateFromDatabase(rs.getString(1));
-                int days = 1;
-                while (rs.next() && DateTimeUtil.dateFromDatabase(rs.getString(1)).equals(lastDay.minusDays(days))) {
-                    days++;
-                }
-                return Optional.of(new ReviewRun(lastDay, days));
-            }
-        }
-    }
-
     /** Daily goal rows in every deck; any row means the app has been used with this database before. */
     public int countAll() throws SQLException {
         return scalarInt("SELECT COUNT(*) FROM daily_goals", null);
-    }
-
-    public int totalReviews() throws SQLException {
-        return scalarInt("SELECT COALESCE(SUM(reviewed_count), 0) FROM daily_goals", null);
-    }
-
-    public int totalReviews(long deckId) throws SQLException {
-        return scalarInt("SELECT COALESCE(SUM(reviewed_count), 0) FROM daily_goals WHERE deck_id = ?", deckId, null);
     }
 
     public int totalXp() throws SQLException {

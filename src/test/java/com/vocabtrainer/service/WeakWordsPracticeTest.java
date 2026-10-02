@@ -67,7 +67,7 @@ class WeakWordsPracticeTest {
         deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         words = new WordRepository(databaseManager);
         logs = new ReviewLogRepository(databaseManager);
-        goals = new GoalService(new GoalRepository(databaseManager), clock);
+        goals = new GoalService(new GoalRepository(databaseManager), logs, clock);
         AchievementService achievements = new AchievementService(new AchievementRepository(databaseManager), goals, clock);
         ReviewSettings settings = new ReviewSettings(new SettingsService(new SettingsRepository(databaseManager)));
         service = new ReviewService(words, logs, new SimilarityService(), new ReviewScheduler(), goals, achievements,
@@ -116,7 +116,7 @@ class WeakWordsPracticeTest {
         assertEquals(GoalService.practiceXp(logs.findByWord(weak.getId()).get(0)), practice.xpEarned());
         assertTrue(practice.xpEarned() > 0);
         assertEquals(0, goals.getTodayProgress(deck.getId()).reviewedCount());
-        assertEquals(0, goals.totalReviews(deck.getId()));
+        assertEquals(0, goals.reviewCount(deck.getId(), 100));
         assertEquals(0, goals.getTodayProgress(deck.getId()).currentStreak(), "practice alone is not a review day");
         assertEquals(practice.xpEarned(), goals.totalXp(deck.getId()));
         assertTrue(practice.unlockedAchievements().isEmpty());

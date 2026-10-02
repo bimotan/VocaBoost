@@ -105,7 +105,7 @@ class StatsServiceTest {
     }
 
     @Test
-    void reviewCurveCoversEachDayFromItsFirstMoment() throws Exception {
+    void reviewCurveCoversEachStudyDayFromItsFirstMoment() throws Exception {
         DatabaseManager databaseManager = databases.open(tempDir.resolve("curve.db"));
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewLogRepository logs = new ReviewLogRepository(databaseManager);
@@ -114,8 +114,9 @@ class StatsServiceTest {
         WordCard word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
         WordCard otherWord = wordRepository.save(WordCard.createNew(other.getId(), "abate", "减弱"));
         LocalDate firstDay = NOW.toLocalDate().minusDays(2);
-        log(logs, word, firstDay.minusDays(1).atTime(23, 59, 59, 999_000_000), ReviewRating.GOOD);
-        log(logs, word, firstDay.atStartOfDay(), ReviewRating.AGAIN);
+        // A study day starts at 4 am: 3:59 am still belongs to the day before.
+        log(logs, word, firstDay.atTime(3, 59, 59, 999_000_000), ReviewRating.GOOD);
+        log(logs, word, firstDay.atTime(4, 0), ReviewRating.AGAIN);
         log(logs, word, firstDay.atTime(12, 0), ReviewRating.GOOD);
         log(logs, word, NOW, ReviewRating.HARD);
         log(logs, otherWord, NOW, ReviewRating.AGAIN);

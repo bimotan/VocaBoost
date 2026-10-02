@@ -161,7 +161,8 @@ public record AppServices(
             ReviewScheduler reviewScheduler = new ReviewScheduler(settingsService.getSchedulingOptions());
             CardStateBackfill cardStates = new CardStateBackfill(wordRepository, reviewLogRepository, reviewScheduler);
             cardStates.run();
-            GoalService goalService = new GoalService(goalRepository, clock);
+            GoalService goalService = new GoalService(goalRepository, reviewLogRepository, reviewScheduler.studyDay(),
+                clock);
             AchievementService achievementService = new AchievementService(achievementRepository, goalService, clock);
             WordValidationService validationService = new WordValidationService();
             ImportExportService importExportService = new ImportExportService(wordRepository, validationService);

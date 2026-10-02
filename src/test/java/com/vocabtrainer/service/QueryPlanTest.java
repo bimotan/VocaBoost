@@ -71,7 +71,7 @@ class QueryPlanTest {
         Deck other = deckRepository.create("Other");
         List<WordCard> words = seed(databaseManager, wordRepository, logRepository, goalRepository, deck, other);
         StatsService stats = new StatsService(wordRepository, logRepository, CLOCK);
-        GoalService goals = new GoalService(goalRepository, CLOCK);
+        GoalService goals = new GoalService(goalRepository, logRepository, CLOCK);
         AchievementService achievements = new AchievementService(achievementRepository, goals, CLOCK);
         DeckService decks = new DeckService(deckRepository, new SettingsService(new SettingsRepository(databaseManager)));
         BackupService backup = new BackupService(deckRepository, wordRepository, logRepository, goalRepository,
@@ -93,8 +93,7 @@ class QueryPlanTest {
         stats.dailyReviewStats(7);
         stats.hardestWords(deck.getId(), 8);
         stats.overdueCount(deck.getId());
-        logRepository.countSince(NOW.toLocalDate().atStartOfDay());
-        logRepository.countCorrectSince(NOW.toLocalDate().atStartOfDay());
+        stats.buildMarkdownReport(deck.getId(), deck.getName(), goals.getTodayProgress(deck.getId()));
         // A rating.
         ReviewService review = new ReviewService(wordRepository, logRepository, new SimilarityService(),
             new ReviewScheduler(), goals, achievements, CLOCK);

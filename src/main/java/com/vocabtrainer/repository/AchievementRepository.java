@@ -8,9 +8,19 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public class AchievementRepository {
+    /**
+     * The deck id of achievements that belong to no deck, such as the streak badges, which count the
+     * reviews of every deck. No deck has this id.
+     */
+    public static final long NO_DECK = 0L;
+
     private final DatabaseManager databaseManager;
 
     public AchievementRepository(DatabaseManager databaseManager) {
@@ -50,6 +60,46 @@ public class AchievementRepository {
             statement.setString(2, code);
             try (ResultSet rs = statement.executeQuery()) {
                 return rs.next();
+            }
+        }
+    }
+
+    /** Whether the achievement was unlocked in any deck or for no deck. */
+    public boolean existsInAnyDeck(String code) throws SQLException {
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement("SELECT 1 FROM achievements WHERE code = ? LIMIT 1")) {
+            statement.setString(1, code);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    /**
+     * What the deck shows as unlocked: its own achievements, those of {@link #NO_DECK}, and the
+     * achievements with one of {@code sharedCodes} unlocked in any deck (older versions unlocked
+     * streak badges per deck). Each code once, the first unlock, oldest first.
+     */
+    public List<Achievement> findShown(long deckId, Collection<String> sharedCodes) throws SQLException {
+        String placeholders = String.join(", ", Collections.nCopies(sharedCodes.size(), "?"));
+        String sql = "SELECT * FROM achievements WHERE deck_id = ? OR deck_id = ?"
+            + (sharedCodes.isEmpty() ? "" : " OR code IN (" + placeholders + ")")
+            + " ORDER BY unlocked_at ASC, deck_id ASC";
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            int index = 1;
+            statement.setLong(index++, deckId);
+            statement.setLong(index++, NO_DECK);
+            for (String code : sharedCodes) {
+                statement.setString(index++, code);
+            }
+            try (ResultSet rs = statement.executeQuery()) {
+                Map<String, Achievement> byCode = new LinkedHashMap<>();
+                while (rs.next()) {
+                    Achievement achievement = map(rs);
+                    byCode.putIfAbsent(achievement.code(), achievement);
+                }
+                return new ArrayList<>(byCode.values());
             }
         }
     }

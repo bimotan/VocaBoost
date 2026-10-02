@@ -53,7 +53,7 @@ class SchemaMigrationTest {
         // App-wide goal history and achievements now belong to the first deck.
         assertEquals(30, intQuery(file, "SELECT COUNT(*) FROM daily_goals WHERE deck_id = 1"));
         GoalRepository goals = new GoalRepository(databaseManager);
-        assertEquals(600, goals.totalReviews(1));
+        assertEquals(600, intQuery(file, "SELECT SUM(reviewed_count) FROM daily_goals WHERE deck_id = 1"));
         assertEquals(4500, goals.totalXp(1));
         assertEquals(List.of("first_review", "streak_3"),
             stringColumn(file, "SELECT code FROM achievements WHERE deck_id = 1 ORDER BY code"));

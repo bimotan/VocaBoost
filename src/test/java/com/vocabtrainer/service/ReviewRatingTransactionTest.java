@@ -59,7 +59,7 @@ class ReviewRatingTransactionTest {
         wordRepository = new WordRepository(databaseManager);
         logRepository = new FailingReviewLogRepository(databaseManager);
         achievementRepository = new FailingAchievementRepository(databaseManager);
-        goalService = new GoalService(new GoalRepository(databaseManager), CLOCK);
+        goalService = new GoalService(new GoalRepository(databaseManager), logRepository, CLOCK);
         achievementService = new AchievementService(achievementRepository, goalService, CLOCK);
         service = new ReviewService(wordRepository, logRepository, new SimilarityService(), new ReviewScheduler(),
             goalService, achievementService, CLOCK);

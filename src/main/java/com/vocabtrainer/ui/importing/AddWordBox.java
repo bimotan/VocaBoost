@@ -1,6 +1,5 @@
 package com.vocabtrainer.ui.importing;
 
-import com.vocabtrainer.domain.Achievement;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.GoalUpdate;
@@ -36,8 +35,6 @@ final class AddWordBox {
     private final ViewContext context;
     private final WordRepository wordRepository;
     private final WordValidationService validationService;
-    private final GoalService goalService;
-    private final AchievementService achievementService;
     private final ConfiguredServices configured;
 
     private final TextField englishField = textField("addEnglishField", "English");
@@ -56,8 +53,6 @@ final class AddWordBox {
         this.context = context;
         this.wordRepository = wordRepository;
         this.validationService = validationService;
-        this.goalService = goalService;
-        this.achievementService = achievementService;
         this.configured = configured;
 
         statusLabel.setId("addWordStatusLabel");
@@ -171,13 +166,9 @@ final class AddWordBox {
             String addedText = "Added to " + targetDeck.getName() + ": " + wordToSave.english()
                 + (verification.found() ? " | Verified by " + verification.source() : " | Marked UNVERIFIED");
             statusLabel.setText(addedText);
-            context.errors().guard("Word added, but updating progress failed", () -> {
-                GoalUpdate update = goalService.recordNewWords(targetDeck.getId(), 1);
-                List<Achievement> unlocked = achievementService.evaluate(targetDeck.getId(), update.progress(), false,
-                    update.dailyGoalCompleted());
-                statusLabel.setText(addedText + Formats.unlockedSuffix(unlocked));
-                context.changes().publish(DataChange.WORDS);
-            });
+            // Adding earns no XP: the word counts as a new word on the day of its first review.
+            context.errors().guard("Word added, but refreshing the views failed",
+                () -> context.changes().publish(DataChange.WORDS));
         } catch (IllegalArgumentException e) {
             statusLabel.setText(e.getMessage());
         } catch (SQLException | RuntimeException e) {

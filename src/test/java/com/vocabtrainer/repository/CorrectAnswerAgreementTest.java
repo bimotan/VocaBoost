@@ -57,12 +57,10 @@ class CorrectAnswerAgreementTest {
         int correct = (int) logs.stream().filter(ReviewLog::isCorrect).count();
         assertTrue(correct > 0 && correct < logs.size());
 
-        assertEquals(correct, repository.countCorrectSince(deck.getId(), DAY));
-        assertEquals(correct, repository.countCorrectSince(DAY));
-        assertEquals(List.of(new ReviewLogRepository.DailyCount(DAY.toLocalDate(), logs.size(), correct)),
-            repository.dailyCounts(deck.getId(), DAY));
-        assertEquals(List.of(new ReviewLogRepository.DailyCount(DAY.toLocalDate(), logs.size(), correct)),
-            repository.dailyCounts(0, DAY));
+        List<ReviewLogRepository.DailyCount> expected =
+            List.of(new ReviewLogRepository.DailyCount(DAY.toLocalDate(), logs.size(), correct, 0));
+        assertEquals(expected, repository.dailyCounts(deck.getId(), DAY, DAY.plusDays(1), 0));
+        assertEquals(expected, repository.dailyCounts(0, DAY, DAY.plusDays(1), 0));
         HardWordStat hardest = repository.hardestWords(deck.getId(), 1).get(0);
         assertEquals(logs.size() - correct, hardest.againCount());
     }
