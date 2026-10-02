@@ -46,7 +46,8 @@ import java.util.function.Supplier;
  *
  * @param ecdictRepository   the imported ECDICT dictionary, in its own file next to the database
  * @param localDictionary    the offline dictionaries (imported ECDICT, bundled starter words)
- * @param dictionaryServices builds the dictionary service (offline dictionaries, then online ones)
+ * @param dictionaryServices builds the dictionary service (offline dictionaries, then online ones,
+ *                           which are skipped while offline mode is on)
  * @param aiServices         builds the AI service from the saved settings; called again when the
  *                           AI settings change
  * @param startupDeck        the deck the main window opens on
@@ -101,8 +102,8 @@ public record AppServices(
         private final Path databasePath;
         private Function<DatabaseManager, WordRepository> wordRepositoryFactory = WordRepository::new;
         private Function<DatabaseManager, ReviewLogRepository> reviewLogRepositoryFactory = ReviewLogRepository::new;
-        private BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> dictionaryServiceFactory =
-            DictionaryServiceFactory::create;
+        /** Null for the app's chain, whose online dictionaries follow the saved offline mode. */
+        private BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> dictionaryServiceFactory;
         private BiFunction<AiCacheRepository, SettingsService, AiService> aiServiceFactory = AiServiceFactory::create;
 
         private Builder(Path databasePath) {
@@ -175,7 +176,9 @@ public record AppServices(
             EcdictImportService ecdictImportService = new EcdictImportService(ecdictRepository);
             LocalDictionaryService localDictionary = new LocalDictionaryService(ecdictRepository);
             BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> dictionaryFactory =
-                dictionaryServiceFactory;
+                dictionaryServiceFactory != null
+                    ? dictionaryServiceFactory
+                    : (cache, local) -> DictionaryServiceFactory.create(cache, local, settingsService::isOfflineMode);
             BiFunction<AiCacheRepository, SettingsService, AiService> aiFactory = aiServiceFactory;
 
             return new AppServices(

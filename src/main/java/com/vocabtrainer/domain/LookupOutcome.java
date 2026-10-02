@@ -23,7 +23,9 @@ public enum LookupOutcome {
     /** The dictionary's answer could not be read, such as malformed JSON. */
     BAD_RESPONSE,
     /** The lookup was cancelled before it finished. */
-    INTERRUPTED;
+    INTERRUPTED,
+    /** Offline mode is on, so the online dictionary was not asked. */
+    OFFLINE;
 
     /** True when the dictionary answered (found or not found); false when it could not be asked. */
     public boolean isAnswer() {

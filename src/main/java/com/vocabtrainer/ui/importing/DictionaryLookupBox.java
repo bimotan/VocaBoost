@@ -2,6 +2,7 @@ package com.vocabtrainer.ui.importing;
 
 import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.DictionaryLookupResult;
+import com.vocabtrainer.domain.LookupOutcome;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.ui.ConfiguredServices;
@@ -145,7 +146,8 @@ final class DictionaryLookupBox {
         }
         results.getItems().clear();
         lookupStatus.setText(LookupMessages.headline(result.outcome()) + System.lineSeparator() + result.message());
-        retryButton.setVisible(result.unavailable());
+        // Asking again only helps when the dictionaries may answer next time, not in offline mode.
+        retryButton.setVisible(result.unavailable() && result.outcome() != LookupOutcome.OFFLINE);
     }
 
     private void cancelRunning() {

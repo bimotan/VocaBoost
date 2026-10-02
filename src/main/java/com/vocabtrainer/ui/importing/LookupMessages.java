@@ -23,6 +23,7 @@ final class LookupMessages {
             case SERVICE_ERROR -> "词典服务出错，请稍后重试。";
             case BAD_RESPONSE -> "词典返回了无法识别的内容。";
             case INTERRUPTED -> "查词已取消。";
+            case OFFLINE -> "离线模式已开启：只查了本地词典（ECDICT、内置词表）和已缓存的在线结果。";
         };
     }
 

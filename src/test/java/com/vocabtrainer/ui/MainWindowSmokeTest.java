@@ -35,7 +35,7 @@ class MainWindowSmokeTest extends MainWindowUiTest {
         assertEquals("0 days", text("streakLabel"));
         assertEquals("0", text("xpLabel"));
         assertEquals("None yet", text("badgesLabel"));
-        assertEquals("SQLite: " + tempDir.resolve("vocab.db").toAbsolutePath(), text("databasePathLabel"));
+        assertTrue(isVisible("dashboardDataFolderButton"), "the data folder is opened, not shown");
 
         selectTab("wordListTab");
         assertEquals(STARTER_WORDS, rowCount("wordTable"));

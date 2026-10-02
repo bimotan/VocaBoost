@@ -79,6 +79,12 @@ final class AiSettingsBox {
         temperatureField.setPromptText("provider default (0 to 2)");
         statusLabel.setText(aiStatusText());
         statusLabel.setId("aiStatusLabel");
+        context.changes().subscribe(changes -> {
+            if (changes.contains(DataChange.SETTINGS)) {
+                // Offline mode or the provider changed.
+                statusLabel.setText(aiStatusText());
+            }
+        });
         statusLabel.setWrapText(true);
 
         Button saveButton = new Button("Save AI Settings");
@@ -160,6 +166,11 @@ final class AiSettingsBox {
     }
 
     private void testProvider(Button testButton) {
+        if (settingsService.isOfflineMode()) {
+            statusLabel.setText("AI test skipped: offline mode is on, so no AI request is sent."
+                + " Turn off offline mode in the header to test the provider.");
+            return;
+        }
         // Ask the saved provider directly: no cache, so a fixed key or model shows up at once,
         // and no mock fallback, so a failure shows the provider's error instead of mock text.
         Optional<AiService> provider;
@@ -244,6 +255,9 @@ final class AiSettingsBox {
     }
 
     private String aiStatusText() {
+        if (settingsService.isOfflineMode()) {
+            return "Offline mode is on: no AI requests are sent and review explanations use the offline mock text.";
+        }
         if (configured.ai().isAvailable()) {
             return "AI provider configured. Review explanations use HTTP provider with local cache.";
         }

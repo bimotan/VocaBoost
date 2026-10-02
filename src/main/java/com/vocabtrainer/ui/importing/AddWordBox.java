@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.Achievement;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.GoalUpdate;
+import com.vocabtrainer.domain.LookupOutcome;
 import com.vocabtrainer.domain.ValidatedWord;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.domain.WordVerificationResult;
@@ -49,7 +50,7 @@ import java.util.function.UnaryOperator;
  * window: the Add button stays usable, changing the English word cancels the check, and a check
  * that finishes for a word no longer in the form is dropped. A word the dictionaries do not have is
  * added as UNVERIFIED only after confirmation; when they could not be asked, the user can retry,
- * add it unchecked (tag UNCHECKED) or cancel.
+ * add it unchecked (tag UNCHECKED) or cancel, and in offline mode add it unchecked or cancel.
  */
 final class AddWordBox {
     private static final String UNVERIFIED_TAG = "UNVERIFIED";
@@ -212,18 +213,25 @@ final class AddWordBox {
                 }
             }
             case UNCHECKED -> {
+                // In offline mode asking again cannot help, so there is no Retry.
+                boolean offline = verification.outcome() == LookupOutcome.OFFLINE;
                 ButtonType retry = new ButtonType("重试", ButtonBar.ButtonData.OTHER);
                 ButtonType addUnchecked = new ButtonType("直接添加", ButtonBar.ButtonData.OK_DONE);
                 ButtonType cancel = new ButtonType("取消", ButtonBar.ButtonData.CANCEL_CLOSE);
-                Optional<ButtonType> choice = context.dialogs().choose("无法验证", "无法验证：" + english,
-                    LookupMessages.headline(verification.outcome()) + System.lineSeparator() + verification.message()
-                        + System.lineSeparator() + "重试，或不经验证直接添加并标记为 " + UNCHECKED_TAG + "？",
-                    retry, addUnchecked, cancel);
+                String question = offline
+                    ? "不经验证直接添加并标记为 " + UNCHECKED_TAG + "？"
+                    : "重试，或不经验证直接添加并标记为 " + UNCHECKED_TAG + "？";
+                String content = LookupMessages.headline(verification.outcome()) + System.lineSeparator()
+                    + verification.message() + System.lineSeparator() + question;
+                Optional<ButtonType> choice = offline
+                    ? context.dialogs().choose("无法验证", "无法验证：" + english, content, addUnchecked, cancel)
+                    : context.dialogs().choose("无法验证", "无法验证：" + english, content, retry, addUnchecked, cancel);
                 if (choice.isPresent() && choice.get() == retry) {
                     checkThenAdd(english);
                 } else if (choice.isPresent() && choice.get() == addUnchecked) {
-                    addFromForm(english, tags -> WordFields.appendTag(tags, UNCHECKED_TAG),
-                        " | Not checked: the dictionaries could not be asked");
+                    addFromForm(english, tags -> WordFields.appendTag(tags, UNCHECKED_TAG), offline
+                        ? " | Not checked: offline mode is on"
+                        : " | Not checked: the dictionaries could not be asked");
                 } else {
                     statusLabel.setText("Canceled: " + english);
                 }

@@ -4,8 +4,12 @@ import com.vocabtrainer.repository.SettingsRepository;
 
 import java.sql.SQLException;
 import java.util.Optional;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class SettingsService {
+    private static final Logger LOGGER = Logger.getLogger(SettingsService.class.getName());
+
     public static final String ECDICT_PATH_KEY = "dictionary.ecdict.path";
     public static final String AI_PROVIDER_KEY = "ai.provider";
     public static final String AI_BASE_URL_KEY = "ai.baseUrl";
@@ -16,6 +20,8 @@ public class SettingsService {
     /** The highest temperature OpenAI-compatible providers accept. */
     public static final double MAX_AI_TEMPERATURE = 2.0;
     public static final String LAST_DECK_ID_KEY = "ui.lastDeckId";
+    /** "true" while offline mode is on: no online dictionary lookups and no AI requests. */
+    public static final String OFFLINE_MODE_KEY = "network.offline";
     public static final String STARTER_IMPORTED_KEY = "starter.imported";
 
     private final SettingsRepository settingsRepository;
@@ -130,6 +136,23 @@ public class SettingsService {
         } catch (NumberFormatException e) {
             return Optional.empty();
         }
+    }
+
+    /**
+     * Whether offline mode is on. It is read from the database at every online lookup and AI
+     * request, so switching it applies at once; if it cannot be read, the app stays offline.
+     */
+    public boolean isOfflineMode() {
+        try {
+            return get(OFFLINE_MODE_KEY).map(value -> value.trim().equalsIgnoreCase("true")).orElse(false);
+        } catch (IllegalStateException e) {
+            LOGGER.log(Level.WARNING, "Cannot read whether offline mode is on; staying offline", e);
+            return true;
+        }
+    }
+
+    public void saveOfflineMode(boolean offline) {
+        save(OFFLINE_MODE_KEY, String.valueOf(offline));
     }
 
     /** The deck the user last worked in; empty if never saved or not a valid id. */

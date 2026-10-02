@@ -4,6 +4,7 @@ import com.vocabtrainer.repository.AiCacheRepository;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 import java.util.logging.Logger;
 
 public final class AiServiceFactory {
@@ -27,7 +28,8 @@ public final class AiServiceFactory {
     /**
      * The service review uses: the configured provider behind the cache, with the mock as a
      * fallback outside it. Only real provider output reaches {@code ai_cache}; a failed request
-     * returns the mock text for that one call and is retried next time.
+     * returns the mock text for that one call and is retried next time. While the saved offline
+     * mode is on ({@link SettingsService#isOfflineMode()}), the mock text is used without a request.
      */
     public static AiService create(AiCacheRepository cacheRepository, SettingsService settingsService,
                                    Map<String, String> config) {
@@ -39,13 +41,14 @@ public final class AiServiceFactory {
         AiService primary = cacheRepository == null
             ? provider
             : new CachingAiService(provider, cacheRepository, provider.cacheIdentity());
-        return new FallbackAiService(primary, mock);
+        BooleanSupplier offline = settingsService == null ? () -> false : settingsService::isOfflineMode;
+        return new OfflineAwareAiService(new FallbackAiService(primary, mock), mock, offline);
     }
 
     /**
-     * The configured provider on its own, without the cache or the mock fallback, so every call
-     * sends a fresh request and a failure is thrown instead of hidden. Empty when no provider is
-     * configured. Used to test the AI settings.
+     * The configured provider on its own, without the cache, the mock fallback or offline mode, so
+     * every call sends a fresh request and a failure is thrown instead of hidden. Empty when no
+     * provider is configured. Used to test the AI settings, which checks offline mode itself.
      */
     public static Optional<AiService> createUncachedProvider(SettingsService settingsService) {
         return createUncachedProvider(settingsService, System.getenv());

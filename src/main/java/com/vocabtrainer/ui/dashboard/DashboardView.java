@@ -7,6 +7,7 @@ import com.vocabtrainer.service.DashboardStats;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.ui.DataChange;
+import com.vocabtrainer.ui.Folders;
 import com.vocabtrainer.ui.Formats;
 import com.vocabtrainer.ui.LazyRefresh;
 import com.vocabtrainer.ui.ViewContext;
@@ -17,6 +18,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.Tab;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
 import java.nio.file.Path;
@@ -39,7 +41,6 @@ public final class DashboardView {
     private final Label streakLabel = new Label("-");
     private final Label xpLabel = new Label("-");
     private final Label badgesLabel = new Label("-");
-    private final Label databasePathLabel = new Label();
     private final ProgressBar reviewProgress = new ProgressBar(0);
     private final ProgressBar newWordProgress = new ProgressBar(0);
     private final Tab tab;
@@ -81,7 +82,6 @@ public final class DashboardView {
         streakLabel.setId("streakLabel");
         xpLabel.setId("xpLabel");
         badgesLabel.setId("badgesLabel");
-        databasePathLabel.setId("databasePathLabel");
         reviewProgress.setId("reviewGoalProgress");
         newWordProgress.setId("newWordGoalProgress");
         addStat(grid, 0, "Total words", totalWordsLabel);
@@ -96,10 +96,14 @@ public final class DashboardView {
         reviewProgress.setPrefWidth(420);
         newWordProgress.setPrefWidth(420);
         badgesLabel.setWrapText(true);
-        databasePathLabel.setStyle("-fx-text-fill: #6b7280;");
         Button refreshButton = new Button("Refresh");
         refreshButton.setId("refreshDashboardButton");
         refreshButton.setOnAction(event -> context.errors().guard("Refresh failed", () -> lazy.refreshNow()));
+        // The folder's path names the user's account, so it is not shown on screen (or in screenshots).
+        Button dataFolderButton = new Button("Open data folder");
+        dataFolderButton.setId("dashboardDataFolderButton");
+        dataFolderButton.setOnAction(event ->
+            Folders.open(context.errors(), "Data folder", databasePath.toAbsolutePath().getParent()));
 
         VBox progressBox = new VBox(10,
             Widgets.sectionTitle("Daily Goals"),
@@ -109,8 +113,7 @@ public final class DashboardView {
             newWordProgress,
             Widgets.sectionTitle("Unlocked Badges"),
             badgesLabel,
-            databasePathLabel,
-            refreshButton
+            new HBox(10, refreshButton, dataFolderButton)
         );
         progressBox.setPadding(new Insets(18, 0, 0, 0));
         grid.add(progressBox, 0, 8, 2, 1);
@@ -141,6 +144,5 @@ public final class DashboardView {
         reviewProgress.setProgress(progress.reviewProgress());
         newWordProgress.setProgress(progress.newWordProgress());
         badgesLabel.setText(Formats.achievementNames(achievements));
-        databasePathLabel.setText("SQLite: " + databasePath.toAbsolutePath());
     }
 }
