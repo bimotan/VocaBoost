@@ -12,6 +12,7 @@ import com.vocabtrainer.service.scheduling.SchedulingOptions;
 import com.vocabtrainer.service.scheduling.StudyDay;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.EnumMap;
@@ -20,6 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.Random;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -31,6 +33,10 @@ import java.util.logging.Logger;
  * similarity it counts as Again, below 75% at most Hard and below 90% at most Good
  * ({@link #effectiveRating}). A card that lapses {@value WordCard#LEECH_LAPSES} times is tagged
  * {@value WordCard#LEECH_TAG}.
+ *
+ * <p>When the word's deck has an exam date ({@link ExamDates}), a review that would fall on or after
+ * it is brought forward into the last days before it ({@link com.vocabtrainer.service.scheduling.ExamClamp});
+ * the rating previews show the shortened interval. Replaying old review logs ignores the exam.
  */
 public class ReviewScheduler {
     /**
@@ -41,10 +47,20 @@ public class ReviewScheduler {
 
     private static final Logger LOGGER = Logger.getLogger(ReviewScheduler.class.getName());
 
+    /** The exam date of each deck, if it has one. */
+    @FunctionalInterface
+    public interface ExamDates {
+        /** No deck has an exam date. */
+        ExamDates NONE = deckId -> Optional.empty();
+
+        Optional<LocalDate> examDate(long deckId);
+    }
+
     private final CardScheduler cards;
     /** Replays review logs of older versions, which had no learning steps. */
     private final CardScheduler withoutSteps;
     private final WordSelector wordSelector;
+    private final ExamDates examDates;
 
     public ReviewScheduler() {
         this(SchedulingOptions.defaults(), new Random());
@@ -60,9 +76,18 @@ public class ReviewScheduler {
 
     /** @param random picks among due cards; scheduling itself is deterministic */
     public ReviewScheduler(SchedulingOptions options, Random random) {
+        this(options, random, ExamDates.NONE);
+    }
+
+    /**
+     * @param random    picks among due cards; scheduling itself is deterministic
+     * @param examDates the exam date of each deck, which reviews are kept before; read at every rating
+     */
+    public ReviewScheduler(SchedulingOptions options, Random random, ExamDates examDates) {
         this.cards = new CardScheduler(options);
         this.withoutSteps = new CardScheduler(options.withoutSteps());
         this.wordSelector = new WordSelector(random);
+        this.examDates = examDates == null ? ExamDates.NONE : examDates;
     }
 
     public SchedulingOptions options() {
@@ -79,7 +104,7 @@ public class ReviewScheduler {
      * for the {@value WordCard#LEECH_LAPSES}th time, so it is now tagged {@value WordCard#LEECH_TAG}.
      */
     public boolean applyRating(WordCard word, ReviewRating rating, LocalDateTime reviewedAt) {
-        return applyRating(cards, word, rating, reviewedAt);
+        return applyRating(cards, word, rating, reviewedAt, examDate(word));
     }
 
     /**
@@ -88,12 +113,12 @@ public class ReviewScheduler {
      * {@link #applyRating(WordCard, ReviewRating, LocalDateTime)}.
      */
     public boolean applyRating(WordCard word, ReviewRating rating, double similarity, LocalDateTime reviewedAt) {
-        return applyRating(cards, word, effectiveRating(rating, similarity), reviewedAt);
+        return applyRating(cards, word, effectiveRating(rating, similarity), reviewedAt, examDate(word));
     }
 
     private static boolean applyRating(CardScheduler scheduler, WordCard word, ReviewRating effectiveRating,
-                                       LocalDateTime reviewedAt) {
-        scheduler.apply(word, effectiveRating, reviewedAt);
+                                       LocalDateTime reviewedAt, LocalDate examDate) {
+        scheduler.apply(word, effectiveRating, reviewedAt, examDate);
         return tagIfLeech(word);
     }
 
@@ -103,6 +128,26 @@ public class ReviewScheduler {
      */
     public void markKnown(WordCard word, LocalDateTime at) {
         cards.markKnown(word, KNOWN_STABILITY_DAYS, at);
+    }
+
+    /**
+     * When {@code word}, a review card due on or after the exam on {@code examDate}, should be due
+     * instead so it is reviewed in the last days before the exam; empty when it can stay. See
+     * {@link CardScheduler#dueBeforeExam}.
+     */
+    public Optional<LocalDateTime> dueBeforeExam(WordCard word, LocalDateTime now, LocalDate examDate) {
+        return cards.dueBeforeExam(word, now, examDate);
+    }
+
+    /** The exam date of the word's deck; null when it has none or it cannot be read, which only logs. */
+    private LocalDate examDate(WordCard word) {
+        try {
+            return examDates.examDate(word.getDeckId()).orElse(null);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Cannot read the exam date of deck " + word.getDeckId()
+                + "; scheduling without it", e);
+            return null;
+        }
     }
 
     /**
@@ -124,7 +169,7 @@ public class ReviewScheduler {
      * rating; nothing is changed.
      */
     public Map<ReviewRating, IntervalPreview> intervals(WordCard word, LocalDateTime now) {
-        Map<ReviewRating, CardScheduler.Outcome> outcomes = cards.outcomes(word, now);
+        Map<ReviewRating, CardScheduler.Outcome> outcomes = cards.outcomes(word, now, examDate(word));
         Map<ReviewRating, IntervalPreview> intervals = new EnumMap<>(ReviewRating.class);
         for (ReviewRating rating : ReviewRating.values()) {
             intervals.put(rating, outcomes.get(rating).preview(now));
@@ -182,7 +227,7 @@ public class ReviewScheduler {
                 if (log.getKind() == ReviewKind.KNOWN) {
                     withoutSteps.markKnown(word, KNOWN_STABILITY_DAYS, log.getReviewedAt());
                 } else {
-                    applyRating(withoutSteps, word, log.getEffectiveRating(), log.getReviewedAt());
+                    applyRating(withoutSteps, word, log.getEffectiveRating(), log.getReviewedAt(), null);
                 }
             });
     }

@@ -3,6 +3,7 @@ package com.vocabtrainer.ui.decks;
 import com.vocabtrainer.service.DeckOverview;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.StatsService;
+import com.vocabtrainer.service.ecdict.EcdictTagDeckService;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.LazyRefresh;
 import com.vocabtrainer.ui.ViewContext;
@@ -22,11 +23,15 @@ import javafx.scene.layout.VBox;
 
 import java.util.List;
 
-/** The Decks tab: active and archived decks with their word, due and latest-review counts. */
+/**
+ * The Decks tab: active and archived decks with their word, due and latest-review counts, and
+ * building a deck from the words ECDICT tags with an exam.
+ */
 public final class DecksView {
     private final ViewContext context;
     private final DeckService deckService;
     private final StatsService statsService;
+    private final EcdictDeckBox ecdictDeckBox;
     private final ObservableList<DeckOverview> deckRows = FXCollections.observableArrayList();
     private final ObservableList<DeckOverview> archivedDeckRows = FXCollections.observableArrayList();
     private final TableView<DeckOverview> deckTable = new TableView<>(deckRows);
@@ -34,10 +39,12 @@ public final class DecksView {
     private final Tab tab;
     private final LazyRefresh lazy;
 
-    public DecksView(ViewContext context, DeckService deckService, StatsService statsService) {
+    public DecksView(ViewContext context, DeckService deckService, StatsService statsService,
+                     EcdictTagDeckService ecdictTagDecks) {
         this.context = context;
         this.deckService = deckService;
         this.statsService = statsService;
+        this.ecdictDeckBox = new EcdictDeckBox(context, ecdictTagDecks);
         this.tab = Widgets.tab("decksTab", "Decks", createContent());
         this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh decks failed", false);
         context.changes().subscribe(changes -> {
@@ -88,7 +95,9 @@ public final class DecksView {
             new HBox(10, switchButton, refreshButton),
             Widgets.sectionTitle("Archived Decks"),
             archivedDeckTable,
-            restoreButton
+            restoreButton,
+            Widgets.sectionTitle("Build a Deck from ECDICT"),
+            ecdictDeckBox.root()
         );
         content.setPadding(new Insets(24));
         VBox.setVgrow(deckTable, Priority.ALWAYS);

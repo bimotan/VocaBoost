@@ -19,10 +19,26 @@ public final class CsvWriter implements Closeable {
 
     private final Writer out;
     private final char delimiter;
+    private final String lineEnd;
+    private final boolean guardFormulas;
 
     public CsvWriter(Writer out, char delimiter) {
+        this(out, delimiter, LINE_END, true);
+    }
+
+    private CsvWriter(Writer out, char delimiter, String lineEnd, boolean guardFormulas) {
         this.out = out;
         this.delimiter = delimiter;
+        this.lineEnd = lineEnd;
+        this.guardFormulas = guardFormulas;
+    }
+
+    /**
+     * Writes records for an app that is not a spreadsheet, such as Anki: quoted where needed, but
+     * without {@link FormulaGuard}, which would put an apostrophe into the app's fields.
+     */
+    public static CsvWriter plainText(Writer out, char delimiter, String lineEnd) {
+        return new CsvWriter(out, delimiter, lineEnd, false);
     }
 
     /**
@@ -49,14 +65,18 @@ public final class CsvWriter implements Closeable {
             if (i > 0) {
                 out.write(delimiter);
             }
-            out.write(encode(cells.get(i), delimiter));
+            String cell = cells.get(i) == null ? "" : cells.get(i);
+            out.write(guardFormulas ? encode(cell, delimiter) : quote(cell, delimiter));
         }
-        out.write(LINE_END);
+        out.write(lineEnd);
     }
 
     /** One cell as it appears in the file; null is written as an empty cell. */
     static String encode(String value, char delimiter) {
-        String cell = FormulaGuard.protect(value == null ? "" : value);
+        return quote(FormulaGuard.protect(value == null ? "" : value), delimiter);
+    }
+
+    private static String quote(String cell, char delimiter) {
         if (!needsQuotes(cell, delimiter)) {
             return cell;
         }

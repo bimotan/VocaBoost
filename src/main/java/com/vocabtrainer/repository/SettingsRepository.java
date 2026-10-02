@@ -4,6 +4,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 
 public class SettingsRepository {
@@ -25,6 +27,23 @@ public class SettingsRepository {
             }
         }
         return Optional.empty();
+    }
+
+    /** Every setting whose key starts with {@code prefix} (case-sensitive), by key. */
+    public Map<String, String> findByPrefix(String prefix) throws SQLException {
+        String sql = "SELECT key, value FROM settings WHERE substr(key, 1, length(?)) = ? ORDER BY key";
+        Map<String, String> settings = new LinkedHashMap<>();
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, prefix);
+            statement.setString(2, prefix);
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    settings.put(rs.getString("key"), rs.getString("value"));
+                }
+            }
+        }
+        return settings;
     }
 
     public void save(String key, String value) throws SQLException {

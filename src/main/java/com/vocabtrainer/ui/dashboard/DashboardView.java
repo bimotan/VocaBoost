@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.Achievement;
 import com.vocabtrainer.domain.DailyGoalProgress;
 import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.DashboardStats;
+import com.vocabtrainer.service.ExamPlanService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.ui.DataChange;
@@ -15,6 +16,7 @@ import com.vocabtrainer.ui.Widgets;
 import com.vocabtrainer.util.DateTimeUtil;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.geometry.VPos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
@@ -27,9 +29,10 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * The Dashboard tab: today's counts, goals, XP and badges for the current deck, and the streak of
- * every deck. Today is the study day; the counts are read from the review logs, like the Statistics
- * tab's. "Edit goals" changes the daily goals and the session goal.
+ * The Dashboard tab: today's counts, goals, XP and badges for the current deck, the streak of every
+ * deck, and the deck's exam with its countdown and new-word plan. Today is the study day; the counts
+ * are read from the review logs, like the Statistics tab's. "Edit goals" changes the daily goals and
+ * the session goal, "Set exam date" the exam.
  */
 public final class DashboardView {
     private final ViewContext context;
@@ -37,6 +40,7 @@ public final class DashboardView {
     private final GoalService goalService;
     private final AchievementService achievementService;
     private final Path databasePath;
+    private final ExamPlanBox examBox;
 
     private final Label totalWordsLabel = new Label("-");
     private final Label dueTodayLabel = new Label("-");
@@ -57,12 +61,13 @@ public final class DashboardView {
     private final LazyRefresh lazy;
 
     public DashboardView(ViewContext context, StatsService statsService, GoalService goalService,
-                         AchievementService achievementService, Path databasePath) {
+                         AchievementService achievementService, ExamPlanService examPlanService, Path databasePath) {
         this.context = context;
         this.statsService = statsService;
         this.goalService = goalService;
         this.achievementService = achievementService;
         this.databasePath = databasePath;
+        this.examBox = new ExamPlanBox(context, examPlanService);
         this.tab = Widgets.tab("dashboardTab", "Dashboard", createContent());
         this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh failed", false);
         context.changes().subscribe(changes -> {
@@ -142,6 +147,10 @@ public final class DashboardView {
         );
         progressBox.setPadding(new Insets(18, 0, 0, 0));
         grid.add(progressBox, 0, 10, 2, 1);
+        // The exam box takes the empty space right of the counts.
+        GridPane.setMargin(examBox.root(), new Insets(0, 0, 0, 60));
+        GridPane.setValignment(examBox.root(), VPos.TOP);
+        grid.add(examBox.root(), 2, 0, 1, 10);
         return grid;
     }
 
@@ -190,5 +199,6 @@ public final class DashboardView {
         reviewProgress.setProgress(progress.reviewProgress());
         newWordProgress.setProgress(progress.newWordProgress());
         badgesLabel.setText(Formats.achievementNames(achievements));
+        examBox.refresh(deckId);
     }
 }

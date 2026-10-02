@@ -19,6 +19,8 @@ import com.vocabtrainer.service.CardStateBackfill;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.DictionaryServiceFactory;
+import com.vocabtrainer.service.ExamPlanService;
+import com.vocabtrainer.service.ExamSettings;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.GoalSettings;
 import com.vocabtrainer.service.ImportExportService;
@@ -33,6 +35,7 @@ import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.service.cloze.ClozeMaker;
 import com.vocabtrainer.service.ecdict.EcdictImportService;
+import com.vocabtrainer.service.ecdict.EcdictTagDeckService;
 import com.vocabtrainer.ui.Dialogs;
 import com.vocabtrainer.ui.MainWindow;
 
@@ -44,6 +47,8 @@ import java.util.Random;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * The repositories and services of one database, wired the way the desktop app runs them.
@@ -58,8 +63,10 @@ import java.util.function.Supplier;
  * @param aiServices         builds the AI service from the saved settings; called again when the
  *                           AI settings change
  * @param startupDeck        the deck the main window opens on
- * @param reviewScheduler    schedules reviews with the saved scheduling settings
+ * @param reviewScheduler    schedules reviews with the saved scheduling settings and exam dates
  * @param clock              the time every service and view works with
+ * @param examPlanService    the exam dates, the countdown and the new-word plan
+ * @param ecdictTagDecks     builds decks from the words ECDICT tags with an exam
  */
 public record AppServices(
     DatabaseManager databaseManager,
@@ -88,7 +95,9 @@ public record AppServices(
     Supplier<AiService> aiServices,
     Deck startupDeck,
     ReviewScheduler reviewScheduler,
-    Clock clock
+    Clock clock,
+    ExamPlanService examPlanService,
+    EcdictTagDeckService ecdictTagDecks
 ) implements AutoCloseable {
     public static Builder builder(Path databasePath) {
         return new Builder(databasePath);
@@ -104,6 +113,21 @@ public record AppServices(
     /** The main window on these services; {@code dialogs} shows its modal dialogs and file choosers. */
     public MainWindow createMainWindow(Dialogs dialogs) {
         return new MainWindow(this, dialogs);
+    }
+
+    /** Calls {@code supplier} once, on first use, and returns that value from then on. */
+    private static <T> Supplier<T> memoize(Supplier<T> supplier) {
+        return new Supplier<>() {
+            private T value;
+
+            @Override
+            public synchronized T get() {
+                if (value == null) {
+                    value = supplier.get();
+                }
+                return value;
+            }
+        };
     }
 
     /**
@@ -172,7 +196,9 @@ public record AppServices(
             Deck startupDeck = deckService.resolveStartupDeck();
 
             SimilarityService similarityService = new SimilarityService();
-            ReviewScheduler reviewScheduler = new ReviewScheduler(settingsService.getSchedulingOptions());
+            ExamSettings examSettings = new ExamSettings(settingsService);
+            ReviewScheduler reviewScheduler = new ReviewScheduler(settingsService.getSchedulingOptions(), new Random(),
+                examSettings::examDate);
             CardStateBackfill cardStates = new CardStateBackfill(wordRepository, reviewLogRepository, reviewScheduler);
             cardStates.run();
             ReviewSettings reviewSettings = new ReviewSettings(settingsService);
@@ -180,14 +206,21 @@ public record AppServices(
                 new GoalSettings(settingsService, reviewSettings), reviewScheduler.studyDay(), clock);
             AchievementService achievementService = new AchievementService(achievementRepository, goalService, clock);
             WordValidationService validationService = new WordValidationService();
-            ImportExportService importExportService = new ImportExportService(wordRepository, validationService);
-            StarterImportService starterImportService = new StarterImportService(
-                importExportService, wordRepository, reviewLogRepository, goalRepository, settingsService);
-            starterImportService.importOnce(startupDeck.getId());
             // Only opened by the first lookup; the ECDICT CSV itself is never read here.
             EcdictRepository ecdictRepository = new EcdictRepository(databasePath.resolveSibling("ecdict.db"));
             EcdictImportService ecdictImportService = new EcdictImportService(ecdictRepository);
             LocalDictionaryService localDictionary = new LocalDictionaryService(ecdictRepository);
+            BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> dictionaryFactory =
+                dictionaryServiceFactory != null
+                    ? dictionaryServiceFactory
+                    : (cache, local) -> DictionaryServiceFactory.create(cache, local, settingsService::isOfflineMode);
+            // A word list import asks the network only when the user allows it, and builds the chain only then.
+            ImportExportService importExportService = new ImportExportService(wordRepository, validationService,
+                localDictionary, memoize(() -> dictionaryFactory.apply(dictionaryCacheRepository, localDictionary)),
+                settingsService::isOfflineMode);
+            StarterImportService starterImportService = new StarterImportService(
+                importExportService, wordRepository, reviewLogRepository, goalRepository, settingsService);
+            starterImportService.importOnce(startupDeck.getId());
             ClozeMaker clozeMaker = new ClozeMaker(localDictionary::inflections);
             ReviewService reviewService = new ReviewService(
                 wordRepository,
@@ -203,12 +236,11 @@ public record AppServices(
             );
             StatsService statsService = new StatsService(wordRepository, reviewLogRepository, clock,
                 reviewScheduler.studyDay(), reviewSettings);
+            ExamPlanService examPlanService = new ExamPlanService(examSettings, wordRepository, reviewLogRepository,
+                reviewSettings, reviewScheduler, clock);
+            bringReviewsBeforeExams(examPlanService);
             BackupService backupService = new BackupService(deckRepository, wordRepository, reviewLogRepository,
                 goalRepository, achievementRepository, databaseManager, validationService, clock, cardStates);
-            BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> dictionaryFactory =
-                dictionaryServiceFactory != null
-                    ? dictionaryServiceFactory
-                    : (cache, local) -> DictionaryServiceFactory.create(cache, local, settingsService::isOfflineMode);
             BiFunction<AiCacheRepository, SettingsService, AiService> aiFactory = aiServiceFactory;
 
             return new AppServices(
@@ -238,8 +270,23 @@ public record AppServices(
                 () -> aiFactory.apply(aiCacheRepository, settingsService),
                 startupDeck,
                 reviewScheduler,
-                clock
+                clock,
+                examPlanService,
+                new EcdictTagDeckService(ecdictRepository, deckService, wordRepository, validationService)
             );
+        }
+
+        /**
+         * Reviews that a backup restore, an import or the card-state backfill scheduled on or after an
+         * exam are brought forward at every start; a failure only skips that.
+         */
+        private static void bringReviewsBeforeExams(ExamPlanService examPlanService) {
+            try {
+                examPlanService.bringReviewsBeforeExams();
+            } catch (RuntimeException e) {
+                Logger.getLogger(AppServices.class.getName()).log(Level.WARNING,
+                    "Cannot bring the reviews scheduled after the exam forward", e);
+            }
         }
     }
 }

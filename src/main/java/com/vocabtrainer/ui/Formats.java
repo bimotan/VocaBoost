@@ -21,14 +21,18 @@ public final class Formats {
 
     /**
      * An interval as a rating button shows it: a learning step in minutes or hours ("1m", "6m",
-     * "2h"), a review interval in days, months or years ("4d", "1.5mo", "2.1y").
+     * "2h"), a review interval in days, months or years ("4d", "1.5mo", "2.1y"), followed by
+     * " (exam)" when it was shortened so the card is reviewed before the exam ("12d (exam)").
      */
     public static String interval(IntervalPreview preview) {
         if (preview.isLearningStep()) {
             long minutes = Math.max(1L, Math.round(preview.learningDelay().toSeconds() / 60.0));
             return minutes < 60 ? minutes + "m" : Math.round(minutes / 60.0) + "h";
         }
-        int days = preview.intervalDays();
+        return reviewInterval(preview.intervalDays()) + (preview.beforeExam() ? " (exam)" : "");
+    }
+
+    private static String reviewInterval(int days) {
         if (days < 30) {
             return days + "d";
         }

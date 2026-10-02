@@ -93,6 +93,7 @@ class QueryPlanTest {
         stats.dailyReviewStats(7);
         stats.hardestWords(deck.getId(), 8);
         stats.overdueCount(deck.getId());
+        stats.workloadForecast(deck.getId(), 30);
         stats.buildMarkdownReport(deck.getId(), deck.getName(), goals.getTodayProgress(deck.getId()));
         // A rating.
         ReviewService review = new ReviewService(wordRepository, logRepository, new SimilarityService(),

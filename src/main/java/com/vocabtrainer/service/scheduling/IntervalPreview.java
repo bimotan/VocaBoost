@@ -8,12 +8,18 @@ import java.time.Duration;
  *
  * @param learningDelay the delay of a learning or relearning step; zero for an interval of days
  * @param intervalDays  the interval in study days; zero for a learning step
+ * @param beforeExam    whether the interval was shortened so the card is reviewed before the exam
+ *                      (see {@link ExamClamp})
  */
-public record IntervalPreview(Duration learningDelay, int intervalDays) {
+public record IntervalPreview(Duration learningDelay, int intervalDays, boolean beforeExam) {
     public IntervalPreview {
         if (learningDelay == null || learningDelay.isNegative() || intervalDays < 0) {
             throw new IllegalArgumentException("Invalid interval: " + learningDelay + ", " + intervalDays + " days");
         }
+    }
+
+    public IntervalPreview(Duration learningDelay, int intervalDays) {
+        this(learningDelay, intervalDays, false);
     }
 
     public static IntervalPreview step(Duration delay) {
