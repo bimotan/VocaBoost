@@ -55,6 +55,31 @@ class ExamSchedulingTest {
     }
 
     @Test
+    void aWordMarkedAsKnownIsDueBeforeTheExamWithTheSameMemory() {
+        WordCard free = WordCard.createNew(1, "lucid", "清楚的");
+        WordCard beforeExam = WordCard.createNew(1, "lucid", "清楚的");
+        LocalDate exam = TODAY.plusDays(20);
+
+        CardScheduler.Outcome unclamped = scheduler.markKnown(free, 60, MONDAY);
+        CardScheduler.Outcome clamped = scheduler.markKnown(beforeExam, 60, MONDAY, exam);
+
+        assertTrue(unclamped.intervalDays() > 20, "60 days of stability would reach the exam");
+        assertFalse(unclamped.beforeExam());
+        long daysBeforeExam = 20 - clamped.intervalDays();
+        assertTrue(daysBeforeExam >= 1 && daysBeforeExam <= ExamClamp.FINAL_DAYS, clamped.toString());
+        assertTrue(clamped.beforeExam());
+        assertEquals(TODAY.plusDays(clamped.intervalDays()).atTime(4, 0), beforeExam.getNextReviewAt());
+        assertEquals(clamped.intervalDays(), beforeExam.getIntervalDays());
+        assertEquals(free.getStability(), beforeExam.getStability());
+        assertEquals(free.getDifficulty(), beforeExam.getDifficulty());
+        assertEquals(CardState.REVIEW, beforeExam.getState());
+
+        WordCard later = WordCard.createNew(1, "lucid", "清楚的");
+        assertEquals(unclamped, scheduler.markKnown(later, 60, MONDAY, TODAY.plusDays(400)),
+            "an exam after the interval changes nothing");
+    }
+
+    @Test
     void applyingARatingSchedulesTheClampedDueDate() {
         WordCard card = reviewCard(5, 40, 5, MONDAY.minusDays(40));
         LocalDate exam = TODAY.plusDays(20);

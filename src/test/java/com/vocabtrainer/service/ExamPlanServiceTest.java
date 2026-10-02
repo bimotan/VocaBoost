@@ -163,6 +163,22 @@ class ExamPlanServiceTest {
     }
 
     @Test
+    void aWordMarkedAsKnownIsDueBeforeItsDecksExam() throws SQLException {
+        WordCard known = words.insert(WordCard.createNew(deck.getId(), "lucid", "清楚的"));
+        WordCard elsewhere = words.insert(WordCard.createNew(other.getId(), "lucid", "清楚的"));
+        plans.saveExam(deck.getId(), true, new Exam("GRE", TODAY.plusDays(20)));
+        ReviewService review = new ReviewService(words, logs, new SimilarityService(), scheduler, null, null, clock,
+            reviewSettings, new Random(1));
+
+        LocalDate knownDue = review.markKnown(known.getId()).getNextReviewAt().toLocalDate();
+        LocalDate elsewhereDue = review.markKnown(elsewhere.getId()).getNextReviewAt().toLocalDate();
+
+        assertTrue(knownDue.isBefore(TODAY.plusDays(20)) && !knownDue.isBefore(TODAY.plusDays(20 - ExamClamp.FINAL_DAYS)),
+            "due in the final week: " + knownDue);
+        assertTrue(elsewhereDue.isAfter(TODAY.plusDays(40)), "the other deck has no exam: " + elsewhereDue);
+    }
+
+    @Test
     void savingAnExamBringsReviewsScheduledAfterItForward() throws SQLException {
         LocalDate exam = TODAY.plusDays(30);
         WordCard late = words.insert(reviewCard(deck, "lucid", 60, NOW.minusDays(10), TODAY.plusDays(50).atTime(4, 0)));

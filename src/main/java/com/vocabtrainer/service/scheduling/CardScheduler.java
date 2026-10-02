@@ -214,10 +214,22 @@ public final class CardScheduler {
      * {@code now}, so its memory decays from now on; the review counters stay as they are.
      */
     public Outcome markKnown(WordCard card, double stability, LocalDateTime now) {
+        return markKnown(card, stability, now, null);
+    }
+
+    /**
+     * As {@link #markKnown(WordCard, double, LocalDateTime)} before an exam on {@code examDay} (null
+     * for none): an interval that would reach the exam day is shortened by {@link ExamClamp#interval},
+     * as a rating's would be, so the card gets a review in the last days before the exam.
+     */
+    public Outcome markKnown(WordCard card, double stability, LocalDateTime now, LocalDate examDay) {
         double difficulty = fsrs.initialDifficulty(ReviewRating.EASY.getGrade());
-        int days = fuzzedInterval(fsrs.nextInterval(stability), fuzzFraction(card), 1, options.maximumInterval());
+        double fuzz = fuzzFraction(card);
+        int free = fuzzedInterval(fsrs.nextInterval(stability), fuzz, 1, options.maximumInterval());
+        long daysToExam = examDay == null ? 0 : ChronoUnit.DAYS.between(studyDay.of(now), examDay);
+        int days = ExamClamp.interval(free, daysToExam, ExamClamp.lead(free, fuzz));
         Outcome outcome = new Outcome(CardState.REVIEW, stability, difficulty, 0, days,
-            studyDay.startOfDayAfter(now, days), false, false);
+            studyDay.startOfDayAfter(now, days), false, days != free);
         card.setState(outcome.state());
         card.setStability(outcome.stability());
         card.setDifficulty(outcome.difficulty());

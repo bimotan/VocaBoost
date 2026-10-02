@@ -124,10 +124,11 @@ public class ReviewScheduler {
 
     /**
      * Puts {@code word}, which the user already knows, straight into review at {@code at}, with
-     * {@value #KNOWN_STABILITY_DAYS} days of stability; see {@link CardScheduler#markKnown}.
+     * {@value #KNOWN_STABILITY_DAYS} days of stability, and due before its deck's exam when that
+     * interval would reach it; see {@link CardScheduler#markKnown}.
      */
     public void markKnown(WordCard word, LocalDateTime at) {
-        cards.markKnown(word, KNOWN_STABILITY_DAYS, at);
+        cards.markKnown(word, KNOWN_STABILITY_DAYS, at, examDate(word));
     }
 
     /**
