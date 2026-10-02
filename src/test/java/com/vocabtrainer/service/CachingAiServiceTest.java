@@ -10,6 +10,8 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -79,6 +81,11 @@ class CachingAiServiceTest {
             + System.lineSeparator() + "AI provider failed; mock fallback was used.";
         repository.save("explain:v1:lucid:清晰的", poisoned, createdAt);
         repository.save("explain:v1:candid:坦率的", "candid 指坦率的、直言不讳的。", createdAt);
+        // Those versions did not record a schema version.
+        try (Connection connection = databaseManager.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA user_version = 0");
+        }
 
         databases.open(databasePath);
 
