@@ -108,8 +108,20 @@ public class DeckService {
         }
     }
 
+    /**
+     * Restores an archived deck. Its name may have been reused by an active deck since it was
+     * archived; then the user has to rename one of them first.
+     */
     public Deck restoreDeck(long id) {
         try {
+            Optional<Deck> deck = deckRepository.findById(id);
+            if (deck.isPresent() && deck.get().isArchived()) {
+                Optional<Deck> active = deckRepository.findByName(deck.get().getName());
+                if (active.isPresent() && active.get().getId() != id) {
+                    throw new IllegalArgumentException("已有同名的活动词库「" + deck.get().getName()
+                        + "」：请先重命名或归档那个词库，再恢复这个词库");
+                }
+            }
             return deckRepository.restore(id);
         } catch (SQLException e) {
             throw new IllegalArgumentException("恢复词库失败：" + e.getMessage(), e);
@@ -134,14 +146,11 @@ public class DeckService {
         return deckRepository.ensureDefaultDeck();
     }
 
-    /** Deck names are unique across archived decks too, so say which deck already uses the name. */
+    /** Names are unique among active decks; an archived deck's name can be used again. */
     private void rejectNameInUse(String name, Long renamingId) throws SQLException {
-        Optional<Deck> existing = deckRepository.findAnyByName(name);
+        Optional<Deck> existing = deckRepository.findByName(name);
         if (existing.isEmpty() || (renamingId != null && existing.get().getId() == renamingId)) {
             return;
-        }
-        if (existing.get().isArchived()) {
-            throw new IllegalArgumentException("已归档的词库中有同名词库「" + name + "」：请在 Decks 页恢复它，或换一个名称");
         }
         throw new IllegalArgumentException("已有同名词库「" + name + "」，请换一个名称");
     }

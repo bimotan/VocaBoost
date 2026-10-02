@@ -23,7 +23,7 @@ import java.util.logging.Logger;
  */
 final class SchemaMigrations {
     /** The version a fully migrated database has: the last step's. */
-    static final int CURRENT_VERSION = 1;
+    static final int CURRENT_VERSION = 2;
 
     private static final Logger LOGGER = Logger.getLogger(SchemaMigrations.class.getName());
 
@@ -64,7 +64,8 @@ final class SchemaMigrations {
 
     private final Connection connection;
     private final List<Step> steps = List.of(
-        new Step(1, "schema of the unversioned releases", false, this::baseline)
+        new Step(1, "schema of the unversioned releases", false, this::baseline),
+        new Step(2, "deck names unique among active decks only", true, this::uniqueActiveDeckNames)
     );
 
     SchemaMigrations(Connection connection) {
@@ -255,6 +256,40 @@ final class SchemaMigrations {
     }
 
     /**
+     * Version 2: decks.name was UNIQUE across archived decks too, so an archived deck blocked its
+     * name forever. SQLite cannot drop a column constraint, so the table is rebuilt with the same
+     * rows and ids, and a partial index keeps names unique among active decks only.
+     */
+    private void uniqueActiveDeckNames() throws SQLException {
+        if (hasColumnUniqueConstraint("decks", "name")) {
+            int brokenReferencesBefore = foreignKeyViolations();
+            Long sequence = autoincrementSequence("decks");
+            execute("""
+                CREATE TABLE decks_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    archived INTEGER NOT NULL DEFAULT 0
+                )
+                """);
+            execute("INSERT INTO decks_new(id, name, created_at, archived) SELECT id, name, created_at, archived FROM decks");
+            // Foreign keys are off, so this does not cascade to the words that reference decks by id.
+            execute("DROP TABLE decks");
+            execute("ALTER TABLE decks_new RENAME TO decks");
+            if (sequence != null) {
+                // Ids of decks deleted in the past are never handed out again.
+                keepAutoincrementAtLeast("decks", sequence);
+            }
+            int brokenReferences = foreignKeyViolations();
+            if (brokenReferences > brokenReferencesBefore) {
+                throw new SQLException("Rebuilding decks broke " + (brokenReferences - brokenReferencesBefore)
+                    + " foreign key reference(s)");
+            }
+        }
+        execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_decks_active_name ON decks(name) WHERE archived = 0");
+    }
+
+    /**
      * Deletes AI explanations that are really the mock fallback text. Older versions cached it
      * after any provider error, so that word never got a real explanation.
      */
@@ -289,6 +324,62 @@ final class SchemaMigrations {
             }
         }
         return columns;
+    }
+
+    /** Whether a UNIQUE constraint in the table definition covers exactly {@code column}. */
+    private boolean hasColumnUniqueConstraint(String table, String column) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT 1
+            FROM pragma_index_list(?) list
+            WHERE list.origin = 'u'
+              AND (SELECT COUNT(*) FROM pragma_index_info(list.name)) = 1
+              AND (SELECT info.name FROM pragma_index_info(list.name) info) = ?
+            """)) {
+            statement.setString(1, table);
+            statement.setString(2, column);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    private int foreignKeyViolations() throws SQLException {
+        int violations = 0;
+        try (Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("PRAGMA foreign_key_check")) {
+            while (rs.next()) {
+                violations++;
+            }
+        }
+        return violations;
+    }
+
+    private Long autoincrementSequence(String table) throws SQLException {
+        if (!tableExists("sqlite_sequence")) {
+            return null;
+        }
+        try (PreparedStatement statement = connection.prepareStatement("SELECT seq FROM sqlite_sequence WHERE name = ?")) {
+            statement.setString(1, table);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? rs.getLong(1) : null;
+            }
+        }
+    }
+
+    private void keepAutoincrementAtLeast(String table, long sequence) throws SQLException {
+        try (PreparedStatement update = connection.prepareStatement(
+            "UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?")) {
+            update.setLong(1, sequence);
+            update.setString(2, table);
+            if (update.executeUpdate() > 0) {
+                return;
+            }
+        }
+        try (PreparedStatement insert = connection.prepareStatement("INSERT INTO sqlite_sequence(name, seq) VALUES(?, ?)")) {
+            insert.setString(1, table);
+            insert.setLong(2, sequence);
+            insert.executeUpdate();
+        }
     }
 
     private boolean tableExists(String table) throws SQLException {

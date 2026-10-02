@@ -131,6 +131,39 @@ class SchemaMigrationTest {
     }
 
     @Test
+    void rebuildsDecksSoArchivedNamesCanBeReusedWithoutTouchingWordsOrIds() throws Exception {
+        Path file = tempDir.resolve("deck-names.db");
+        LegacySchemas.DECK_SCOPED_GOALS.create(file);
+        seedPreMultiDeckData(file);
+        LegacySchemas.execute(file,
+            // Deck 3 was deleted once, so AUTOINCREMENT is ahead of the highest id.
+            "INSERT INTO decks(id, name, created_at, archived) VALUES(4, 'TOEFL', '2026-04-03T08:00:00', 1)",
+            "UPDATE sqlite_sequence SET seq = 7 WHERE name = 'decks'",
+            word(4, "laconic", "简洁的"));
+
+        DatabaseManager databaseManager = databases.open(file);
+
+        assertEquals(List.of("1|默认词库|0", "2|GRE|0", "4|TOEFL|1"),
+            stringColumn(file, "SELECT id || '|' || name || '|' || archived FROM decks ORDER BY id"));
+        // The rebuild dropped the old table with foreign keys off: no word or log was cascade-deleted.
+        assertEquals(4, intQuery(file, "SELECT COUNT(*) FROM words"));
+        assertEquals(3, intQuery(file, "SELECT COUNT(*) FROM review_logs"));
+        assertDatabaseIsConsistent(file);
+        assertEquals("1", stringColumn(file, "SELECT \"unique\" FROM pragma_index_list('decks')"
+            + " WHERE name = 'idx_decks_active_name'").get(0));
+
+        DeckRepository decks = new DeckRepository(databaseManager);
+        assertEquals(8, decks.create("TOEFL").getId(), "ids of deleted decks are not reused");
+        assertThrows(SQLException.class, () -> decks.create("GRE"));
+        assertThrows(SQLException.class, () -> decks.restore(4));
+        // Foreign keys are back on for the pooled connections.
+        try (Connection connection = databaseManager.getConnection();
+             Statement statement = connection.createStatement()) {
+            assertThrows(SQLException.class, () -> statement.executeUpdate(word(99, "orphan", "孤儿")));
+        }
+    }
+
+    @Test
     void failedStepChangesNothingAndIsRetriedOnTheNextStart() throws Exception {
         Path file = tempDir.resolve("failing.db");
         LegacySchemas.GOALS.create(file);

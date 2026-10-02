@@ -10,10 +10,12 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.sql.SQLException;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -99,25 +101,68 @@ class DeckServiceTest {
     }
 
     @Test
-    void explainsNameConflictsWithArchivedDecks() throws Exception {
+    void archivedDeckNamesCanBeReusedAndRestoringIntoATakenNameIsExplained() throws Exception {
         DatabaseManager databaseManager = databases.open(tempDir.resolve("names.db"));
-        DeckService deckService = new DeckService(new DeckRepository(databaseManager),
+        DeckRepository deckRepository = new DeckRepository(databaseManager);
+        DeckService deckService = new DeckService(deckRepository,
             new SettingsService(new SettingsRepository(databaseManager)));
         Deck defaultDeck = deckService.ensureDefaultDeck();
-        Deck greDeck = deckService.createDeck("GRE");
-        deckService.archiveDeck(greDeck.getId());
+        Deck archivedGre = deckService.createDeck("GRE");
+        deckService.archiveDeck(archivedGre.getId());
+        Deck archivedToefl = deckService.createDeck("TOEFL");
+        deckService.archiveDeck(archivedToefl.getId());
 
+        Deck newGre = deckService.createDeck("GRE");
+        assertNotEquals(archivedGre.getId(), newGre.getId());
+        assertEquals("TOEFL", deckService.renameDeck(defaultDeck.getId(), "TOEFL").getName());
+
+        IllegalArgumentException restore = assertThrows(IllegalArgumentException.class,
+            () -> deckService.restoreDeck(archivedGre.getId()));
+        assertTrue(restore.getMessage().contains("已有同名的活动词库「GRE」"), restore.getMessage());
+        assertNull(restore.getCause(), "shown to the user as a plain validation message");
+        assertTrue(deckRepository.findById(archivedGre.getId()).orElseThrow().isArchived());
+
+        // Active names stay unique.
         IllegalArgumentException create = assertThrows(IllegalArgumentException.class, () -> deckService.createDeck("GRE"));
-        assertTrue(create.getMessage().contains("已归档"), create.getMessage());
+        assertTrue(create.getMessage().contains("已有同名词库"), create.getMessage());
         assertNull(create.getCause());
         IllegalArgumentException rename = assertThrows(IllegalArgumentException.class,
             () -> deckService.renameDeck(defaultDeck.getId(), "GRE"));
-        assertTrue(rename.getMessage().contains("已归档"), rename.getMessage());
-        IllegalArgumentException active = assertThrows(IllegalArgumentException.class,
-            () -> deckService.createDeck(DeckRepository.DEFAULT_DECK_NAME));
-        assertTrue(active.getMessage().contains("已有同名词库"), active.getMessage());
+        assertTrue(rename.getMessage().contains("已有同名词库"), rename.getMessage());
+        assertEquals("TOEFL", deckService.renameDeck(defaultDeck.getId(), "TOEFL").getName());
 
-        assertEquals(DeckRepository.DEFAULT_DECK_NAME,
-            deckService.renameDeck(defaultDeck.getId(), DeckRepository.DEFAULT_DECK_NAME).getName());
+        // Once the name is free again, the archived deck comes back under it.
+        deckService.renameDeck(newGre.getId(), "GRE 2");
+        Deck restored = deckService.restoreDeck(archivedGre.getId());
+        assertEquals("GRE", restored.getName());
+        assertFalse(restored.isArchived());
+    }
+
+    @Test
+    void databaseKeepsActiveNamesUniqueEvenWithoutTheServiceChecks() throws Exception {
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("index.db"));
+        DeckRepository deckRepository = new DeckRepository(databaseManager);
+        Deck first = deckRepository.create("GRE");
+
+        assertThrows(SQLException.class, () -> deckRepository.create("GRE"));
+        deckRepository.archive(first.getId());
+        Deck second = deckRepository.create("GRE");
+        assertThrows(SQLException.class, () -> deckRepository.restore(first.getId()));
+        assertEquals(second.getId(), deckRepository.findByName("GRE").orElseThrow().getId());
+        assertEquals(second.getId(), deckRepository.findAnyByName("GRE").orElseThrow().getId());
+        deckRepository.archive(second.getId());
+        assertEquals(second.getId(), deckRepository.findAnyByName("GRE").orElseThrow().getId(), "newest archived");
+    }
+
+    @Test
+    void ensureDefaultDeckPrefersTheActiveDefaultDeckOverArchivedOnes() throws Exception {
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("defaults.db"));
+        DeckRepository deckRepository = new DeckRepository(databaseManager);
+        Deck archivedDefault = deckRepository.ensureDefaultDeck();
+        deckRepository.archive(archivedDefault.getId());
+        Deck activeDefault = deckRepository.create(DeckRepository.DEFAULT_DECK_NAME);
+
+        assertEquals(activeDefault.getId(), deckRepository.ensureDefaultDeck().getId());
+        assertTrue(deckRepository.findById(archivedDefault.getId()).orElseThrow().isArchived());
     }
 }
