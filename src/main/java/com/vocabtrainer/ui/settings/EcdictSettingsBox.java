@@ -1,4 +1,4 @@
-package com.vocabtrainer.ui.importing;
+package com.vocabtrainer.ui.settings;
 
 import com.vocabtrainer.domain.EcdictMetadata;
 import com.vocabtrainer.service.LocalDictionaryService;

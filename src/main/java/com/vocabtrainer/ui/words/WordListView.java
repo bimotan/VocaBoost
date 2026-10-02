@@ -35,6 +35,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.OptionalDouble;
+import java.util.function.Supplier;
 
 /**
  * The Word List tab: search and filter the current deck's words, edit or delete one. Under the table
@@ -44,7 +45,7 @@ public final class WordListView {
     private final ViewContext context;
     private final WordRepository wordRepository;
     private final Clock clock;
-    private final StudyDay studyDay;
+    private final Supplier<StudyDay> studyDays;
     private final WordEditDialog editDialog;
     private final ClozeMaker examples;
     private final WordDetailsCard detailsCard = new WordDetailsCard("wordDetails");
@@ -58,21 +59,23 @@ public final class WordListView {
     private final LazyRefresh lazy;
 
     /**
-     * {@code clock} and {@code studyDay} decide which words are due today and how strong their memory
-     * is; {@code examples} finds the word in its example sentence.
+     * {@code clock} and {@code studyDays} (the scheduler's study day, read at every refresh) decide which
+     * words are due today and how strong their memory is; {@code examples} finds the word in its example
+     * sentence.
      */
     public WordListView(ViewContext context, WordRepository wordRepository, WordValidationService validationService,
-                        Clock clock, StudyDay studyDay, ClozeMaker examples) {
+                        Clock clock, Supplier<StudyDay> studyDays, ClozeMaker examples) {
         this.context = context;
         this.examples = examples;
         this.wordRepository = wordRepository;
         this.clock = clock;
-        this.studyDay = studyDay;
+        this.studyDays = studyDays;
         this.editDialog = new WordEditDialog(context, wordRepository, validationService);
         this.tab = Widgets.tab("wordListTab", "Word List", createContent());
         this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh failed", false);
         context.changes().subscribe(changes -> {
-            if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)) {
+            if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
+                || changes.contains(DataChange.REVIEW_SETTINGS)) {
                 lazy.markStale();
             }
         });
@@ -139,7 +142,7 @@ public final class WordListView {
         TableColumn<WordCard, String> statusCol = new TableColumn<>("Status");
         statusCol.setCellValueFactory(data -> {
             LocalDateTime now = LocalDateTime.now(clock);
-            return new SimpleStringProperty(WordListFilter.statusOf(data.getValue(), now, studyDay.end(now)));
+            return new SimpleStringProperty(WordListFilter.statusOf(data.getValue(), now, studyDays.get().end(now)));
         });
         wordTable.getColumns().addAll(List.of(englishCol, chineseCol, nextCol, intervalCol, strengthCol, statusCol));
 
@@ -159,7 +162,7 @@ public final class WordListView {
             WordListFilter filter = new WordListFilter(wordStatusFilter.getValue(), tagFilterField.getText(),
                 posFilterField.getText());
             LocalDateTime now = LocalDateTime.now(clock);
-            LocalDateTime dayEnd = studyDay.end(now);
+            LocalDateTime dayEnd = studyDays.get().end(now);
             WordCard selected = wordTable.getSelectionModel().getSelectedItem();
             wordItems.setAll(words.stream().filter(word -> filter.matches(word, now, dayEnd)).toList());
             // Keep the selected word selected, with its details as they are now (e.g. after an edit).

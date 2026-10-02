@@ -94,7 +94,7 @@ class OfflineModeUiTest extends MainWindowUiTest {
         assertTrue(text("reviewResultArea").endsWith(OfflineAwareAiService.OFFLINE_NOTE), text("reviewResultArea"));
         assertFalse(isVisible("regenerateExplanationButton"));
 
-        selectTab("addImportTab");
+        selectTab("settingsTab");
         assertTrue(text("aiStatusLabel").startsWith("Offline mode is on"), text("aiStatusLabel"));
         click("testAiButton");
         waitForBackgroundTasks();

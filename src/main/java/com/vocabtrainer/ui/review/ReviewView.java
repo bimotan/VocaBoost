@@ -116,6 +116,9 @@ public final class ReviewView {
             if (changes.contains(DataChange.WORDS)) {
                 presenter.wordsChanged();
             }
+            if (changes.contains(DataChange.REVIEW_SETTINGS)) {
+                presenter.reviewSettingsChanged();
+            }
             if (changes.contains(DataChange.SETTINGS)) {
                 // The AI provider or offline mode may have changed.
                 render();

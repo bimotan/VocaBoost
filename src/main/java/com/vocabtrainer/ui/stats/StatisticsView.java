@@ -25,15 +25,16 @@ import javafx.scene.control.TextArea;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.DoubleSupplier;
 import java.util.stream.Collectors;
 
 /** The Statistics tab: review charts, memory distribution, hardest words, exports and backups. */
 public final class StatisticsView {
     private final ViewContext context;
     private final StatsService statsService;
+    private final DoubleSupplier desiredRetention;
     private final BarChart<String, Number> reviewCountChart;
     private final LineChart<String, Number> accuracyChart;
     private final PieChart memoryChart = new PieChart();
@@ -43,10 +44,12 @@ public final class StatisticsView {
     private final Tab tab;
     private final LazyRefresh lazy;
 
+    /** {@code desiredRetention} is the scheduler's, which the Settings tab changes. */
     public StatisticsView(ViewContext context, StatsService statsService, GoalService goalService,
-                          BackupService backupService, Path databasePath) {
+                          BackupService backupService, DoubleSupplier desiredRetention) {
         this.context = context;
         this.statsService = statsService;
+        this.desiredRetention = desiredRetention;
 
         CategoryAxis reviewDateAxis = new CategoryAxis();
         reviewDateAxis.setTickLabelRotation(-35);
@@ -88,18 +91,15 @@ public final class StatisticsView {
         Button refreshButton = new Button("Refresh statistics");
         refreshButton.setId("refreshStatisticsButton");
         refreshButton.setOnAction(event -> context.errors().guard("Refresh statistics failed", this::refreshNow));
-        DataActions actions = new DataActions(context, statsService, goalService, backupService, databasePath,
-            overdueStatsLabel);
+        DataActions actions = new DataActions(context, statsService, goalService, backupService, overdueStatsLabel);
         List<Button> exportButtons = new ArrayList<>();
         exportButtons.add(refreshButton);
         exportButtons.addAll(actions.exportButtons());
         HBox buttons = new HBox(10);
         buttons.getChildren().setAll(exportButtons);
-        HBox folderButtons = new HBox(10);
-        folderButtons.getChildren().setAll(actions.folderButtons());
         VBox charts = new VBox(16, reviewCountChart, accuracyChart, memoryChart, overdueStatsLabel,
             Widgets.sectionTitle("Hardest Words"), hardestWordsArea,
-            Widgets.sectionTitle("Portfolio Summary"), analyticsArea, buttons, folderButtons);
+            Widgets.sectionTitle("Portfolio Summary"), analyticsArea, buttons);
         charts.setId("statisticsCharts");
         charts.setPadding(new Insets(24));
         ScrollPane scrollPane = new ScrollPane(charts);
@@ -155,7 +155,8 @@ public final class StatisticsView {
             .collect(Collectors.joining(System.lineSeparator()));
         hardestWordsArea.setText(hardest.isBlank() ? "No review logs yet." : hardest);
         analyticsArea.setText("Spaced repetition: FSRS-5 models each word's stability and difficulty and schedules"
-            + " the next review when the chance of recall drops to 90%."
+            + " the next review when the chance of recall drops to " + Formats.percent(desiredRetention.getAsDouble())
+            + " (the desired retention on the Settings tab)."
             + System.lineSeparator() + "Retrieval practice: every review stores the typed answer and the time taken to answer;"
             + " failed and new words come back after short learning steps in the same session."
             + System.lineSeparator() + "Adaptive scheduling: an answer that is not similar enough counts as Again;"

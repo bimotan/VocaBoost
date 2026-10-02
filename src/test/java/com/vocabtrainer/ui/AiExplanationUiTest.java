@@ -130,7 +130,7 @@ class AiExplanationUiTest extends MainWindowUiTest {
         waitForBackgroundTasks();
         assertEquals(1, provider.requests.size());
 
-        selectTab("addImportTab");
+        selectTab("settingsTab");
         dialogs.confirm(true);
         click("clearAiCacheButton");
 
@@ -151,7 +151,7 @@ class AiExplanationUiTest extends MainWindowUiTest {
 
     @Test
     void anInvalidTemperatureIsRefusedAndAValidOneSaved() {
-        selectTab("addImportTab");
+        selectTab("settingsTab");
         type("aiBaseUrlField", "https://api.example.com/v1");
         type("aiApiKeyField", "sk-test-0123456789abcdef");
         type("aiModelField", "model-a");

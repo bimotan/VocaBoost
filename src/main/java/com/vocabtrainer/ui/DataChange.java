@@ -8,9 +8,12 @@ public enum DataChange {
     REVIEWS,
     /** Decks were created, renamed, archived or restored. */
     DECKS,
-    /** Dictionary or AI settings changed. */
+    /** Dictionary or AI settings or offline mode changed. */
     SETTINGS,
-    /** Review settings changed, such as a deck's new-cards-per-day limit, which changes what is due today. */
+    /**
+     * Review settings changed: a new-cards-per-day limit or the day rollover hour, which change what
+     * is due today, or the desired retention, which changes the intervals of the next ratings.
+     */
     REVIEW_SETTINGS,
     /** The daily goals or the session goal (the review session size) were edited. */
     GOALS

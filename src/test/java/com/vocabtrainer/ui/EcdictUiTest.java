@@ -53,7 +53,7 @@ class EcdictUiTest extends MainWindowUiTest {
     @Test
     void testingThenSavingImportsTheCsvAndLookupsFillTheFormWithACleanAnswer() throws Exception {
         Path csv = EcdictFixtures.write(tempDir.resolve("ecdict.csv"), true, EcdictFixtures.REAL_ROWS);
-        selectTab("addImportTab");
+        selectTab("settingsTab");
         assertEquals("", text("ecdictPathField"));
         assertEquals("ECDICT: not imported. Bundled GRE starter: 215 entries.", text("ecdictStatusLabel"));
         assertFalse(isVisible("ecdictProgressBar"));
@@ -111,6 +111,7 @@ class EcdictUiTest extends MainWindowUiTest {
         assertEquals(ABANDON_MEANING, abandon.getChinese());
 
         // Saving the unchanged file does not import it again; Re-import does.
+        selectTab("settingsTab");
         click("saveEcdictButton");
         waitForBackgroundTasks();
         assertTrue(text("ecdictStatusLabel").startsWith("Saved. Already imported, the file has not changed." + NEW_LINE
@@ -135,7 +136,7 @@ class EcdictUiTest extends MainWindowUiTest {
     void cancelingAnImportKeepsThePreviousDictionaryAndPath() throws Exception {
         Path small = EcdictFixtures.write(tempDir.resolve("small.csv"), false, EcdictFixtures.REAL_ROWS);
         Path large = EcdictFixtures.writeGenerated(tempDir.resolve("large.csv"), 200_000, "新");
-        selectTab("addImportTab");
+        selectTab("settingsTab");
         type("ecdictPathField", small.toString());
         click("saveEcdictButton");
         waitForBackgroundTasks();
@@ -168,7 +169,7 @@ class EcdictUiTest extends MainWindowUiTest {
     void aCsvThatCannotBeImportedIsExplainedAndItsPathIsNotSaved() throws Exception {
         Path csv = tempDir.resolve("no-meanings.csv");
         Files.writeString(csv, "word,phonetic\nlucid,ˈluːsɪd\n");
-        selectTab("addImportTab");
+        selectTab("settingsTab");
         type("ecdictPathField", csv.toString());
 
         click("saveEcdictButton");
@@ -192,7 +193,7 @@ class EcdictUiTest extends MainWindowUiTest {
         // prepareImportedCsv(false) replaced the CSV by garbage of the same size and time: reading it
         // would fail or change the dictionary.
         waitForBackgroundTasks();
-        selectTab("addImportTab");
+        selectTab("settingsTab");
 
         assertEquals(importedBeforeStart, services.ecdictImportService().imported().orElseThrow());
         assertEquals(services.localDictionary().status().toDisplayText(), text("ecdictStatusLabel"));
@@ -205,7 +206,7 @@ class EcdictUiTest extends MainWindowUiTest {
     @Test
     void startupImportsTheCsvAgainWhenItChanged() throws Exception {
         waitForBackgroundTasks();
-        selectTab("addImportTab");
+        selectTab("settingsTab");
 
         EcdictMetadata imported = services.ecdictImportService().imported().orElseThrow();
         assertEquals(100, imported.rowCount());
@@ -233,7 +234,9 @@ class EcdictUiTest extends MainWindowUiTest {
         });
     }
 
+    /** Looks {@code word} up on the Add / Import tab, which the ECDICT import on the Settings tab serves. */
     private void lookUp(String word) {
+        selectTab("addImportTab");
         type("lookupField", word);
         click("lookupButton");
         waitForBackgroundTasks();

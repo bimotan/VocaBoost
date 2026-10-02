@@ -307,6 +307,25 @@ public final class ReviewSessionPresenter {
         }
     }
 
+    /**
+     * The review settings changed (on the Settings tab, or this deck's limit here): the deck's
+     * new-words limit is read again, the checked answer's rating buttons show the intervals of the
+     * new scheduler settings, and a session that ran out of cards goes on when more are due now.
+     */
+    public void reviewSettingsChanged() {
+        try {
+            newCardsPerDay = reviewService.newCardsPerDay(deckId);
+            if (canRate()) {
+                previewRatings();
+            }
+            if (state == State.COMPLETE) {
+                loadNextCard();
+            }
+        } finally {
+            fireChanged();
+        }
+    }
+
     /** The text in the answer field; the user may edit it until the answer is submitted. */
     public void setAnswer(String text) {
         answer = text == null ? "" : text;

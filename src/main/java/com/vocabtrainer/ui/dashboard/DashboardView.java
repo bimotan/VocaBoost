@@ -124,8 +124,7 @@ public final class DashboardView {
 
         Button editGoalsButton = new Button("Edit goals");
         editGoalsButton.setId("editGoalsButton");
-        // Reading the goals for the form can fail too (the database); that is reported, not thrown at JavaFX.
-        editGoalsButton.setOnAction(event -> context.errors().guard("Goals not saved", this::editGoals));
+        editGoalsButton.setOnAction(event -> GoalsDialog.open(context, goalService.settings()));
         goalScopeLabel.setStyle("-fx-text-fill: #6b7280;");
         HBox goalsTitle = new HBox(12, Widgets.sectionTitle("Daily Goals"), editGoalsButton, goalScopeLabel);
         goalsTitle.setAlignment(Pos.CENTER_LEFT);
@@ -160,13 +159,6 @@ public final class DashboardView {
         valueLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: 600;");
         grid.add(nameLabel, 0, row);
         grid.add(valueLabel, 1, row);
-    }
-
-    private void editGoals() {
-        if (new GoalsDialog(context, goalService.settings()).edit(context.decks().current())) {
-            context.errors().guard("Goals saved, but refreshing the views failed",
-                () -> context.changes().publish(DataChange.GOALS));
-        }
     }
 
     private void refresh() {

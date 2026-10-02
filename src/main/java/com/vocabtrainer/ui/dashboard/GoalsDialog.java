@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.GoalTargets;
 import com.vocabtrainer.service.GoalSettings;
 import com.vocabtrainer.service.ReviewSettings;
+import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.ViewContext;
 import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
@@ -18,19 +19,32 @@ import javafx.scene.layout.Region;
 /**
  * Edits the goals in a modal form: the daily review and new-word goals, either the defaults of
  * every deck or the current deck's own, and the session goal, which is the review session size of
- * every deck (the Review tab's "Session size").
+ * every deck (the Review tab's "Session size"). The Dashboard and the Settings tab open it.
  */
-final class GoalsDialog {
+public final class GoalsDialog {
     private final ViewContext context;
     private final GoalSettings settings;
 
-    GoalsDialog(ViewContext context, GoalSettings settings) {
+    private GoalsDialog(ViewContext context, GoalSettings settings) {
         this.context = context;
         this.settings = settings;
     }
 
+    /**
+     * Shows the form for the current deck; once the goals are saved, publishes {@link DataChange#GOALS}.
+     * Failures, also reading the goals for the form, are reported.
+     */
+    public static void open(ViewContext context, GoalSettings settings) {
+        context.errors().guard("Goals not saved", () -> {
+            if (new GoalsDialog(context, settings).edit(context.decks().current())) {
+                context.errors().guard("Goals saved, but refreshing the views failed",
+                    () -> context.changes().publish(DataChange.GOALS));
+            }
+        });
+    }
+
     /** Shows the form for {@code deck} and saves it on OK; true when the goals were saved. */
-    boolean edit(Deck deck) {
+    private boolean edit(Deck deck) {
         GoalTargets defaults = settings.defaults();
         boolean ownGoals = settings.deckGoals(deck.getId()).isPresent();
         GoalTargets shown = settings.goalsFor(deck.getId());
@@ -57,7 +71,8 @@ final class GoalsDialog {
 
         Label newWordsHint = hint("A word counts as a new word on the day of its first review. "
             + deck.getName() + " introduces at most " + settings.newCardsPerDay(deck.getId())
-            + " new words per study day (Review tab).");
+            + " new words per study day: the limit of every deck is on the Settings tab, this deck's own on"
+            + " the Review tab.");
         Label sessionHint = hint("Cards per review session, in every deck, as on the Review tab; 0 means All Due.");
 
         GridPane form = new GridPane();

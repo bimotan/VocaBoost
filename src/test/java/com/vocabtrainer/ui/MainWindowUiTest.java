@@ -232,6 +232,14 @@ abstract class MainWindowUiTest {
             .toList());
     }
 
+    /** The id of every node on the tab {@code tabId} that has one, whether or not the tab is selected. */
+    List<String> idsOnTab(String tabId) {
+        return Fx.call(() -> allNodes(tab(tabId).getContent()).stream()
+            .map(Node::getId)
+            .filter(id -> id != null && !id.isBlank())
+            .toList());
+    }
+
     private static List<Node> allNodes(Node root) {
         Set<Node> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         Deque<Node> pending = new ArrayDeque<>();

@@ -1,10 +1,13 @@
 package com.vocabtrainer.ui;
 
 import com.vocabtrainer.app.AppServices;
+import com.vocabtrainer.service.ReviewSettings;
+import com.vocabtrainer.service.SchedulingSettings;
 import com.vocabtrainer.ui.dashboard.DashboardView;
 import com.vocabtrainer.ui.decks.DecksView;
 import com.vocabtrainer.ui.importing.AddImportView;
 import com.vocabtrainer.ui.review.ReviewView;
+import com.vocabtrainer.ui.settings.SettingsView;
 import com.vocabtrainer.ui.stats.StatisticsView;
 import com.vocabtrainer.ui.words.WordListView;
 import javafx.scene.Scene;
@@ -36,26 +39,31 @@ public class MainWindow {
         ViewContext context = new ViewContext(dialogs, errors, new UiAsync(errors), new DataChanges(), decks,
             () -> root.getScene().getWindow());
         Path databasePath = services.databaseManager().getDatabasePath();
+        OfflineMode offlineMode = new OfflineMode(context, services.settingsService());
 
-        DeckHeader header = new DeckHeader(context, services.deckService(), services.settingsService(), configured);
+        DeckHeader header = new DeckHeader(context, services.deckService(), services.settingsService(), configured,
+            offlineMode);
         DashboardView dashboard = new DashboardView(context, services.statsService(), services.goalService(),
             services.achievementService(), databasePath);
         DecksView decksView = new DecksView(context, services.deckService(), services.statsService());
         ReviewView review = new ReviewView(context, services.reviewService(), services.goalService(), configured,
             services.clock());
         AddImportView addImport = new AddImportView(context, services.wordRepository(), services.validationService(),
-            services.importExportService(),
-            services.settingsService(), services.aiCacheRepository(), services.ecdictImportService(),
-            services.localDictionary(), configured);
+            services.importExportService(), configured);
         StatisticsView statistics = new StatisticsView(context, services.statsService(), services.goalService(),
-            services.backupService(), databasePath);
+            services.backupService(), () -> services.reviewScheduler().options().desiredRetention());
         WordListView wordList = new WordListView(context, services.wordRepository(), services.validationService(),
-            services.clock(), services.reviewScheduler().studyDay(), services.clozeMaker());
+            services.clock(), services.reviewScheduler()::studyDay, services.clozeMaker());
+        SettingsView settings = new SettingsView(context, services.settingsService(),
+            new SchedulingSettings(services.settingsService(), services.reviewScheduler()),
+            new ReviewSettings(services.settingsService()), services.goalService().settings(),
+            services.aiCacheRepository(), services.ecdictImportService(), services.localDictionary(), configured,
+            offlineMode, databasePath);
 
         TabPane tabs = new TabPane();
         tabs.setId("mainTabs");
         tabs.getTabs().addAll(dashboard.tab(), decksView.tab(), review.tab(), addImport.tab(), statistics.tab(),
-            wordList.tab());
+            wordList.tab(), settings.tab());
         root.setTop(header.root());
         root.setCenter(tabs);
 
