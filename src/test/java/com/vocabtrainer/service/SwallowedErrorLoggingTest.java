@@ -17,7 +17,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.nio.charset.Charset;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -41,8 +40,10 @@ class SwallowedErrorLoggingTest {
 
     @Test
     void localDictionaryLogsWhyConfiguredCsvCouldNotBeRead() throws Exception {
-        Path csv = tempDir.resolve("ecdict-gbk.csv");
-        Files.write(csv, "word,translation\nlucid,清晰的\n".getBytes(Charset.forName("GBK")));
+        // Byte 0xFF is valid neither in UTF-8 nor in GB18030.
+        Path csv = tempDir.resolve("ecdict-broken.csv");
+        Files.write(csv, new byte[] {'w', 'o', 'r', 'd', ',', 't', 'r', 'a', 'n', 's', 'l', 'a', 't', 'i', 'o', 'n', '\n',
+            'l', 'u', 'c', 'i', 'd', ',', (byte) 0xFF, '\n'});
 
         LocalDictionaryService service;
         List<LogRecord> warnings;
@@ -55,7 +56,7 @@ class SwallowedErrorLoggingTest {
         assertTrue(service.status().bundledStarterLoaded());
         assertEquals(1, warnings.size());
         assertTrue(warnings.get(0).getMessage().contains(csv.toAbsolutePath().toString()));
-        assertInstanceOf(CharacterCodingException.class, warnings.get(0).getThrown());
+        assertInstanceOf(CharacterCodingException.class, warnings.get(0).getThrown().getCause());
     }
 
     @Test

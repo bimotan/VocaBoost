@@ -3,24 +3,31 @@ package com.vocabtrainer.service;
 import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.domain.WordVerificationResult;
+import com.vocabtrainer.service.csv.CsvReader;
+import com.vocabtrainer.service.csv.CsvRecord;
+import com.vocabtrainer.service.csv.WordColumn;
+import com.vocabtrainer.service.csv.WordColumns;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class LocalDictionaryService implements DictionaryService {
     private static final Logger LOGGER = Logger.getLogger(LocalDictionaryService.class.getName());
     private static final String STARTER_RESOURCE = "/data/gre_starter_sample.csv";
+    private static final WordColumns STARTER_COLUMNS_BY_POSITION = WordColumns.positional(
+        WordColumn.ENGLISH, WordColumn.CHINESE, WordColumn.POS, WordColumn.EXAMPLE);
+    private static final WordColumns ECDICT_COLUMNS_BY_POSITION = WordColumns.positional(
+        WordColumn.ENGLISH, WordColumn.PHONETIC, null, WordColumn.CHINESE, WordColumn.POS);
 
     private final Map<String, DictionaryEntry> entries;
     private final LocalDictionaryStatus status;
@@ -75,7 +82,7 @@ public class LocalDictionaryService implements DictionaryService {
         if (localCsvPath != null && !localCsvPath.isBlank()) {
             Path path = Path.of(localCsvPath.trim());
             if (Files.isRegularFile(path)) {
-                try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+                try (CsvReader reader = CsvReader.open(path)) {
                     ReadStats stats = readCsv(reader, result, "ECDICT/local CSV");
                     skippedRows += stats.skippedRows();
                     configuredLoaded = stats.loadedRows() > 0;
@@ -89,9 +96,9 @@ public class LocalDictionaryService implements DictionaryService {
                 }
             }
         }
-        var stream = LocalDictionaryService.class.getResourceAsStream(STARTER_RESOURCE);
+        InputStream stream = LocalDictionaryService.class.getResourceAsStream(STARTER_RESOURCE);
         if (stream != null) {
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            try (InputStream in = stream; CsvReader reader = CsvReader.open(in, StandardCharsets.UTF_8)) {
                 ReadStats stats = readCsv(reader, result, "Bundled GRE starter");
                 skippedRows += stats.skippedRows();
                 bundledLoaded = stats.loadedRows() > 0;
@@ -113,58 +120,44 @@ public class LocalDictionaryService implements DictionaryService {
         ));
     }
 
-    private ReadStats readCsv(BufferedReader reader, Map<String, DictionaryEntry> target, String source)
+    /**
+     * Reads entries by header names (see {@link WordColumn}). Without a header row the columns are
+     * english, chinese, pos, example, like the starter CSV, unless the first row looks like ECDICT's
+     * own order (word, phonetic, definition, translation, pos, ...): five or more fields with Chinese
+     * in the fourth and none in the second.
+     */
+    private ReadStats readCsv(CsvReader reader, Map<String, DictionaryEntry> target, String source)
         throws IOException {
-        String line;
-        int lineNumber = 0;
-        int wordIndex = 0;
-        int translationIndex = 1;
-        int phoneticIndex = -1;
-        int posIndex = 2;
-        int exampleIndex = 3;
         int loadedRows = 0;
         int skippedRows = 0;
-        while ((line = reader.readLine()) != null) {
-            lineNumber++;
-            if (line.isBlank()) {
+        WordColumns columns = null;
+        CsvRecord record;
+        while ((record = reader.read()) != null) {
+            if (record.isBlank()) {
                 continue;
             }
-            List<String> fields = parseCsvLine(line);
-            if (lineNumber == 1 && looksLikeHeader(fields)) {
-                wordIndex = firstExistingIndex(fields, "word", "english");
-                translationIndex = firstExistingIndex(fields, "translation", "chinese", "definition");
-                phoneticIndex = firstExistingIndex(fields, "phonetic", "phonetics");
-                posIndex = firstExistingIndex(fields, "pos", "part_of_speech", "partOfSpeech", "tag", "tags");
-                exampleIndex = firstExistingIndex(fields, "example", "example_sentence", "sentence");
-                continue;
-            } else if (lineNumber == 1 && fields.size() > 3 && !fieldAt(fields, 3).isBlank()) {
-                wordIndex = 0;
-                phoneticIndex = 1;
-                translationIndex = 3;
-                posIndex = fields.size() > 4 ? 4 : -1;
-                exampleIndex = -1;
+            if (columns == null) {
+                Optional<WordColumns> header = WordColumns.fromHeader(record);
+                if (header.isPresent()) {
+                    columns = header.get();
+                    continue;
+                }
+                columns = looksLikeHeaderlessEcdict(record) ? ECDICT_COLUMNS_BY_POSITION : STARTER_COLUMNS_BY_POSITION;
             }
-            if (wordIndex < 0 || translationIndex < 0 || fields.size() <= Math.max(wordIndex, translationIndex)) {
-                skippedRows++;
-                continue;
-            }
-            String english = fieldAt(fields, wordIndex);
-            String chinese = fieldAt(fields, translationIndex);
+            String english = columns.get(record, WordColumn.ENGLISH).trim();
+            String chinese = columns.get(record, WordColumn.CHINESE).trim();
             if (english.isBlank() || chinese.isBlank()) {
                 skippedRows++;
                 continue;
             }
             String key = normalizeKey(english);
             if (!target.containsKey(key)) {
-                String pos = fieldAt(fields, posIndex);
-                String example = fieldAt(fields, exampleIndex);
-                String phonetic = fieldAt(fields, phoneticIndex);
                 target.put(key, new DictionaryEntry(
                     english,
                     chinese,
-                    pos,
-                    phonetic,
-                    example,
+                    columns.get(record, WordColumn.POS).trim(),
+                    columns.get(record, WordColumn.PHONETIC).trim(),
+                    columns.get(record, WordColumn.EXAMPLE).trim(),
                     source
                 ));
                 loadedRows++;
@@ -173,49 +166,12 @@ public class LocalDictionaryService implements DictionaryService {
         return new ReadStats(loadedRows, skippedRows);
     }
 
-    private List<String> parseCsvLine(String line) {
-        List<String> fields = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean quoted = false;
-        for (int i = 0; i < line.length(); i++) {
-            char c = line.charAt(i);
-            if (c == '"') {
-                if (quoted && i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                    current.append('"');
-                    i++;
-                } else {
-                    quoted = !quoted;
-                }
-            } else if (c == ',' && !quoted) {
-                fields.add(current.toString());
-                current.setLength(0);
-            } else {
-                current.append(c);
-            }
-        }
-        fields.add(current.toString());
-        return fields;
+    private static boolean looksLikeHeaderlessEcdict(CsvRecord record) {
+        return record.size() >= 5 && containsCjk(record.get(3)) && !containsCjk(record.get(1));
     }
 
-    private boolean looksLikeHeader(List<String> fields) {
-        return fields.stream()
-            .map(value -> value.trim().toLowerCase(Locale.ROOT))
-            .anyMatch(value -> value.equals("word") || value.equals("english") || value.equals("translation"));
-    }
-
-    private int firstExistingIndex(List<String> fields, String... names) {
-        for (String name : names) {
-            for (int i = 0; i < fields.size(); i++) {
-                if (name.equalsIgnoreCase(fields.get(i).trim())) {
-                    return i;
-                }
-            }
-        }
-        return -1;
-    }
-
-    private String fieldAt(List<String> fields, int index) {
-        return index >= 0 && index < fields.size() ? fields.get(index).trim() : "";
+    private static boolean containsCjk(String value) {
+        return value.codePoints().anyMatch(codePoint -> Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN);
     }
 
     private String normalizeKey(String value) {
