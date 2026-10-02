@@ -1,4 +1,4 @@
-name: Maven Test
+name: CI
 
 on:
   push:
@@ -7,10 +7,24 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
-    runs-on: windows-latest
+    name: Test (${{ matrix.os }}, JDK ${{ matrix.java }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        java: ['17', '21']
 
     steps:
       - name: Checkout
@@ -20,13 +34,29 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: ${{ matrix.java }}
           cache: maven
 
-      - name: Run tests
-        run: mvn test
+      - name: Cache the Maven Wrapper's Maven
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/wrapper
+          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
+
+      # Enforcer rules, tests without the UI tests, coverage report and floor, and the jar.
+      - name: Build and test
+        run: ${{ runner.os == 'Windows' && '.\mvnw.cmd' || './mvnw' }} -B -ntp verify
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-${{ matrix.os }}-jdk${{ matrix.java }}
+          path: target/surefire-reports
+          if-no-files-found: ignore
 
   ui-test:
+    name: Test with UI tests (ubuntu-latest, JDK 21)
     runs-on: ubuntu-latest
 
     steps:
@@ -37,14 +67,28 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
           cache: maven
+
+      - name: Cache the Maven Wrapper's Maven
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/wrapper
+          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
 
       - name: Install virtual display
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
-      - name: Run tests including UI tests
-        run: xvfb-run -a mvn -B test -Pui-tests
+      - name: Build and run all tests including UI tests
+        run: xvfb-run -a -s "-screen 0 1400x900x24" ./mvnw -B -ntp verify -Pui-tests
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-ui
+          path: target/surefire-reports
+          if-no-files-found: ignore
 
       - name: Upload UI snapshots
         if: always()
@@ -53,3 +97,63 @@ jobs:
           name: ui-snapshots
           path: target/ui-snapshots
           if-no-files-found: ignore
+
+      # The coverage of all tests, UI included.
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: target/site/jacoco
+          if-no-files-found: ignore
+
+  package:
+    name: Package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Cache the Maven Wrapper's Maven
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/wrapper
+          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
+
+      # The test jobs run the tests; this checks the packaging scripts and the trimmed runtime.
+      - name: Package the Windows app image
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/package-windows.ps1 -SkipTests
+
+      - name: Package the Linux app image
+        if: runner.os == 'Linux'
+        run: scripts/package.sh --skip-tests
+
+      - name: Install virtual display
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Smoke-test the app image
+        if: runner.os == 'Linux'
+        run: xvfb-run -a -s "-screen 0 1400x900x24" scripts/smoke-test.sh target/dist/VocaBoost/bin/VocaBoost
+
+      - name: Upload the Windows app image
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: VocaBoost-windows-app-image
+          path: target/dist
+          retention-days: 7
