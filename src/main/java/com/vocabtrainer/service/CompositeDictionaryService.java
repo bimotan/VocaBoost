@@ -26,6 +26,20 @@ public class CompositeDictionaryService implements DictionaryService {
         return DictionaryLookupResult.failure(String.join(" | ", messages));
     }
 
+    /** Asks each dictionary to refresh, so a cached one looks the word up again. */
+    @Override
+    public DictionaryLookupResult refresh(String english) {
+        List<String> messages = new ArrayList<>();
+        for (DictionaryService service : services) {
+            DictionaryLookupResult result = service.refresh(english);
+            if (result.success() && !result.entries().isEmpty()) {
+                return result;
+            }
+            messages.add(result.message());
+        }
+        return DictionaryLookupResult.failure(String.join(" | ", messages));
+    }
+
     @Override
     public WordVerificationResult verify(String english) {
         List<String> messages = new ArrayList<>();

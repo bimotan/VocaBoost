@@ -103,7 +103,8 @@ public class CachingDictionaryService implements DictionaryService {
                 encode(entry.phonetic()),
                 encode(entry.example()),
                 encode(entry.source()),
-                encode(entry.definition())
+                encode(entry.definition()),
+                encode(entry.note())
             ));
         }
         return String.join("\n", rows);
@@ -116,9 +117,9 @@ public class CachingDictionaryService implements DictionaryService {
                 continue;
             }
             String[] fields = row.split("\\t", -1);
-            if (fields.length == 6 || fields.length == 7) {
+            if (fields.length >= 6 && fields.length <= 8) {
                 String chinese = decode(fields[1]);
-                String definition = fields.length == 7 ? decode(fields[6]) : "";
+                String definition = fields.length >= 7 ? decode(fields[6]) : "";
                 if (looksLikeOnlineDefinitionPlaceholder(chinese)) {
                     definition = extractDefinition(chinese);
                     chinese = "";
@@ -130,7 +131,8 @@ public class CachingDictionaryService implements DictionaryService {
                     decode(fields[3]),
                     decode(fields[4]),
                     decode(fields[5]),
-                    definition
+                    definition,
+                    fields.length == 8 ? decode(fields[7]) : ""
                 ));
             }
         }

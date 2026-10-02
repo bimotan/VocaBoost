@@ -4,8 +4,10 @@ import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ImportExportService;
+import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.SettingsService;
 import com.vocabtrainer.service.WordValidationService;
+import com.vocabtrainer.service.ecdict.EcdictImportService;
 import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
@@ -21,10 +23,11 @@ public final class AddImportView {
     public AddImportView(ViewContext context, WordRepository wordRepository, WordValidationService validationService,
                          GoalService goalService, AchievementService achievementService,
                          ImportExportService importExportService, SettingsService settingsService,
+                         EcdictImportService ecdictImportService, LocalDictionaryService localDictionary,
                          ConfiguredServices configured) {
         AddWordBox addWord = new AddWordBox(context, wordRepository, validationService, goalService,
             achievementService, configured);
-        EcdictSettingsBox ecdict = new EcdictSettingsBox(context, settingsService, configured);
+        EcdictSettingsBox ecdict = new EcdictSettingsBox(context, settingsService, ecdictImportService, localDictionary);
         AiSettingsBox ai = new AiSettingsBox(context, settingsService, configured);
         ImportBox imports = new ImportBox(context, importExportService, goalService, achievementService);
 

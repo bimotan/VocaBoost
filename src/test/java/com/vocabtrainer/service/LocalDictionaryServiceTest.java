@@ -1,12 +1,15 @@
 package com.vocabtrainer.service;
 
+import com.vocabtrainer.domain.DictionaryEntry;
+import com.vocabtrainer.repository.EcdictRepository;
+import com.vocabtrainer.service.ecdict.EcdictFixtures;
+import com.vocabtrainer.service.ecdict.EcdictImportService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -17,84 +20,58 @@ class LocalDictionaryServiceTest {
     Path tempDir;
 
     @Test
-    void loadsHeaderCsvAndVerifiesWord() throws Exception {
-        Path csv = tempDir.resolve("ecdict.csv");
-        Files.writeString(csv, """
-            word,translation,phonetic,definition
-            abate,减少,əˈbeɪt,to become weaker
-            badrow,,,
-            """);
+    void withoutAnImportTheBundledStarterWordsAnswer() {
+        try (EcdictRepository ecdict = new EcdictRepository(tempDir.resolve("ecdict.db"))) {
+            LocalDictionaryService service = new LocalDictionaryService(ecdict);
 
-        LocalDictionaryService service = new LocalDictionaryService(csv.toString());
-
-        assertTrue(service.status().configuredPathLoaded());
-        assertTrue(service.status().loadedCount() >= 1);
-        assertTrue(service.status().skippedRows() >= 1);
-        assertTrue(service.verify("abate").found());
-        assertEquals("减少", service.lookup("ABATE").entries().get(0).chinese());
+            DictionaryEntry abate = service.lookup("ABATE").entries().get(0);
+            assertEquals("减弱; 减少", abate.chinese());
+            assertEquals("verb", abate.partOfSpeech());
+            assertEquals(LocalDictionaryService.STARTER_SOURCE, abate.source());
+            assertTrue(service.verify("abate").found());
+            assertFalse(service.verify("notarealword").found());
+            assertEquals("词条未找到：本地词库没有该词条。", service.lookup("notarealword").message());
+            assertFalse(service.status().ecdictImported());
+            assertEquals("ECDICT: not imported. Bundled GRE starter: 215 entries.", service.status().toDisplayText());
+            assertFalse(Files.exists(tempDir.resolve("ecdict.db")), "looking up must not create the dictionary file");
+        }
     }
 
     @Test
-    void loadsCommonEcdictColumnOrderWithoutHeader() throws Exception {
-        Path csv = tempDir.resolve("ecdict-no-header.csv");
-        Files.writeString(csv, "lucid,ˈluːsɪd,definition,清晰的,adj\n");
+    void theImportedDictionaryAnswersBeforeTheStarterWordsAndItsStatusComesFromTheImport() throws Exception {
+        Path csv = EcdictFixtures.write(tempDir.resolve("ecdict.csv"), false, List.of(
+            EcdictFixtures.ABANDON, "lucid,ˈluːsɪd,,\"a. 清楚的, 透明的\",,,,,0,0,,,", "badrow,,,,,,,,0,0,,,"));
+        try (EcdictRepository ecdict = new EcdictRepository(tempDir.resolve("ecdict.db"))) {
+            new EcdictImportService(ecdict).importCsv(csv, progress -> { }, () -> false);
+            LocalDictionaryService service = new LocalDictionaryService(ecdict);
 
-        LocalDictionaryService service = new LocalDictionaryService(csv.toString());
-
-        assertTrue(service.verify("lucid").found());
-        assertEquals("清晰的", service.lookup("lucid").entries().get(0).chinese());
+            assertEquals("清楚的; 透明的", service.lookup("lucid").entries().get(0).chinese());
+            assertEquals("Loaded from local dictionary.", service.lookup("lucid").message());
+            assertEquals("Local dictionary", service.verify("Lucid").source());
+            LocalDictionaryStatus status = service.status();
+            assertTrue(status.ecdictImported());
+            assertTrue(status.toDisplayText().startsWith("ECDICT: 2 entries from " + csv.toAbsolutePath() + ", imported "),
+                status.toDisplayText());
+            assertTrue(status.toDisplayText().endsWith(" (skipped rows: 1). Bundled GRE starter: 215 entries."),
+                status.toDisplayText());
+        }
     }
 
     @Test
-    void headerlessStarterLayoutKeepsTheChineseWhenTheFirstRowHasAnExample() throws Exception {
-        // english, chinese, pos, example without a header: the example is not a translation.
-        Path csv = tempDir.resolve("my-list.csv");
-        Files.writeString(csv, """
-            lucidx,清晰的,adjective,The explanation was lucid.
-            abatex,减弱,verb
-            """);
+    void creatingTheServiceAndLookingUpNeverReadTheCsv() throws Exception {
+        Path csv = EcdictFixtures.write(tempDir.resolve("ecdict.csv"), false, List.of(EcdictFixtures.ABANDON));
+        try (EcdictRepository ecdict = new EcdictRepository(tempDir.resolve("ecdict.db"))) {
+            new EcdictImportService(ecdict).importCsv(csv, progress -> { }, () -> false);
+        }
+        // Earlier versions parsed the whole CSV into memory whenever this service was created (findings C5, D3).
+        Files.writeString(csv, "this is not the dictionary any more");
 
-        LocalDictionaryService service = new LocalDictionaryService(csv.toString());
+        try (EcdictRepository ecdict = new EcdictRepository(tempDir.resolve("ecdict.db"))) {
+            LocalDictionaryService service = new LocalDictionaryService(ecdict);
 
-        assertEquals("清晰的", service.lookup("lucidx").entries().get(0).chinese());
-        assertEquals("adjective", service.lookup("lucidx").entries().get(0).partOfSpeech());
-        assertEquals("减弱", service.lookup("abatex").entries().get(0).chinese());
-        assertTrue(service.status().configuredPathLoaded());
-    }
-
-    @Test
-    void aHeaderWithUnknownNamesIsNotLoadedAsAnEntry() throws Exception {
-        Path csv = tempDir.resolve("own-header.csv");
-        Files.writeString(csv, "Word,汉语解释\nlucidx,清晰的\n");
-
-        LocalDictionaryService service = new LocalDictionaryService(csv.toString());
-
-        assertEquals("清晰的", service.lookup("lucidx").entries().get(0).chinese());
-        assertFalse(service.verify("word").found());
-    }
-
-    @Test
-    void readsAGreCsvSavedByExcelWithAByteOrderMark() throws Exception {
-        Path csv = tempDir.resolve("excel-utf8.csv");
-        Files.write(csv, ("\uFEFFenglish,chinese,pos,example,tags\r\n"
-            + "lucidx,清晰的,adjective,The storm.,gre\r\n").getBytes(StandardCharsets.UTF_8));
-
-        LocalDictionaryService service = new LocalDictionaryService(csv.toString());
-
-        assertEquals("清晰的", service.lookup("lucidx").entries().get(0).chinese());
-        assertEquals("adjective", service.lookup("lucidx").entries().get(0).partOfSpeech());
-        assertEquals("The storm.", service.lookup("lucidx").entries().get(0).example());
-    }
-
-    @Test
-    void readsGbkAndQuotedLineBreaks() throws Exception {
-        Path csv = tempDir.resolve("gbk.csv");
-        Files.write(csv, "word,translation\r\nlucidx,\"清晰的\n易懂的\"\r\nabatex,减弱\r\n".getBytes(Charset.forName("GBK")));
-
-        LocalDictionaryService service = new LocalDictionaryService(csv.toString());
-
-        assertTrue(service.status().configuredPathLoaded());
-        assertEquals("清晰的\n易懂的", service.lookup("lucidx").entries().get(0).chinese());
-        assertEquals("减弱", service.lookup("abatex").entries().get(0).chinese());
+            assertEquals("放弃; 抛弃; 遗弃; 使屈从; 沉溺; 放纵; 放任; 无拘束; 狂热",
+                service.lookup("abandon").entries().get(0).chinese());
+            assertEquals(1, service.status().ecdict().rowCount());
+        }
     }
 }

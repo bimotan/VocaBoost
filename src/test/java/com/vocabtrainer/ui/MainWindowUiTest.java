@@ -10,7 +10,6 @@ import com.vocabtrainer.service.CompositeDictionaryService;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.MockAiService;
-import com.vocabtrainer.service.SettingsService;
 import javafx.event.ActionEvent;
 import javafx.scene.Node;
 import javafx.scene.Parent;
@@ -95,7 +94,7 @@ abstract class MainWindowUiTest {
         lastInputNanos = System.nanoTime() - INPUT_SETTLE_NANOS;
         Fx.drainUncaught();
         AppServices.Builder builder = AppServices.builder(tempDir.resolve("vocab.db"))
-            .dictionaryService((cache, settings) -> offlineDictionary(settings))
+            .dictionaryService((cache, local) -> offlineDictionary(local))
             .aiService((cache, settings) -> new MockAiService());
         AppServices.Builder configured = configure(builder);
         // Like VocabTrainerApp.start, the services and the window are created on the FX thread.
@@ -110,7 +109,10 @@ abstract class MainWindowUiTest {
         });
     }
 
-    /** Override to replace part of the wiring, for example with a repository that fails on demand. */
+    /**
+     * Override to replace part of the wiring, for example with a repository that fails on demand, or
+     * to prepare files before the window opens ({@link #testName()} tells which test is starting).
+     */
     AppServices.Builder configure(AppServices.Builder builder) {
         return builder;
     }
@@ -145,14 +147,11 @@ abstract class MainWindowUiTest {
     }
 
     /**
-     * The app's local dictionary chain (saved ECDICT CSV, then the bundled starter words) followed by
-     * a few extra test words, in place of the online dictionaries.
+     * The app's offline dictionaries (imported ECDICT, then the bundled starter words) followed by a
+     * few extra test words, in place of the online dictionaries.
      */
-    static DictionaryService offlineDictionary(SettingsService settings) {
-        return new CompositeDictionaryService(List.of(
-            new LocalDictionaryService(settings.getEcdictPath().orElse(null)),
-            new TestDictionary()
-        ));
+    static DictionaryService offlineDictionary(LocalDictionaryService local) {
+        return new CompositeDictionaryService(List.of(local, new TestDictionary()));
     }
 
     /** Knows words that are not in the starter deck, so adding them is verified without the network. */
@@ -175,6 +174,11 @@ abstract class MainWindowUiTest {
         public boolean isConfigured() {
             return true;
         }
+    }
+
+    /** The name of the test method that is running. */
+    String testName() {
+        return testName;
     }
 
     // ---- Finding controls (call these on the FX thread, e.g. inside Fx.call) ----

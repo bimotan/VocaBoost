@@ -7,8 +7,6 @@ import java.util.Optional;
 
 public class SettingsService {
     public static final String ECDICT_PATH_KEY = "dictionary.ecdict.path";
-    public static final String ECDICT_LAST_LOADED_COUNT_KEY = "dictionary.lastLoadedCount";
-    public static final String ECDICT_LAST_LOADED_AT_KEY = "dictionary.lastLoadedAt";
     public static final String AI_PROVIDER_KEY = "ai.provider";
     public static final String AI_BASE_URL_KEY = "ai.baseUrl";
     public static final String AI_API_KEY_KEY = "ai.apiKey";

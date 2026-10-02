@@ -1,9 +1,6 @@
 package com.vocabtrainer.ui;
 
 import com.vocabtrainer.domain.WordCard;
-import com.vocabtrainer.service.LocalDictionaryService;
-import com.vocabtrainer.service.LocalDictionaryStatus;
-import com.vocabtrainer.service.SettingsService;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -18,50 +15,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Tag("ui")
 class ImportAndSettingsUiTest extends MainWindowUiTest {
-    @Test
-    void savingAnEcdictPathReloadsTheDictionaryAndClearingItFallsBack() throws Exception {
-        Path csv = tempDir.resolve("ecdict-mini.csv");
-        Files.writeString(csv, """
-            word,phonetic,translation,pos
-            petrichor,ˈpetrɪkɔː,雨后泥土的气味,n
-            sesquipedalian,ˌseskwɪpɪˈdeɪliən,冗长的; 爱用长词的,adj
-            """, StandardCharsets.UTF_8);
-        LocalDictionaryStatus expected = new LocalDictionaryService(csv.toString()).status();
-        selectTab("addImportTab");
-        assertEquals("", text("ecdictPathField"));
-
-        dialogs.openFile(csv);
-        click("chooseEcdictButton");
-        ScriptedDialogs.Shown chooser = dialogs.last(ScriptedDialogs.Kind.OPEN_FILE);
-        assertEquals("Choose ECDICT CSV", chooser.title());
-        assertEquals("CSV [*.csv], All Files [*.*]", chooser.content());
-        assertEquals(csv.toString(), text("ecdictPathField"));
-
-        click("testEcdictButton");
-        waitForText("ecdictStatusLabel", expected.toDisplayText() + System.lineSeparator() + "Configured CSV loaded.");
-        assertTrue(services.settingsService().getEcdictPath().isEmpty(), "Test must not save the path");
-
-        click("saveEcdictButton");
-        waitForText("ecdictStatusLabel", "Saved. " + expected.toDisplayText());
-        assertEquals(csv.toString(), services.settingsService().getEcdictPath().orElseThrow());
-        assertEquals(String.valueOf(expected.loadedCount()),
-            services.settingsService().get(SettingsService.ECDICT_LAST_LOADED_COUNT_KEY).orElseThrow());
-        assertTrue(services.settingsService().get(SettingsService.ECDICT_LAST_LOADED_AT_KEY).isPresent());
-        assertTrue(headerSubtitle().contains("| Dictionary: ECDICT configured |"), headerSubtitle());
-
-        // The reloaded dictionary knows the CSV's words.
-        type("addEnglishField", "petrichor");
-        type("addChineseField", "雨后泥土的气味");
-        click("addWordButton");
-        waitForText("addWordStatusLabel", "Added to " + STARTER_DECK + ": petrichor | Verified by Local dictionary");
-
-        click("clearEcdictButton");
-        waitForText("ecdictStatusLabel", "Cleared. Using bundled starter and online fallback.");
-        assertEquals("", text("ecdictPathField"));
-        assertTrue(services.settingsService().getEcdictPath().isEmpty());
-        assertTrue(headerSubtitle().contains("| Dictionary: starter/online fallback |"), headerSubtitle());
-    }
-
     @Test
     void aGreCsvChosenWithTheFileChooserIsPreviewedAndImportedIntoTheCurrentDeck() throws Exception {
         Path csv = tempDir.resolve("my-words.csv");

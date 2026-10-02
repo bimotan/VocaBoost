@@ -193,7 +193,14 @@ final class AddWordBox {
 
     private static String dictionaryNote(DictionaryEntry entry) {
         StringBuilder builder = new StringBuilder();
+        if (entry.note() != null && !entry.note().isBlank()) {
+            // Senses the dictionary marks as specialist ("[网络] ..."), kept out of the answer key.
+            builder.append(entry.note().trim().replace("\n", System.lineSeparator()));
+        }
         if (entry.definition() != null && !entry.definition().isBlank()) {
+            if (builder.length() > 0) {
+                builder.append(System.lineSeparator());
+            }
             builder.append("English definition: ").append(entry.definition().trim());
         }
         if (entry.source() != null && !entry.source().isBlank()) {

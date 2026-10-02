@@ -55,7 +55,8 @@ public enum WordColumn {
         return ALIASES.get(normalize(headerCell));
     }
 
-    static String normalize(String name) {
+    /** A header name as it is compared: lower case, without spaces, '_', '-', '.' or a byte order mark. */
+    public static String normalize(String name) {
         StringBuilder builder = new StringBuilder();
         for (char c : name.toLowerCase(Locale.ROOT).toCharArray()) {
             if (!Character.isWhitespace(c) && c != '_' && c != '-' && c != '.' && c != '\uFEFF') {

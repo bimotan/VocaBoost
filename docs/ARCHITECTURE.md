@@ -48,16 +48,26 @@ The scheduler follows an SM-2 style model with easiness factor, interval days, r
 
 ## Dictionary Services
 
-`DictionaryService` is composed in this order:
+`DictionaryServiceFactory` composes the lookup chain:
 
-1. saved ECDICT CSV path from the local `settings` table,
-2. environment fallback `ECDICT_CSV_PATH`,
-3. bundled GRE starter sample,
-4. optional configured API through `DICTIONARY_API_BASE_URL` / `DICTIONARY_API_KEY`,
-5. public online dictionaries,
-6. mock fallback.
+1. the offline dictionaries (`LocalDictionaryService`): the imported ECDICT dictionary, then the bundled GRE starter words;
+2. through the lookup cache (`CachingDictionaryService`, table `dictionary_cache`): the optional configured API (`DICTIONARY_API_BASE_URL` / `DICTIONARY_API_KEY`), the public online dictionaries and the mock fallback.
 
-Online lookups run in background JavaFX tasks and cached results can be refreshed from the UI. The ECDICT CSV is never copied into the repository; only the local path is stored.
+The offline dictionaries answer before the cache and are never cached, so a re-imported ECDICT or a better cleaner applies to every lookup, and an old cached copy of a raw ECDICT translation is never shown. Online lookups run in background tasks; "Refresh cache" looks the word up again.
+
+### ECDICT
+
+The ECDICT CSV is imported once into its own SQLite file next to the database, `ecdict.db` (`EcdictRepository`), so `vocab.db` and its backups do not grow by the dictionary's 100+ MB and the import needs no schema migration of `vocab.db`. The CSV itself is never copied into the repository.
+
+- `ecdict(word TEXT PRIMARY KEY COLLATE NOCASE, phonetic, definition, translation, pos, collins, oxford, tag, bnc, frq, exchange, example)` holds the rows as the CSV has them (ECDICT is unique on the word ignoring case; when a word repeats, the first row wins). `example` is only filled from word-list CSVs.
+- `ecdict_forms(form, lemma, kinds)`, primary key `(form, lemma)`, comes from the `exchange` field: the `p:`, `d:`, `i:`, `3:`, `r:`, `t:` and `s:` inflections of a base form, and the `0:` base form a row that is itself an inflection names.
+- `ecdict_meta` records the source path, its size and modification time, the entry and skipped-row counts, the import time, the format (encoding, delimiter, columns) and the duration. `PRAGMA user_version` is the file's format; a file of another format reads as not imported and is imported again.
+
+`EcdictImportService` streams the CSV through the shared `CsvReader` (quoting, ECDICT's literal `\n`, byte order marks, GBK, headerless files) and `EcdictColumns` (columns by header name, or ECDICT's order for a headerless file whose fourth field is Chinese, otherwise english, chinese, pos, example, tags). It writes 5,000-row batches in one transaction into `ecdict.db.importing` (no journal and no fsync: the file is thrown away if anything goes wrong) and swaps that file in place of `ecdict.db` only when every row is in. Lookups keep answering from the previous file during an import; a failure, a cancel or a crash leaves it as it was. Progress (rows and bytes) is reported every 10,000 rows and cancellation is checked every 1,000. A file that cannot be read fails with its line number, a header without a word or Chinese column and a file without entries are reported as such; nothing fails silently.
+
+The ECDICT box on the Add / Import tab tests a file (encoding, columns and the first 200 rows; nothing is imported or saved), imports it in the background with a progress bar and a Cancel button, and saves the path only when the import succeeds. Opening the window never parses the CSV: it compares the saved path's size and modification time with `ecdict_meta` and imports in the background only when they changed or nothing is imported yet (for example after upgrading from a version that read the CSV at every start); without a saved path `ECDICT_CSV_PATH` is used. "Save and Import" skips an unchanged file, "Re-import" imports it anyway, and "Clear Dictionary Path" also deletes `ecdict.db`. The imported dictionary keeps working when the CSV is moved or deleted.
+
+Lookups are indexed queries (`EcdictRepositoryTest` checks the query plans) that keep almost nothing in memory, and translations are cleaned as they are read (`EcdictTranslationCleaner`), so the add form gets a Chinese answer key the learner can type: ECDICT's literal `\n` separates lines, leading part-of-speech markers (`vt.`, `n.`, `adj.`, ...) become the part of speech ("verb; noun"), lines tagged `[网络]`, `[计]`, `[医]`, ... move to the note unless the word has nothing else, and the senses are joined with "; " without splitting inside brackets ("使(马,鹰等)戴头罩"). A meaning longer than 200 characters keeps its first senses and lists the rest in the note. A word that is not an entry but an inflection of one ("abandons") returns its base form, and the result says so.
 
 ## CSV Import and Export
 

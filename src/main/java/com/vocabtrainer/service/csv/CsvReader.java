@@ -77,6 +77,15 @@ public final class CsvReader implements Closeable {
         }
     }
 
+    /**
+     * Reads a stream from its first byte in an encoding {@link TextEncoding#detect(Path)} found, with
+     * a sniffed delimiter; the byte order mark is skipped. For callers that count the bytes read.
+     */
+    public static CsvReader open(InputStream in, TextEncoding encoding) throws IOException {
+        in.skipNBytes(encoding.bomLength());
+        return new CsvReader(encoding.openReader(in), encoding, null);
+    }
+
     /** Reads a stream in a known charset, with a sniffed delimiter. */
     public static CsvReader open(InputStream in, Charset charset) throws IOException {
         TextEncoding encoding = new TextEncoding(charset, 0);
