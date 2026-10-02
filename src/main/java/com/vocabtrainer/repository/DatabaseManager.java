@@ -3,6 +3,9 @@ package com.vocabtrainer.repository;
 import com.vocabtrainer.util.DateTimeUtil;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -11,10 +14,15 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
-public class DatabaseManager {
+public class DatabaseManager implements TransactionRunner {
+    private static final Logger LOGGER = Logger.getLogger(DatabaseManager.class.getName());
+
     private final Path databasePath;
     private final String jdbcUrl;
+    private final ThreadLocal<Transaction> activeTransaction = new ThreadLocal<>();
 
     public DatabaseManager() {
         this(DateTimeUtil.defaultDatabasePath());
@@ -244,7 +252,67 @@ public class DatabaseManager {
         }
     }
 
+    /**
+     * Returns a new connection, or, while this thread is inside {@link #inTransaction}, the
+     * transaction's connection. Closing that one is a no-op, so repositories can keep using
+     * try-with-resources.
+     */
     public Connection getConnection() throws SQLException {
+        Transaction transaction = activeTransaction.get();
+        if (transaction != null) {
+            return transaction.participant;
+        }
+        return openConnection();
+    }
+
+    /**
+     * Runs {@code work} in one transaction bound to the current thread. Every
+     * {@link #getConnection()} call the work makes on this thread joins it, and a nested
+     * {@code inTransaction} call joins the outer one. The outermost call commits when the work
+     * returns and rolls back if it throws anything; a failed nested call makes the whole
+     * transaction roll back even if the outer work catches the exception.
+     */
+    @Override
+    public <T> T inTransaction(SqlWork<T> work) throws SQLException {
+        Transaction current = activeTransaction.get();
+        if (current != null) {
+            try {
+                return work.run();
+            } catch (Throwable e) {
+                current.rollbackOnly = true;
+                throw e;
+            }
+        }
+
+        Connection connection = openConnection();
+        Transaction transaction = new Transaction(connection);
+        activeTransaction.set(transaction);
+        boolean started = false;
+        try {
+            // BEGIN IMMEDIATE takes the write lock up front: if another connection is writing, this
+            // waits for the busy timeout instead of failing at once when a read is later upgraded
+            // to a write. Plain SQL is used instead of setAutoCommit(false)/commit() because the
+            // driver's commit() immediately opens the next transaction.
+            execute(connection, "BEGIN IMMEDIATE");
+            started = true;
+            T result = work.run();
+            if (transaction.rollbackOnly) {
+                throw new SQLException("Transaction rolled back: a nested operation failed or requested a rollback");
+            }
+            execute(connection, "COMMIT");
+            return result;
+        } catch (Throwable e) {
+            if (started) {
+                rollbackQuietly(connection, e);
+            }
+            throw e;
+        } finally {
+            activeTransaction.remove();
+            closeQuietly(connection);
+        }
+    }
+
+    private Connection openConnection() throws SQLException {
         Connection connection = DriverManager.getConnection(jdbcUrl);
         try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA foreign_keys = ON");
@@ -252,7 +320,78 @@ public class DatabaseManager {
         return connection;
     }
 
+    private static void execute(Connection connection, String sql) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(sql);
+        }
+    }
+
+    private static void rollbackQuietly(Connection connection, Throwable failure) {
+        try {
+            execute(connection, "ROLLBACK");
+        } catch (SQLException rollbackError) {
+            // SQLite may already have rolled back on its own; closing the connection finishes the job.
+            failure.addSuppressed(rollbackError);
+        }
+    }
+
+    private static void closeQuietly(Connection connection) {
+        try {
+            connection.close();
+        } catch (SQLException e) {
+            // The outcome is already decided; a close failure must not turn a commit into an error.
+            LOGGER.log(Level.WARNING, "Cannot close transaction connection", e);
+        }
+    }
+
     public Path getDatabasePath() {
         return databasePath;
+    }
+
+    /** The connection bound to one outermost {@link #inTransaction} call. */
+    private static final class Transaction {
+        private final Connection connection;
+        private final Connection participant;
+        private boolean rollbackOnly;
+
+        private Transaction(Connection connection) {
+            this.connection = connection;
+            this.participant = participantView();
+        }
+
+        /**
+         * The connection as handed to code running inside the transaction: the outermost
+         * inTransaction call owns commit and close, so those calls are ignored, and a rollback
+         * marks the whole transaction for rollback.
+         */
+        private Connection participantView() {
+            InvocationHandler handler = (proxy, method, args) -> {
+                switch (method.getName()) {
+                    case "close", "commit", "setAutoCommit":
+                        return null;
+                    case "getAutoCommit":
+                        return false;
+                    case "rollback":
+                        if (method.getParameterCount() == 0) {
+                            rollbackOnly = true;
+                            return null;
+                        }
+                        break;
+                    case "equals":
+                        return proxy == args[0];
+                    case "hashCode":
+                        return System.identityHashCode(proxy);
+                    default:
+                        break;
+                }
+                try {
+                    return method.invoke(connection, args);
+                } catch (InvocationTargetException e) {
+                    throw e.getCause();
+                }
+            };
+            return (Connection) Proxy.newProxyInstance(
+                DatabaseManager.class.getClassLoader(), new Class<?>[] {Connection.class}, handler);
+        }
     }
 }

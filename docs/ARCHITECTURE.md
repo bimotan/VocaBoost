@@ -23,6 +23,8 @@ Business logic stays out of JavaFX controls and does not use `Scanner`, `System.
 
 Schema changes are applied with `CREATE TABLE IF NOT EXISTS` and compatibility migrations. Existing local databases are not deleted.
 
+Multi-step writes use `DatabaseManager.inTransaction` (exposed to services as `TransactionRunner`). It binds one connection to the calling thread; repository calls made inside the work, and nested `inTransaction` calls, join that transaction, and closing the joined connection is a no-op. The transaction commits only if all the work succeeds. Rating a card (schedule, review log, goal progress, achievements and their XP) and bulk word imports are atomic.
+
 ## Review Algorithm
 
 The scheduler follows an SM-2 style model with easiness factor, interval days, repetitions, consecutive correct count, and lapses. User ratings are combined with answer similarity:
@@ -56,4 +58,4 @@ Online lookups run in background JavaFX tasks and cached results can be refreshe
 
 ## Review Sessions
 
-`ReviewService` owns session state: active deck, selected mode, current mixed-mode question direction, target size, reviewed count, accuracy, XP, and unlocked achievements. A target of `0` means All Due. `ReviewMode.MIXED` chooses English-to-Chinese or Chinese-to-English per card, while weak-word mode keeps using weak-card selection.
+`ReviewService` owns session state: active deck, selected mode, current mixed-mode question direction, target size, reviewed count, accuracy, XP, and unlocked achievements. A target of `0` means All Due. `ReviewMode.MIXED` chooses English-to-Chinese or Chinese-to-English per card, while weak-word mode keeps using weak-card selection. A card can only be rated after an answer was submitted; the submitted answer is kept until the rating is committed, so a failed save can be retried from the Review tab with the same answer and similarity.

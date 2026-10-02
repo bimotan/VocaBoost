@@ -20,6 +20,11 @@ public class WordRepository {
         this.databaseManager = databaseManager;
     }
 
+    /** Runs several writes on this repository's database (and others sharing it) atomically. */
+    public TransactionRunner transactions() {
+        return databaseManager;
+    }
+
     public WordCard save(WordCard word) throws SQLException {
         if (word.getId() == 0) {
             return insert(word);
@@ -58,26 +63,19 @@ public class WordRepository {
                               repetitions, consecutive_correct, lapses, archived)
             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
-        try (Connection connection = databaseManager.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            boolean previousAutoCommit = connection.getAutoCommit();
-            connection.setAutoCommit(false);
-            try {
+        // All rows or none; joins the caller's transaction if there is one.
+        return databaseManager.inTransaction(() -> {
+            try (Connection connection = databaseManager.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(sql)) {
                 int inserted = 0;
                 for (WordCard word : words) {
                     bindWord(statement, word);
                     statement.executeUpdate();
                     inserted++;
                 }
-                connection.commit();
                 return inserted;
-            } catch (SQLException e) {
-                connection.rollback();
-                throw e;
-            } finally {
-                connection.setAutoCommit(previousAutoCommit);
             }
-        }
+        });
     }
 
     public void update(WordCard word) throws SQLException {

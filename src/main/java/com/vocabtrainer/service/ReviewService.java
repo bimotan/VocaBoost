@@ -10,6 +10,7 @@ import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.ReviewSessionSummary;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.ReviewLogRepository;
+import com.vocabtrainer.repository.TransactionRunner;
 import com.vocabtrainer.repository.WordRepository;
 
 import java.sql.SQLException;
@@ -30,6 +31,7 @@ public class ReviewService {
     private final ReviewScheduler scheduler;
     private final GoalService goalService;
     private final AchievementService achievementService;
+    private final TransactionRunner transactions;
     private final Clock clock;
     private final Random random = new Random();
     private final Map<Long, ReviewAnswer> pendingAnswers = new HashMap<>();
@@ -68,6 +70,7 @@ public class ReviewService {
         this.scheduler = scheduler;
         this.goalService = goalService;
         this.achievementService = achievementService;
+        this.transactions = wordRepository.transactions();
         this.clock = clock;
     }
 
@@ -144,61 +147,93 @@ public class ReviewService {
         }
     }
 
+    public boolean hasPendingAnswer(long wordId) {
+        return pendingAnswers.containsKey(wordId);
+    }
+
+    /**
+     * Saves the rating for an answer submitted with {@link #submitAnswer}. The schedule, review log,
+     * goal progress and achievements are written in one transaction. If saving fails nothing is
+     * written and the submitted answer is kept, so calling this again retries with the same answer.
+     */
     public ReviewOutcome rateCurrent(long wordId, ReviewRating rating) {
+        ReviewAnswer answer = pendingAnswers.get(wordId);
+        if (answer == null) {
+            throw new IllegalStateException("No answer was submitted for word " + wordId + "; submit an answer before rating it");
+        }
+        SavedReview saved;
         try {
-            WordCard word = wordRepository.findById(wordId)
-                .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
-            ReviewAnswer answer = pendingAnswers.remove(wordId);
-            LocalDateTime now = LocalDateTime.now(clock);
-            if (answer == null) {
-                answer = new ReviewAnswer(wordId, word.getEnglish(), "", word.getChinese(), 0.0, now);
-            }
-            long elapsed = Math.max(0L, Duration.between(answer.submittedAt(), now).toMillis());
-            boolean overdueRescued = word.getNextReviewAt() != null
-                && word.getNextReviewAt().toLocalDate().isBefore(now.toLocalDate());
-
-            scheduler.applyRating(word, rating, answer.similarity(), now);
-            WordCard updated = wordRepository.save(word);
-            reviewLogRepository.insert(new ReviewLog(
-                0,
-                wordId,
-                now,
-                answer.userAnswer(),
-                answer.correctAnswer(),
-                answer.similarity(),
-                rating,
-                elapsed
-            ));
-
-            long deckId = word.getDeckId();
-            activeSessionDeckId = deckId;
-            GoalUpdate goalUpdate = goalService == null
-                ? null
-                : goalService.recordReview(deckId, rating, answer.similarity());
-            DailyGoalProgress progress = goalUpdate == null ? null : goalUpdate.progress();
-            List<Achievement> unlocked = achievementService == null || progress == null
-                ? List.of()
-                : achievementService.evaluate(deckId, progress, overdueRescued, goalUpdate.dailyGoalCompleted());
-            int achievementXp = unlocked.stream().mapToInt(Achievement::xpReward).sum();
-            int earnedXp = (goalUpdate == null ? 0 : goalUpdate.xpEarned()) + achievementXp;
-            if (goalService != null) {
-                progress = goalService.getTodayProgress(deckId);
-            }
-
-            sessionReviewed++;
-            if (rating != ReviewRating.AGAIN && answer.similarity() >= 0.5) {
-                sessionCorrect++;
-            }
-            sessionXp += earnedXp;
-            sessionAchievements.addAll(unlocked);
-            return new ReviewOutcome(updated, progress, earnedXp, unlocked, sessionSummary());
+            saved = transactions.inTransaction(() -> saveRating(wordId, rating, answer));
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot save review result", e);
         }
+
+        // Committed: only in-memory session state is updated from here on, so nothing below can fail.
+        pendingAnswers.remove(wordId);
+        activeSessionDeckId = saved.word().getDeckId();
+        sessionReviewed++;
+        if (rating != ReviewRating.AGAIN && answer.similarity() >= 0.5) {
+            sessionCorrect++;
+        }
+        sessionXp += saved.earnedXp();
+        sessionAchievements.addAll(saved.unlocked());
+        return new ReviewOutcome(saved.word(), saved.progress(), saved.earnedXp(), saved.unlocked(),
+            sessionSummary(saved.sessionGoal()));
+    }
+
+    private SavedReview saveRating(long wordId, ReviewRating rating, ReviewAnswer answer) throws SQLException {
+        // Read inside the transaction so a retry starts from the stored card, not a half-updated copy.
+        WordCard word = wordRepository.findById(wordId)
+            .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
+        LocalDateTime now = LocalDateTime.now(clock);
+        long elapsed = Math.max(0L, Duration.between(answer.submittedAt(), now).toMillis());
+        boolean overdueRescued = word.getNextReviewAt() != null
+            && word.getNextReviewAt().toLocalDate().isBefore(now.toLocalDate());
+
+        scheduler.applyRating(word, rating, answer.similarity(), now);
+        WordCard updated = wordRepository.save(word);
+        reviewLogRepository.insert(new ReviewLog(
+            0,
+            wordId,
+            now,
+            answer.userAnswer(),
+            answer.correctAnswer(),
+            answer.similarity(),
+            rating,
+            elapsed
+        ));
+
+        long deckId = word.getDeckId();
+        GoalUpdate goalUpdate = goalService == null
+            ? null
+            : goalService.recordReview(deckId, rating, answer.similarity());
+        DailyGoalProgress progress = goalUpdate == null ? null : goalUpdate.progress();
+        List<Achievement> unlocked = achievementService == null || progress == null
+            ? List.of()
+            : achievementService.evaluate(deckId, progress, overdueRescued, goalUpdate.dailyGoalCompleted());
+        int achievementXp = unlocked.stream().mapToInt(Achievement::xpReward).sum();
+        int earnedXp = (goalUpdate == null ? 0 : goalUpdate.xpEarned()) + achievementXp;
+        if (goalService != null) {
+            progress = goalService.getTodayProgress(deckId);
+        }
+        int sessionGoal = sessionTarget < 0 ? defaultSessionTarget(deckId) : sessionTarget;
+        return new SavedReview(updated, progress, earnedXp, unlocked, sessionGoal);
+    }
+
+    private record SavedReview(
+        WordCard word,
+        DailyGoalProgress progress,
+        int earnedXp,
+        List<Achievement> unlocked,
+        int sessionGoal
+    ) {
     }
 
     public ReviewSessionSummary sessionSummary() {
-        int sessionGoal = sessionTarget < 0 ? defaultSessionTarget(activeSessionDeckId) : sessionTarget;
+        return sessionSummary(sessionTarget < 0 ? defaultSessionTarget(activeSessionDeckId) : sessionTarget);
+    }
+
+    private ReviewSessionSummary sessionSummary(int sessionGoal) {
         return new ReviewSessionSummary(
             sessionReviewed,
             sessionCorrect,

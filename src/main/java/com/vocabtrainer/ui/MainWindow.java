@@ -1210,22 +1210,27 @@ public class MainWindow {
     }
 
     private void rateCurrentWord(ReviewRating rating) {
-        if (currentReviewWord == null) {
+        if (currentReviewWord == null || ratingButtons.isDisabled()) {
             return;
         }
-        // Never leave the rating buttons armed after a click: a second rating of the same card
-        // would be graded without the submitted answer and recorded as a lapse.
+        // Disarm the buttons while saving so the same card cannot be rated twice.
         ratingButtons.setDisable(true);
+        long wordId = currentReviewWord.getId();
         ReviewOutcome outcome;
         try {
-            outcome = reviewService.rateCurrent(currentReviewWord.getId(), rating);
+            outcome = reviewService.rateCurrent(wordId, rating);
         } catch (RuntimeException e) {
-            // The AI explanation may still overwrite the hint below, so the dialog says it too.
-            reportFailure("Rating not saved - submit your answer again", e);
-            // rateCurrent has already consumed the submitted answer, so ask for it again.
-            submitAnswerButton.setDisable(false);
-            answerField.setDisable(false);
-            reviewResultArea.setText("The rating was not saved. Submit your answer again to retry.");
+            // Nothing was saved. The service keeps the submitted answer, so the same card and
+            // answer stay on screen and the user can simply rate again.
+            if (reviewService.hasPendingAnswer(wordId)) {
+                reportFailure("Rating not saved - choose a rating again to retry", e);
+                ratingButtons.setDisable(false);
+            } else {
+                reportFailure("Rating not saved - submit your answer again", e);
+                submitAnswerButton.setDisable(false);
+                answerField.setDisable(false);
+                reviewResultArea.setText("The rating was not saved. Submit your answer again to retry.");
+            }
             return;
         }
         guard("Rating saved, but refreshing the review failed", () -> {
