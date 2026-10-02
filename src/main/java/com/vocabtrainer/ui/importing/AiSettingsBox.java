@@ -1,0 +1,150 @@
+package com.vocabtrainer.ui.importing;
+
+import com.vocabtrainer.domain.WordCard;
+import com.vocabtrainer.service.AiService;
+import com.vocabtrainer.service.AiServiceFactory;
+import com.vocabtrainer.service.SettingsService;
+import com.vocabtrainer.ui.ConfiguredServices;
+import com.vocabtrainer.ui.DataChange;
+import com.vocabtrainer.ui.UiErrors;
+import com.vocabtrainer.ui.ViewContext;
+import com.vocabtrainer.ui.Widgets;
+import javafx.scene.Node;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.PasswordField;
+import javafx.scene.control.TextField;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
+
+import java.util.Optional;
+
+/** Saves, clears and tests the optional AI provider used for review explanations. */
+final class AiSettingsBox {
+    private final ViewContext context;
+    private final SettingsService settingsService;
+    private final ConfiguredServices configured;
+    private final Label statusLabel = new Label();
+    private final VBox root;
+
+    AiSettingsBox(ViewContext context, SettingsService settingsService, ConfiguredServices configured) {
+        this.context = context;
+        this.settingsService = settingsService;
+        this.configured = configured;
+
+        TextField providerField = new TextField(settingsService.getAiProvider().orElse("openai-compatible"));
+        providerField.setId("aiProviderField");
+        providerField.setPromptText("openai-compatible");
+        TextField baseUrlField = new TextField(settingsService.getAiBaseUrl().orElse(""));
+        baseUrlField.setId("aiBaseUrlField");
+        baseUrlField.setPromptText("https://your-provider.example/v1/chat/completions");
+        PasswordField apiKeyField = new PasswordField();
+        apiKeyField.setId("aiApiKeyField");
+        apiKeyField.setText(settingsService.getAiApiKey().orElse(""));
+        apiKeyField.setPromptText("API key");
+        TextField modelField = new TextField(settingsService.getAiModel().orElse(""));
+        modelField.setId("aiModelField");
+        modelField.setPromptText("model name");
+        statusLabel.setText(aiStatusText());
+        statusLabel.setId("aiStatusLabel");
+        statusLabel.setWrapText(true);
+
+        Button saveButton = new Button("Save AI Settings");
+        saveButton.setId("saveAiButton");
+        saveButton.setOnAction(event -> {
+            try {
+                settingsService.saveAiSettings(
+                    providerField.getText(),
+                    baseUrlField.getText(),
+                    apiKeyField.getText(),
+                    modelField.getText()
+                );
+                reloadAiService();
+                statusLabel.setText("Saved. " + aiStatusText());
+            } catch (RuntimeException e) {
+                context.errors().logFailure("Save AI settings failed", e);
+                statusLabel.setText(UiErrors.rootMessage(e));
+            }
+        });
+
+        Button clearButton = new Button("Clear AI Settings");
+        clearButton.setId("clearAiButton");
+        clearButton.setOnAction(event -> context.errors().guard("Clear AI settings failed", () -> {
+            settingsService.clearAiSettings();
+            providerField.setText("openai-compatible");
+            baseUrlField.clear();
+            apiKeyField.clear();
+            modelField.clear();
+            reloadAiService();
+            statusLabel.setText("Cleared. " + aiStatusText());
+        }));
+
+        Button testButton = new Button("Test AI Explanation");
+        testButton.setId("testAiButton");
+        testButton.setOnAction(event -> testProvider());
+
+        GridPane form = new GridPane();
+        form.setHgap(10);
+        form.setVgap(10);
+        form.add(new Label("Provider"), 0, 0);
+        form.add(providerField, 1, 0);
+        form.add(new Label("Base URL"), 0, 1);
+        form.add(baseUrlField, 1, 1);
+        form.add(new Label("API key"), 0, 2);
+        form.add(apiKeyField, 1, 2);
+        form.add(new Label("Model"), 0, 3);
+        form.add(modelField, 1, 3);
+        GridPane.setHgrow(providerField, Priority.ALWAYS);
+        GridPane.setHgrow(baseUrlField, Priority.ALWAYS);
+        GridPane.setHgrow(apiKeyField, Priority.ALWAYS);
+        GridPane.setHgrow(modelField, Priority.ALWAYS);
+        HBox buttons = new HBox(10, saveButton, clearButton, testButton);
+        root = new VBox(10, Widgets.sectionTitle("AI Explanation Provider"), form, buttons, statusLabel);
+    }
+
+    Node root() {
+        return root;
+    }
+
+    private void testProvider() {
+        // Ask the saved provider directly: no cache, so a fixed key or model shows up at once,
+        // and no mock fallback, so a failure shows the provider's error instead of mock text.
+        Optional<AiService> provider;
+        try {
+            provider = AiServiceFactory.createUncachedProvider(settingsService);
+        } catch (RuntimeException e) {
+            // Reading the saved settings can fail; report it here instead of on the FX thread.
+            context.errors().logFailure("AI test failed", e);
+            statusLabel.setText("AI test failed: " + UiErrors.rootMessage(e));
+            return;
+        }
+        if (provider.isEmpty()) {
+            statusLabel.setText("AI test skipped: no AI provider is configured. Save a base URL, API key and"
+                + " model first; until then the offline mock explanation is used.");
+            return;
+        }
+        AiService uncachedProvider = provider.get();
+        WordCard sample = WordCard.createNew(context.decks().currentId(), "lucid", "清晰的; 易懂的");
+        context.async().run(
+            () -> uncachedProvider.explain(sample),
+            text -> statusLabel.setText("AI test succeeded. Provider response:" + System.lineSeparator() + text),
+            error -> statusLabel.setText("AI test failed: " + UiErrors.rootMessage(error)),
+            statusLabel,
+            "Testing AI explanation..."
+        );
+    }
+
+    private void reloadAiService() {
+        configured.reloadAi();
+        context.changes().publish(DataChange.SETTINGS);
+    }
+
+    private String aiStatusText() {
+        if (configured.ai().isAvailable()) {
+            return "AI provider configured. Review explanations use HTTP provider with local cache.";
+        }
+        return "AI provider not configured. Mock explanation is used offline.";
+    }
+}
