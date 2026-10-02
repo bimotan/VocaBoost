@@ -4,7 +4,9 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.SettingsRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
@@ -21,10 +23,12 @@ class CachingAiServiceTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     @Test
     void cachesConfiguredAiResponseByWord() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("ai-cache.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("ai-cache.db"));
         AtomicInteger calls = new AtomicInteger();
         AiService delegate = new AiService() {
             @Override
@@ -67,8 +71,7 @@ class CachingAiServiceTest {
     @Test
     void startupDeletesCachedFallbackTextAndKeepsRealExplanations() throws Exception {
         Path databasePath = tempDir.resolve("poisoned-ai-cache.db");
-        DatabaseManager databaseManager = new DatabaseManager(databasePath);
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(databasePath);
         AiCacheRepository repository = new AiCacheRepository(databaseManager);
         LocalDateTime createdAt = LocalDateTime.of(2026, 5, 1, 9, 0);
         // What older versions stored after a provider error: the mock text plus the failure note.
@@ -77,7 +80,7 @@ class CachingAiServiceTest {
         repository.save("explain:v1:lucid:清晰的", poisoned, createdAt);
         repository.save("explain:v1:candid:坦率的", "candid 指坦率的、直言不讳的。", createdAt);
 
-        new DatabaseManager(databasePath).initialize();
+        databases.open(databasePath);
 
         assertTrue(repository.find("explain:v1:lucid:清晰的").isEmpty(), "cached fallback text must be deleted");
         assertEquals("candid 指坦率的、直言不讳的。", repository.find("explain:v1:candid:坦率的").orElseThrow());
@@ -92,8 +95,7 @@ class CachingAiServiceTest {
 
     @Test
     void factoryUsesLocalSettingsBeforeEnvironment() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("ai-settings.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("ai-settings.db"));
         SettingsService settingsService = new SettingsService(new SettingsRepository(databaseManager));
         settingsService.saveAiSettings(
             "openai-compatible",

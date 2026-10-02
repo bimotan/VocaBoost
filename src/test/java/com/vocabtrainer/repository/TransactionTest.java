@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.WordCard;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
@@ -23,14 +24,16 @@ class TransactionTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     private DatabaseManager databaseManager;
     private WordRepository wordRepository;
     private long deckId;
 
     @BeforeEach
     void setUp() throws Exception {
-        databaseManager = new DatabaseManager(tempDir.resolve("transactions.db"));
-        databaseManager.initialize();
+        databaseManager = databases.open(tempDir.resolve("transactions.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         deckId = deck.getId();
         wordRepository = new WordRepository(databaseManager);

@@ -4,7 +4,9 @@ import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.SettingsRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
@@ -20,10 +22,12 @@ class DeckServiceTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     @Test
     void createsRenamesAndArchivesDecks() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("decks.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("decks.db"));
         DeckRepository deckRepository = new DeckRepository(databaseManager);
         DeckService deckService = new DeckService(deckRepository, new SettingsService(new SettingsRepository(databaseManager)));
 
@@ -51,8 +55,7 @@ class DeckServiceTest {
 
     @Test
     void doesNotArchiveLastActiveDeckAndValidatesNames() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("validation.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("validation.db"));
         DeckService deckService = new DeckService(new DeckRepository(databaseManager),
             new SettingsService(new SettingsRepository(databaseManager)));
 
@@ -64,8 +67,7 @@ class DeckServiceTest {
 
     @Test
     void keepsOneActiveDeckAfterTheDefaultDeckIsArchived() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("last-active.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("last-active.db"));
         DeckService deckService = new DeckService(new DeckRepository(databaseManager),
             new SettingsService(new SettingsRepository(databaseManager)));
         Deck defaultDeck = deckService.ensureDefaultDeck();
@@ -83,8 +85,7 @@ class DeckServiceTest {
 
     @Test
     void ensureDefaultDeckRestoresArchivedDefaultDeckInsteadOfInsertingTheNameAgain() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("archived-default.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("archived-default.db"));
         DeckRepository deckRepository = new DeckRepository(databaseManager);
         Deck defaultDeck = deckRepository.ensureDefaultDeck();
         deckRepository.create("GRE");
@@ -99,8 +100,7 @@ class DeckServiceTest {
 
     @Test
     void explainsNameConflictsWithArchivedDecks() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("names.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("names.db"));
         DeckService deckService = new DeckService(new DeckRepository(databaseManager),
             new SettingsService(new SettingsRepository(databaseManager)));
         Deck defaultDeck = deckService.ensureDefaultDeck();

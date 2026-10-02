@@ -7,7 +7,9 @@ import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.GoalRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
@@ -22,6 +24,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GoalServiceTest {
     @TempDir
     Path tempDir;
+
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
 
     @Test
     void recordsNewWordsReviewsXpAndDailyCompletion() throws Exception {
@@ -43,8 +48,7 @@ class GoalServiceTest {
 
     @Test
     void calculatesReviewStreakAcrossConsecutiveDays() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("streak.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("streak.db"));
         GoalRepository repository = new GoalRepository(databaseManager);
         LocalDate today = LocalDate.of(2026, 5, 28);
         for (int i = 0; i < 3; i++) {
@@ -59,8 +63,7 @@ class GoalServiceTest {
 
     @Test
     void deckScopedGoalsDoNotPolluteEachOther() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("deck-goals.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("deck-goals.db"));
         DeckRepository deckRepository = new DeckRepository(databaseManager);
         Deck defaultDeck = deckRepository.ensureDefaultDeck();
         Deck secondDeck = deckRepository.create("Second");
@@ -79,8 +82,7 @@ class GoalServiceTest {
     }
 
     private GoalService serviceAt(LocalDate date) throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve(date + ".db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve(date + ".db"));
         return new GoalService(new GoalRepository(databaseManager), clockAt(date));
     }
 

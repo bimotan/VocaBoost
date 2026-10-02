@@ -8,8 +8,10 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.repository.WordRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
@@ -22,10 +24,12 @@ class StatsServiceTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     @Test
     void dailyReviewStatsCanBeScopedToDeck() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("stats.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("stats.db"));
         DeckRepository deckRepository = new DeckRepository(databaseManager);
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewLogRepository reviewLogRepository = new ReviewLogRepository(databaseManager);

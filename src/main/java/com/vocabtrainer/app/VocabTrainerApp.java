@@ -39,12 +39,14 @@ import java.util.logging.Logger;
 public class VocabTrainerApp extends Application {
     private static final Logger LOGGER = Logger.getLogger(VocabTrainerApp.class.getName());
 
+    private DatabaseManager databaseManager;
+
     @Override
     public void start(Stage stage) {
         AppLogging.initialize();
         ErrorDialogs.installUncaughtExceptionHandler();
         try {
-            DatabaseManager databaseManager = new DatabaseManager();
+            databaseManager = new DatabaseManager();
             databaseManager.initialize();
 
             DeckRepository deckRepository = new DeckRepository(databaseManager);
@@ -109,6 +111,14 @@ public class VocabTrainerApp extends Application {
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Startup failed", e);
             ErrorDialogs.exceptionAlert("Startup failed", "The app could not start", e).showAndWait();
+        }
+    }
+
+    /** Closes the database so SQLite checkpoints the write-ahead log and releases the file. */
+    @Override
+    public void stop() {
+        if (databaseManager != null) {
+            databaseManager.close();
         }
     }
 

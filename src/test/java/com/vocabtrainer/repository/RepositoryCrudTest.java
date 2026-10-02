@@ -6,6 +6,7 @@ import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
@@ -21,10 +22,12 @@ class RepositoryCrudTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     @Test
     void wordAndReviewLogCrudWorks() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("test.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("test.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewLogRepository logRepository = new ReviewLogRepository(databaseManager);
@@ -62,8 +65,7 @@ class RepositoryCrudTest {
 
     @Test
     void goalAchievementAndDictionaryCacheCrudWorks() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("new-tables.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("new-tables.db"));
         GoalRepository goalRepository = new GoalRepository(databaseManager);
         AchievementRepository achievementRepository = new AchievementRepository(databaseManager);
         DictionaryCacheRepository cacheRepository = new DictionaryCacheRepository(databaseManager);

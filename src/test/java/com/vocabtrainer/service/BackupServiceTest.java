@@ -12,9 +12,11 @@ import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.util.ErrorMessages;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
@@ -46,6 +48,9 @@ class BackupServiceTest {
 
     @TempDir
     Path tempDir;
+
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
 
     @Test
     void exportsCsvFiles() throws Exception {
@@ -486,7 +491,7 @@ class BackupServiceTest {
     }
 
     /** One SQLite database with its repositories and a backup service on a fixed clock. */
-    private static final class Db {
+    private final class Db {
         final DatabaseManager databaseManager;
         final DeckRepository decks;
         final WordRepository words;
@@ -500,8 +505,7 @@ class BackupServiceTest {
         }
 
         Db(Path file, Function<DatabaseManager, ReviewLogRepository> logRepository) throws SQLException {
-            databaseManager = new DatabaseManager(file);
-            databaseManager.initialize();
+            databaseManager = databases.open(file);
             decks = new DeckRepository(databaseManager);
             words = new WordRepository(databaseManager);
             logs = logRepository.apply(databaseManager);

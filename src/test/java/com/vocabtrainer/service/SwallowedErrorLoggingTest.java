@@ -11,8 +11,10 @@ import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.DictionaryCacheRepository;
 import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.repository.WordRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.Charset;
@@ -33,6 +35,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SwallowedErrorLoggingTest {
     @TempDir
     Path tempDir;
+
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
 
     @Test
     void localDictionaryLogsWhyConfiguredCsvCouldNotBeRead() throws Exception {
@@ -56,7 +61,7 @@ class SwallowedErrorLoggingTest {
     @Test
     void cachingAiServiceLogsCacheFailuresAndStillAnswers() {
         // Not initialized, so the ai_cache table does not exist and every cache call fails.
-        DatabaseManager brokenDatabase = new DatabaseManager(tempDir.resolve("no-tables.db"));
+        DatabaseManager brokenDatabase = databases.track(new DatabaseManager(tempDir.resolve("no-tables.db")));
         CachingAiService service = new CachingAiService(availableAi("explanation"), new AiCacheRepository(brokenDatabase),
             "test-provider");
 
@@ -74,7 +79,7 @@ class SwallowedErrorLoggingTest {
 
     @Test
     void cachingDictionaryServiceLogsCacheFailuresAndStillLooksUp() {
-        DatabaseManager brokenDatabase = new DatabaseManager(tempDir.resolve("no-tables.db"));
+        DatabaseManager brokenDatabase = databases.track(new DatabaseManager(tempDir.resolve("no-tables.db")));
         DictionaryService delegate = new DictionaryService() {
             @Override
             public DictionaryLookupResult lookup(String english) {
@@ -131,8 +136,7 @@ class SwallowedErrorLoggingTest {
 
     @Test
     void backupImportLogsReviewLogsItCouldNotRestore() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("backup.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("backup.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         BackupService backupService = new BackupService(new DeckRepository(databaseManager), wordRepository,

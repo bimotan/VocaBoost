@@ -6,7 +6,9 @@ import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.repository.AchievementRepository;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.GoalRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
@@ -22,10 +24,12 @@ class AchievementServiceTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     @Test
     void unlocksFirstReviewAndReviewCountBadges() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("achievements.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("achievements.db"));
         Clock clock = Clock.fixed(Instant.parse("2026-05-28T09:00:00Z"), ZoneId.of("UTC"));
         GoalService goalService = new GoalService(new GoalRepository(databaseManager), clock);
         AchievementService achievementService = new AchievementService(
@@ -51,8 +55,7 @@ class AchievementServiceTest {
 
     @Test
     void unlocksStreakBadge() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("streak-achievements.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("streak-achievements.db"));
         GoalRepository goalRepository = new GoalRepository(databaseManager);
         LocalDate today = LocalDate.of(2026, 5, 28);
         for (int i = 0; i < 3; i++) {

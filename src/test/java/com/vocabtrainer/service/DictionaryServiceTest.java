@@ -4,7 +4,9 @@ import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DictionaryCacheRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
@@ -22,6 +24,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DictionaryServiceTest {
     @TempDir
     Path tempDir;
+
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
 
     @Test
     void mockDictionaryReturnsCandidate() {
@@ -50,8 +55,7 @@ class DictionaryServiceTest {
 
     @Test
     void cachingDictionaryAvoidsRepeatedDelegateCalls() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("dictionary.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("dictionary.db"));
         AtomicInteger calls = new AtomicInteger();
         DictionaryService delegate = new DictionaryService() {
             @Override
@@ -100,8 +104,7 @@ class DictionaryServiceTest {
 
     @Test
     void cacheRefreshCallsDelegateAgain() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("refresh.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("refresh.db"));
         AtomicInteger calls = new AtomicInteger();
         DictionaryService delegate = new DictionaryService() {
             @Override
@@ -133,8 +136,7 @@ class DictionaryServiceTest {
 
     @Test
     void cachedOnlineDefinitionPlaceholderIsConvertedToDefinition() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("old-cache.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("old-cache.db"));
         DictionaryCacheRepository cacheRepository = new DictionaryCacheRepository(databaseManager);
         String oldPayload = String.join("\t",
             b64("like"),
@@ -156,8 +158,7 @@ class DictionaryServiceTest {
 
     @Test
     void staleMockFallbackCacheIsIgnoredAndReplaced() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("stale-mock-cache.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("stale-mock-cache.db"));
         DictionaryCacheRepository cacheRepository = new DictionaryCacheRepository(databaseManager);
         String stalePayload = String.join("\t",
             b64("hi"),
