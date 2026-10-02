@@ -180,13 +180,14 @@ public class ImportExportService {
     }
 
     /**
-     * Writes the deck's words as an Anki plain-text file: UTF-8, tab-separated, with the header lines
-     * of {@link AnkiExport#HEADER}, one note per word with the English word, the meaning (with the
-     * part of speech and phonetic on a second line), the example and the tags.
+     * Writes the deck's words, suspended ones included (as the CSV export does), as an Anki plain-text
+     * file: UTF-8, tab-separated, with the header lines of {@link AnkiExport#HEADER}, one note per word
+     * with the English word, the meaning (with the part of speech and phonetic on a second line), the
+     * example and the tags.
      */
     public Path exportForAnki(long deckId, Path output) {
         try {
-            List<WordCard> words = wordRepository.findAll(deckId);
+            List<WordCard> words = wordRepository.findAllIncludingSuspended(deckId);
             createParent(output);
             try (Writer writer = Files.newBufferedWriter(output, StandardCharsets.UTF_8)) {
                 writer.write(AnkiExport.HEADER);
@@ -207,10 +208,13 @@ public class ImportExportService {
         }
     }
 
-    /** Writes the deck's English words, one per line (UTF-8, CRLF), for apps that take a plain word list. */
+    /**
+     * Writes the deck's English words, suspended ones included, one per line (UTF-8, CRLF), for apps
+     * that take a plain word list.
+     */
     public Path exportWordList(long deckId, Path output) {
         try {
-            List<WordCard> words = wordRepository.findAll(deckId);
+            List<WordCard> words = wordRepository.findAllIncludingSuspended(deckId);
             createParent(output);
             try (Writer writer = Files.newBufferedWriter(output, StandardCharsets.UTF_8)) {
                 for (WordCard word : words) {

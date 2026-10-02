@@ -105,6 +105,20 @@ class AnkiExportRoundTripTest {
         assertTrue(abate.getNote().startsWith("Meaning from "), abate.getNote());
     }
 
+    @Test
+    void bothExportsKeepSuspendedWordsLikeTheCsvExport() throws Exception {
+        Deck deck = decks.ensureDefaultDeck();
+        save(deck, "abate", "减弱", "", "", "", "", "");
+        save(deck, "lucid", "清晰的", "", "", "", "", "");
+        words.setSuspended(List.of(words.findByEnglish(deck.getId(), "lucid").orElseThrow().getId()), true);
+
+        Path anki = service.exportForAnki(deck.getId(), tempDir.resolve("anki.txt"));
+        Path list = service.exportWordList(deck.getId(), tempDir.resolve("words.txt"));
+
+        assertTrue(Files.readString(anki, StandardCharsets.UTF_8).contains("\nlucid\t清晰的\t\t\n"));
+        assertEquals("abate\r\nlucid\r\n", Files.readString(list, StandardCharsets.UTF_8));
+    }
+
     private void save(Deck deck, String english, String chinese, String phonetic, String pos, String example,
                       String note, String tags) throws SQLException {
         WordCard word = WordCard.createNew(deck.getId(), english, chinese);
