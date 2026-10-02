@@ -195,15 +195,19 @@ public class WordRepository {
     }
 
     /**
-     * The deck's due words (see {@link WordCard#isDue}): learning and relearning cards first, then
-     * review cards, then new ones, each by due time.
+     * The deck's review cards (state {@code REVIEW}) due today, the ones most likely forgotten first:
+     * by FSRS retrievability at {@code now}, lowest first, which is the order of elapsed time over
+     * stability, highest first. A card without a last review time ranks as if it were exactly due.
+     * Learning, relearning and new cards are left to {@link #findLearningDueBy} and {@link #findNewCards}.
      *
      * @param dayEnd the end of the current study day, after {@code now}
      */
-    public List<WordCard> findDue(long deckId, LocalDateTime now, LocalDateTime dayEnd, int limit) throws SQLException {
-        String sql = "SELECT * FROM words WHERE deck_id = ? AND archived = 0 AND " + DUE + """
-            ORDER BY CASE COALESCE(card_state, 'NEW')
-                         WHEN 'LEARNING' THEN 0 WHEN 'RELEARNING' THEN 0 WHEN 'REVIEW' THEN 1 ELSE 2 END,
+    public List<WordCard> findDueReviews(long deckId, LocalDateTime now, LocalDateTime dayEnd, int limit)
+        throws SQLException {
+        String sql = """
+            SELECT * FROM words
+            WHERE deck_id = ? AND archived = 0 AND card_state = 'REVIEW' AND next_review_at < ?
+            ORDER BY COALESCE((julianday(?) - julianday(last_reviewed_at)) / MAX(stability, 0.01), 1.0) DESC,
                      next_review_at ASC, id ASC
             LIMIT ?
             """;
@@ -217,6 +221,67 @@ public class WordRepository {
                 return mapList(rs);
             }
         }
+    }
+
+    /**
+     * The deck's new cards (never reviewed) that are due today, in the order they were added: the
+     * cards a session introduces, up to the new-cards-per-day limit.
+     *
+     * @param dayEnd the end of the current study day
+     */
+    public List<WordCard> findNewCards(long deckId, LocalDateTime dayEnd, int limit) throws SQLException {
+        String sql = """
+            SELECT * FROM words
+            WHERE deck_id = ? AND archived = 0 AND card_state = 'NEW' AND next_review_at < ?
+            ORDER BY added_at ASC, id ASC
+            LIMIT ?
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            statement.setString(2, DateTimeUtil.toDatabase(dayEnd));
+            statement.setInt(3, limit);
+            try (ResultSet rs = statement.executeQuery()) {
+                return mapList(rs);
+            }
+        }
+    }
+
+    /**
+     * The deck's due words (see {@link #countDue}) split by state, in one query: learning and
+     * relearning cards whose step time has come, review cards due today and new cards. Words
+     * without a card state, which exist only until the startup backfill derived it, are in none.
+     */
+    public DueCounts countDueByState(long deckId, LocalDateTime now, LocalDateTime dayEnd) throws SQLException {
+        String sql = """
+            SELECT COALESCE(SUM(CASE WHEN card_state IN ('LEARNING', 'RELEARNING') AND next_review_at <= ?
+                                     THEN 1 ELSE 0 END), 0) AS learning,
+                   COALESCE(SUM(CASE WHEN card_state = 'REVIEW' THEN 1 ELSE 0 END), 0) AS review,
+                   COALESCE(SUM(CASE WHEN card_state = 'NEW' THEN 1 ELSE 0 END), 0) AS new_cards
+            FROM words
+            WHERE deck_id = ? AND archived = 0 AND next_review_at < ?
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, DateTimeUtil.toDatabase(now));
+            statement.setLong(2, deckId);
+            statement.setString(3, DateTimeUtil.toDatabase(dayEnd));
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next()
+                    ? new DueCounts(rs.getInt("learning"), rs.getInt("review"), rs.getInt("new_cards"))
+                    : new DueCounts(0, 0, 0);
+            }
+        }
+    }
+
+    /**
+     * Due words by state, see {@link #countDueByState}.
+     *
+     * @param learning learning and relearning cards whose step time has come
+     * @param review   review cards due today
+     * @param newCards new cards due today, before the new-cards-per-day limit
+     */
+    public record DueCounts(int learning, int review, int newCards) {
     }
 
     /**
@@ -286,7 +351,11 @@ public class WordRepository {
         }
     }
 
-    /** The deck's due words, see {@link #findDue}. */
+    /**
+     * The deck's due words (see {@link WordCard#isDue}); {@link #countDueByState} splits them by state.
+     *
+     * @param dayEnd the end of the current study day, after {@code now}
+     */
     public int countDue(long deckId, LocalDateTime now, LocalDateTime dayEnd) throws SQLException {
         String sql = "SELECT COUNT(*) FROM words WHERE deck_id = ? AND archived = 0 AND " + DUE;
         try (Connection connection = databaseManager.getConnection();
@@ -319,11 +388,12 @@ public class WordRepository {
     /**
      * Active-word and due-word counts of every deck that has words, by deck id, in one query.
      *
-     * @param dayEnd the end of the current study day, see {@link #findDue}
+     * @param dayEnd the end of the current study day, see {@link #countDue}
      */
     public Map<Long, DeckWordCounts> countByDeck(LocalDateTime now, LocalDateTime dayEnd) throws SQLException {
         String sql = "SELECT deck_id, COUNT(*) AS total, COALESCE(SUM(CASE WHEN " + DUE + """
-                THEN 1 ELSE 0 END), 0) AS due
+                THEN 1 ELSE 0 END), 0) AS due,
+                COALESCE(SUM(CASE WHEN card_state = 'NEW' AND next_review_at < ? THEN 1 ELSE 0 END), 0) AS due_new
             FROM words
             WHERE archived = 0
             GROUP BY deck_id
@@ -332,18 +402,23 @@ public class WordRepository {
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, DateTimeUtil.toDatabase(dayEnd));
             statement.setString(2, DateTimeUtil.toDatabase(now));
+            statement.setString(3, DateTimeUtil.toDatabase(dayEnd));
             try (ResultSet rs = statement.executeQuery()) {
                 Map<Long, DeckWordCounts> counts = new HashMap<>();
                 while (rs.next()) {
-                    counts.put(rs.getLong("deck_id"), new DeckWordCounts(rs.getInt("total"), rs.getInt("due")));
+                    counts.put(rs.getLong("deck_id"),
+                        new DeckWordCounts(rs.getInt("total"), rs.getInt("due"), rs.getInt("due_new")));
                 }
                 return counts;
             }
         }
     }
 
-    /** What {@link #countAll} and {@link #countDue} return for one deck. */
-    public record DeckWordCounts(int total, int due) {
+    /**
+     * What {@link #countAll} and {@link #countDue} return for one deck, and how many of the due
+     * words are new ({@link DueCounts#newCards()}).
+     */
+    public record DeckWordCounts(int total, int due, int dueNew) {
     }
 
     private int count(String sql, long deckId) throws SQLException {

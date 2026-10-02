@@ -11,9 +11,27 @@ public class ReviewLog {
     private double similarity;
     private ReviewRating rating;
     private long elapsedMillis;
+    private ReviewKind kind;
+    private ReviewMode direction;
 
+    /** A {@link ReviewKind#REVIEW} log whose question direction is unknown. */
     public ReviewLog(long id, long wordId, LocalDateTime reviewedAt, String userAnswer,
                      String correctAnswer, double similarity, ReviewRating rating, long elapsedMillis) {
+        this(id, wordId, reviewedAt, userAnswer, correctAnswer, similarity, rating, elapsedMillis,
+            ReviewKind.REVIEW, null);
+    }
+
+    /**
+     * @param kind      what the review was; null reads as {@link ReviewKind#REVIEW}
+     * @param direction {@link ReviewMode#EN_TO_ZH} or {@link ReviewMode#ZH_TO_EN}, the way the
+     *                  question was asked; null if unknown (logs of older versions)
+     */
+    public ReviewLog(long id, long wordId, LocalDateTime reviewedAt, String userAnswer,
+                     String correctAnswer, double similarity, ReviewRating rating, long elapsedMillis,
+                     ReviewKind kind, ReviewMode direction) {
+        if (direction != null && direction != ReviewMode.EN_TO_ZH && direction != ReviewMode.ZH_TO_EN) {
+            throw new IllegalArgumentException("A question direction is EN_TO_ZH or ZH_TO_EN, not " + direction);
+        }
         this.id = id;
         this.wordId = wordId;
         this.reviewedAt = reviewedAt;
@@ -22,6 +40,8 @@ public class ReviewLog {
         this.similarity = similarity;
         this.rating = rating;
         this.elapsedMillis = elapsedMillis;
+        this.kind = kind == null ? ReviewKind.REVIEW : kind;
+        this.direction = direction;
     }
 
     public long getId() {
@@ -58,5 +78,14 @@ public class ReviewLog {
 
     public long getElapsedMillis() {
         return elapsedMillis;
+    }
+
+    public ReviewKind getKind() {
+        return kind;
+    }
+
+    /** How the question was asked (English to Chinese or Chinese to English); null if unknown. */
+    public ReviewMode getDirection() {
+        return direction;
     }
 }

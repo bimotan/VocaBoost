@@ -9,31 +9,35 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The schemas earlier releases created, written out by hand, for upgrade tests. Only the last one,
- * from after schema versioning, sets {@code user_version}.
+ * The schemas earlier releases created, written out by hand, for upgrade tests. Only those from
+ * after schema versioning set {@code user_version}.
  */
 enum LegacySchemas {
     /** c49a7d7, the first SQLite release: decks, words, review logs, settings, AI cache. */
-    FIRST_RELEASE(false, false, false, false),
+    FIRST_RELEASE(false, false, false, false, false),
     /** c09856a: adds goals and achievements (one set for the whole app) and the dictionary cache. */
-    GOALS(true, false, false, false),
+    GOALS(true, false, false, false, false),
     /** 9c488f6: decks can be archived. */
-    ARCHIVED_DECKS(true, true, false, false),
+    ARCHIVED_DECKS(true, true, false, false, false),
     /** 0426f54 up to phase 1: goals and achievements are kept per deck. */
-    DECK_SCOPED_GOALS(true, true, true, false),
+    DECK_SCOPED_GOALS(true, true, true, false, false),
     /** 51bf259, schema version 4: the last schema before FSRS, words with only the SM-2 schedule. */
-    SM2_VERSION_4(true, true, true, true);
+    SM2_VERSION_4(true, true, true, true, false),
+    /** 8febeb5, schema version 5: FSRS card state; review logs without kind or direction. */
+    FSRS_VERSION_5(true, true, true, true, true);
 
     private final boolean goals;
     private final boolean archivedDecks;
     private final boolean deckScopedGoals;
     private final boolean versioned;
+    private final boolean fsrs;
 
-    LegacySchemas(boolean goals, boolean archivedDecks, boolean deckScopedGoals, boolean versioned) {
+    LegacySchemas(boolean goals, boolean archivedDecks, boolean deckScopedGoals, boolean versioned, boolean fsrs) {
         this.goals = goals;
         this.archivedDecks = archivedDecks;
         this.deckScopedGoals = deckScopedGoals;
         this.versioned = versioned;
+        this.fsrs = fsrs;
     }
 
     /** Creates this schema in a new database file. */
@@ -105,6 +109,14 @@ enum LegacySchemas {
             sql.add("CREATE UNIQUE INDEX idx_review_logs_word_time ON review_logs(word_id, reviewed_at, rating)");
             sql.add("CREATE INDEX idx_review_logs_time ON review_logs(reviewed_at)");
             sql.add("PRAGMA user_version = 4");
+        }
+        if (fsrs) {
+            sql.add("ALTER TABLE words ADD COLUMN card_state TEXT");
+            sql.add("ALTER TABLE words ADD COLUMN stability REAL NOT NULL DEFAULT 0");
+            sql.add("ALTER TABLE words ADD COLUMN difficulty REAL NOT NULL DEFAULT 0");
+            sql.add("ALTER TABLE words ADD COLUMN learning_step INTEGER NOT NULL DEFAULT 0");
+            sql.add("CREATE INDEX idx_words_without_card_state ON words(id) WHERE card_state IS NULL");
+            sql.add("PRAGMA user_version = 5");
         }
         return sql;
     }

@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.Achievement;
 import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.DailyGoalProgress;
 import com.vocabtrainer.domain.GoalUpdate;
+import com.vocabtrainer.domain.ReviewKind;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewOutcome;
@@ -21,27 +22,60 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Runs review sessions on the scheduler: which card comes next, checking a typed answer and saving
  * its rating.
  *
- * <p>A session shows the deck's due cards: learning and relearning cards whose step time has come
- * first, then the others weighted by {@link WordSelector}. When nothing is due, a learning card due
- * within the learn-ahead window (20 minutes) is shown early, so a failed or new card is tested again
- * in the same session. The session target counts different cards; once it is reached, only the
- * session's own cards that are still being learned come back, until none is due within the window.
+ * <p><b>Queues.</b> A session shows learning and relearning cards whose step time has come first.
+ * Then review cards due today, the ones most likely forgotten first (lowest retrievability), and new
+ * cards in the order they were added, up to the deck's new-cards-per-day limit (counted from the new
+ * cards introduced this study day, see {@link ReviewKind#LEARN}). The two are interleaved: one new
+ * card after every {@value #REVIEWS_PER_NEW_CARD} review cards, but new cards wait while the due
+ * reviews alone fill the rest of the session (in an All Due session: while more than
+ * {@value #LARGE_BACKLOG} are due). When nothing is due, a learning card due within the learn-ahead
+ * window (20 minutes) is shown early, so a failed or new card is tested again in the same session.
+ *
+ * <p><b>Session.</b> A card is shown once per session; only a learning or relearning step brings it
+ * back. The session target counts different cards; 0 means All Due: every due review and the new
+ * cards still allowed today. Once the target is reached, only the session's own cards that are still
+ * being learned come back, until none is due within the window. Changing the mode or the deck, or
+ * resetting, starts a new session with the same target; the target and mode are saved in the
+ * settings and the next start uses them.
+ *
+ * <p><b>Weak Words</b> shows the deck's weak words, due ones first. A weak word that is not due yet
+ * is <i>practiced</i> ({@link ReviewKind#PRACTICE}): the review is logged, but the card's memory and
+ * schedule stay as they are, because reviewing it early would tell FSRS little and inflate its
+ * interval. Only a failed practice changes something: the card becomes due at the start of the next
+ * study day if it was due later. Practice earns half the XP and does not count towards the review
+ * goal, the streak or review achievements. The session ends when every weak word was shown.
+ *
+ * <p><b>Mixed mode</b> asks each card English to Chinese (recognition) or Chinese to English
+ * (production) and logs the direction. Both directions share one schedule. Producing the word is the
+ * harder skill, so a failure counts fully in either direction; a recognition success counts at most
+ * as Good, so an easy recognition never grows the shared interval more than a normal Good review.
  */
 public class ReviewService {
-    /** How many due cards the next card is chosen from. */
+    /** How many weak words the next one is chosen from, besides those the session already showed. */
     private static final int CANDIDATES = 250;
+    /** One new card is introduced after this many review cards. */
+    static final int REVIEWS_PER_NEW_CARD = 4;
+    /** In an All Due session, new cards wait while more review cards than this are due. */
+    static final int LARGE_BACKLOG = 100;
+
+    private static final Logger LOGGER = Logger.getLogger(ReviewService.class.getName());
 
     private final WordRepository wordRepository;
     private final ReviewLogRepository reviewLogRepository;
@@ -51,18 +85,24 @@ public class ReviewService {
     private final AchievementService achievementService;
     private final TransactionRunner transactions;
     private final Clock clock;
-    private final Random random = new Random();
+    /** Null when the settings are not saved; then {@link #newCardLimits} holds the changed limits. */
+    private final ReviewSettings settings;
+    private final Map<Long, Integer> newCardLimits = new HashMap<>();
+    private final Random random;
     private final Map<Long, ReviewAnswer> pendingAnswers = new HashMap<>();
-    /** The different cards rated in this session; the session target counts them. */
+    /** The different cards rated in this session; the session target counts them and none is shown twice. */
     private final Set<Long> sessionWords = new HashSet<>();
     private final List<Achievement> sessionAchievements = new ArrayList<>();
+    private boolean sessionStarted;
     private long activeSessionDeckId;
-    private ReviewMode activeSessionMode = ReviewMode.EN_TO_ZH;
+    private ReviewMode activeSessionMode;
     private ReviewMode currentQuestionMode = ReviewMode.EN_TO_ZH;
-    private int sessionTarget = -1;
+    private int sessionTarget;
     private int sessionReviewed;
     private int sessionCorrect;
     private int sessionXp;
+    /** Review cards rated since the session last introduced a new card. */
+    private int reviewsSinceNewCard;
 
     public ReviewService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository,
                          SimilarityService similarityService, ReviewScheduler scheduler) {
@@ -84,6 +124,19 @@ public class ReviewService {
     public ReviewService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository,
                          SimilarityService similarityService, ReviewScheduler scheduler,
                          GoalService goalService, AchievementService achievementService, Clock clock) {
+        this(wordRepository, reviewLogRepository, similarityService, scheduler, goalService, achievementService,
+            clock, null, new Random());
+    }
+
+    /**
+     * @param settings the saved new-cards-per-day limits and the session size and mode to start with;
+     *                 null keeps them in memory, with the defaults
+     * @param random   picks the question direction in Mixed mode
+     */
+    public ReviewService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository,
+                         SimilarityService similarityService, ReviewScheduler scheduler,
+                         GoalService goalService, AchievementService achievementService, Clock clock,
+                         ReviewSettings settings, Random random) {
         this.wordRepository = wordRepository;
         this.reviewLogRepository = reviewLogRepository;
         this.similarityService = similarityService;
@@ -92,47 +145,104 @@ public class ReviewService {
         this.achievementService = achievementService;
         this.transactions = wordRepository.transactions();
         this.clock = clock;
+        this.settings = settings;
+        this.random = random;
+        this.sessionTarget = settings == null ? ReviewSettings.DEFAULT_SESSION_SIZE : settings.sessionSize();
+        this.activeSessionMode = settings == null ? ReviewMode.EN_TO_ZH : settings.mode();
     }
 
     public Optional<WordCard> nextDueWord(long deckId) {
         return nextWord(deckId, ReviewMode.EN_TO_ZH);
     }
 
-    /** The next card of the session, or empty when the session is complete; see the class comment. */
+    /**
+     * The next card of the session, or empty when the session is complete; see the class comment.
+     * A different deck or mode than the session's starts a new session with the same target.
+     */
     public Optional<WordCard> nextWord(long deckId, ReviewMode mode) {
         try {
             ensureSession(deckId, mode);
             LocalDateTime now = LocalDateTime.now(clock);
             Optional<WordCard> selected = isSessionTargetReached()
                 ? sessionCardStillLearning(deckId, now)
-                : nextCandidate(deckId, mode, now);
-            selected.ifPresent(word -> currentQuestionMode = questionModeFor(mode));
+                : nextCandidate(deckId, now);
+            selected.ifPresent(word -> currentQuestionMode = questionModeFor(activeSessionMode));
             return selected;
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read review words", e);
         }
     }
 
-    private Optional<WordCard> nextCandidate(long deckId, ReviewMode mode, LocalDateTime now) throws SQLException {
-        if (mode == ReviewMode.WEAK_WORDS) {
-            return scheduler.selectNext(wordRepository.findWeak(deckId, CANDIDATES), now);
+    private Optional<WordCard> nextCandidate(long deckId, LocalDateTime now) throws SQLException {
+        LocalDateTime dayEnd = scheduler.studyDay().end(now);
+        if (activeSessionMode == ReviewMode.WEAK_WORDS) {
+            Optional<WordCard> weak = nextWeakWord(deckId, now, dayEnd);
+            return weak.isPresent() ? weak : sessionCardStillLearning(deckId, now);
         }
-        List<WordCard> due = wordRepository.findDue(deckId, now, scheduler.studyDay().end(now), CANDIDATES);
         // Learning cards come first and soonest first, so their steps keep their length.
-        Optional<WordCard> learning = due.stream().filter(word -> word.getState().isLearning()).findFirst();
+        Optional<WordCard> learning = wordRepository.findLearningDueBy(deckId, now, 1).stream().findFirst();
         if (learning.isPresent()) {
             return learning;
         }
-        Optional<WordCard> selected = scheduler.selectNext(due, now);
-        if (selected.isPresent()) {
-            return selected;
+        Optional<WordCard> review =
+            notShownYet(wordRepository.findDueReviews(deckId, now, dayEnd, sessionWords.size() + 1));
+        Optional<WordCard> newCard = newCardsLeftToday(deckId, now) > 0
+            ? notShownYet(wordRepository.findNewCards(deckId, dayEnd, sessionWords.size() + 1))
+            : Optional.empty();
+        if (review.isPresent() && newCard.isPresent()) {
+            return introducesNewCard(deckId, now, dayEnd) ? newCard : review;
+        }
+        Optional<WordCard> either = review.or(() -> newCard);
+        if (either.isPresent()) {
+            return either;
         }
         return wordRepository.findLearningDueBy(deckId, learnAheadLimit(now), 1).stream().findFirst();
     }
 
-    /** After the target: a card this session rated that is still being learned and due within the learn-ahead window. */
+    /**
+     * Whether the next card is a new one rather than a review: after {@value #REVIEWS_PER_NEW_CARD}
+     * reviews, unless the due reviews fill the rest of the session (more than {@value #LARGE_BACKLOG}
+     * of them in an All Due session).
+     */
+    private boolean introducesNewCard(long deckId, LocalDateTime now, LocalDateTime dayEnd) throws SQLException {
+        if (reviewsSinceNewCard < REVIEWS_PER_NEW_CARD) {
+            return false;
+        }
+        int reviewsDue = wordRepository.countDueByState(deckId, now, dayEnd).review();
+        return sessionTarget > 0 ? reviewsDue < sessionTarget - sessionWords.size() : reviewsDue <= LARGE_BACKLOG;
+    }
+
+    /**
+     * Weak Words: a learning step whose time has come, then a due weak word, then a weak word to
+     * practice that is not due yet; each shown once. Learning cards that are not due wait for their
+     * step instead of being practiced.
+     */
+    private Optional<WordCard> nextWeakWord(long deckId, LocalDateTime now, LocalDateTime dayEnd) throws SQLException {
+        List<WordCard> weak = wordRepository.findWeak(deckId, CANDIDATES + sessionWords.size());
+        Optional<WordCard> step = weak.stream()
+            .filter(word -> word.getState().isLearning() && word.isDue(now, dayEnd))
+            .min(Comparator.comparing(WordCard::getNextReviewAt).thenComparingLong(WordCard::getId));
+        if (step.isPresent()) {
+            return step;
+        }
+        List<WordCard> fresh = weak.stream().filter(word -> !sessionWords.contains(word.getId())).toList();
+        List<WordCard> due = fresh.stream().filter(word -> word.isDue(now, dayEnd)).toList();
+        if (!due.isEmpty()) {
+            return scheduler.selectNext(due, now);
+        }
+        return scheduler.selectNext(fresh.stream().filter(word -> word.getState() == CardState.REVIEW).toList(), now);
+    }
+
+    private Optional<WordCard> notShownYet(List<WordCard> words) {
+        return words.stream().filter(word -> !sessionWords.contains(word.getId())).findFirst();
+    }
+
+    /**
+     * After the target, or when nothing else is left: a card this session rated that is still being
+     * learned and due within the learn-ahead window.
+     */
     private Optional<WordCard> sessionCardStillLearning(long deckId, LocalDateTime now) throws SQLException {
-        return wordRepository.findLearningDueBy(deckId, learnAheadLimit(now), CANDIDATES).stream()
+        return wordRepository.findLearningDueBy(deckId, learnAheadLimit(now), CANDIDATES + sessionWords.size()).stream()
             .filter(word -> sessionWords.contains(word.getId()))
             .findFirst();
     }
@@ -141,22 +251,54 @@ public class ReviewService {
         return now.plus(scheduler.options().learnAhead());
     }
 
+    /**
+     * Starts a new session and saves {@code mode} and {@code target} as the ones the next session
+     * starts with.
+     *
+     * @param target the number of different cards, from 1 to {@value ReviewSettings#MAX_SESSION_SIZE};
+     *               0 for All Due
+     */
     public void startSession(long deckId, ReviewMode mode, int target) {
+        sessionStarted = true;
         activeSessionDeckId = deckId;
         activeSessionMode = mode == null ? ReviewMode.EN_TO_ZH : mode;
-        sessionTarget = Math.max(0, target);
+        sessionTarget = boundedTarget(target);
         sessionReviewed = 0;
         sessionCorrect = 0;
         sessionXp = 0;
+        reviewsSinceNewCard = 0;
         sessionWords.clear();
         sessionAchievements.clear();
         pendingAnswers.clear();
         currentQuestionMode = questionModeFor(activeSessionMode);
+        remember(() -> {
+            settings.saveMode(activeSessionMode);
+            settings.saveSessionSize(sessionTarget);
+        });
     }
 
+    /** Starts a new session on {@code deckId} with the current mode and target. */
     public void resetSession(long deckId) {
-        ReviewMode mode = activeSessionMode == null ? ReviewMode.EN_TO_ZH : activeSessionMode;
-        startSession(deckId, mode, defaultSessionTarget(deckId));
+        startSession(deckId, activeSessionMode, sessionTarget);
+    }
+
+    /**
+     * Changes the target of the running session, keeping what it has done so far, and saves it for
+     * the next session; see {@link #startSession}.
+     */
+    public void setSessionTarget(int target) {
+        sessionTarget = boundedTarget(target);
+        remember(() -> settings.saveSessionSize(sessionTarget));
+    }
+
+    /** The session's target: a number of different cards, or 0 for All Due. */
+    public int sessionTarget() {
+        return sessionTarget;
+    }
+
+    /** The session's mode, or before the first session the mode it will start with. */
+    public ReviewMode sessionMode() {
+        return activeSessionMode;
     }
 
     public ReviewMode currentQuestionMode() {
@@ -166,6 +308,47 @@ public class ReviewService {
     /** Whether the session rated as many different cards as its target; never for All Due. */
     public boolean isSessionTargetReached() {
         return sessionTarget > 0 && sessionWords.size() >= sessionTarget;
+    }
+
+    /** The most new cards {@code deckId} introduces per study day. */
+    public int newCardsPerDay(long deckId) {
+        if (settings == null) {
+            return newCardLimits.getOrDefault(deckId, ReviewSettings.DEFAULT_NEW_CARDS_PER_DAY);
+        }
+        return settings.newCardsPerDay(deckId);
+    }
+
+    /**
+     * Sets and saves the deck's new-cards-per-day limit; the running session uses it for its next card.
+     *
+     * @throws IllegalArgumentException if {@code limit} is not from 0 to {@value ReviewSettings#MAX_NEW_CARDS_PER_DAY}
+     */
+    public void setNewCardsPerDay(long deckId, int limit) {
+        if (settings == null) {
+            if (limit < 0 || limit > ReviewSettings.MAX_NEW_CARDS_PER_DAY) {
+                throw new IllegalArgumentException("New cards per day must be between 0 and "
+                    + ReviewSettings.MAX_NEW_CARDS_PER_DAY + ".");
+            }
+            newCardLimits.put(deckId, limit);
+        } else {
+            settings.saveNewCardsPerDay(deckId, limit);
+        }
+    }
+
+    /** What the deck has to study today: due reviews and the new cards the daily limit still allows. */
+    public ReviewQueueCounts queueCounts(long deckId) {
+        try {
+            return ReviewQueueCounts.read(wordRepository, reviewLogRepository, scheduler.studyDay(), deckId,
+                LocalDateTime.now(clock), newCardsPerDay(deckId));
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot count the due words", e);
+        }
+    }
+
+    private int newCardsLeftToday(long deckId, LocalDateTime now) throws SQLException {
+        StudyDay studyDay = scheduler.studyDay();
+        int introduced = reviewLogRepository.countNewCardsIntroducedSince(deckId, studyDay.start(studyDay.of(now)));
+        return Math.max(0, newCardsPerDay(deckId) - introduced);
     }
 
     public ReviewAnswer submitAnswer(long wordId, String userAnswer) {
@@ -180,6 +363,8 @@ public class ReviewService {
     /**
      * Checks the typed answer and keeps it until it is rated.
      *
+     * @param mode    the mode the card was asked in; for Mixed mode, the direction of the current card
+     *                ({@link #currentQuestionMode()}) is used
      * @param shownAt when the card was shown; the time from then to now is logged as the response
      *                time. Null if unknown, which logs 0.
      */
@@ -187,8 +372,9 @@ public class ReviewService {
         try {
             WordCard word = wordRepository.findById(wordId)
                 .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
-            ReviewMode answerMode = mode == ReviewMode.MIXED ? currentQuestionMode : questionModeFor(mode);
-            String correctAnswer = answerMode == ReviewMode.ZH_TO_EN ? word.getEnglish() : word.getChinese();
+            ReviewMode askedIn = mode == null ? ReviewMode.EN_TO_ZH : mode;
+            ReviewMode direction = askedIn == ReviewMode.MIXED ? currentQuestionMode : questionModeFor(askedIn);
+            String correctAnswer = direction == ReviewMode.ZH_TO_EN ? word.getEnglish() : word.getChinese();
             double similarity = similarityService.calculate(userAnswer, correctAnswer);
             LocalDateTime submittedAt = LocalDateTime.now(clock);
             long responseMillis = shownAt == null ? 0L : Math.max(0L, Duration.between(shownAt, submittedAt).toMillis());
@@ -199,7 +385,9 @@ public class ReviewService {
                 correctAnswer,
                 similarity,
                 submittedAt,
-                responseMillis
+                responseMillis,
+                direction,
+                askedIn
             );
             pendingAnswers.put(wordId, answer);
             return answer;
@@ -223,7 +411,9 @@ public class ReviewService {
 
     /**
      * The interval each rating would give the word for the answer submitted with
-     * {@link #submitAnswer}, as the rating buttons show it; nothing is saved.
+     * {@link #submitAnswer}, as the rating buttons show it; nothing is saved. A practice keeps the
+     * due date: every rating shows it, except that a failed answer shows the next day when the card
+     * was due later.
      */
     public Map<ReviewRating, IntervalPreview> previewRatings(long wordId) {
         ReviewAnswer answer = pendingAnswers.get(wordId);
@@ -233,10 +423,27 @@ public class ReviewService {
         try {
             WordCard word = wordRepository.findById(wordId)
                 .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
-            return scheduler.preview(word, answer.similarity(), LocalDateTime.now(clock));
+            LocalDateTime now = LocalDateTime.now(clock);
+            if (kindOf(word, now) == ReviewKind.PRACTICE) {
+                return practicePreviews(word, answer, now);
+            }
+            Map<ReviewRating, IntervalPreview> previews = scheduler.preview(word, answer.similarity(), now);
+            if (answer.isRecognitionInMixedMode()) {
+                previews.put(ReviewRating.EASY, previews.get(ReviewRating.GOOD));
+            }
+            return previews;
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read word " + wordId, e);
         }
+    }
+
+    private Map<ReviewRating, IntervalPreview> practicePreviews(WordCard word, ReviewAnswer answer, LocalDateTime now) {
+        Map<ReviewRating, IntervalPreview> previews = new EnumMap<>(ReviewRating.class);
+        for (ReviewRating rating : ReviewRating.values()) {
+            LocalDateTime due = practiceDue(word, rating, answer, now);
+            previews.put(rating, IntervalPreview.days((int) Math.max(1L, scheduler.studyDay().daysBetween(now, due))));
+        }
+        return previews;
     }
 
     /** The study day rules the scheduler counts days and due words with. */
@@ -266,13 +473,18 @@ public class ReviewService {
         activeSessionDeckId = saved.word().getDeckId();
         sessionReviewed++;
         sessionWords.add(wordId);
+        if (saved.kind() == ReviewKind.LEARN) {
+            reviewsSinceNewCard = 0;
+        } else if (saved.reviewCard()) {
+            reviewsSinceNewCard++;
+        }
         if (rating != ReviewRating.AGAIN && answer.similarity() >= 0.5) {
             sessionCorrect++;
         }
         sessionXp += saved.earnedXp();
         sessionAchievements.addAll(saved.unlocked());
         return new ReviewOutcome(saved.word(), saved.progress(), saved.earnedXp(), saved.unlocked(),
-            sessionSummary(saved.sessionGoal()), saved.becameLeech());
+            sessionSummary(), saved.becameLeech(), saved.kind());
     }
 
     private SavedReview saveRating(long wordId, ReviewRating rating, ReviewAnswer answer) throws SQLException {
@@ -280,22 +492,18 @@ public class ReviewService {
         WordCard word = wordRepository.findById(wordId)
             .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
         LocalDateTime now = LocalDateTime.now(clock);
+        ReviewKind kind = kindOf(word, now);
+        if (kind == ReviewKind.PRACTICE) {
+            return savePractice(word, rating, answer, now);
+        }
         StudyDay studyDay = scheduler.studyDay();
+        boolean reviewCard = word.getState() == CardState.REVIEW;
         boolean overdueRescued = word.getState() != CardState.NEW && word.getNextReviewAt() != null
             && studyDay.of(word.getNextReviewAt()).isBefore(studyDay.of(now));
 
-        boolean becameLeech = scheduler.applyRating(word, rating, answer.similarity(), now);
+        boolean becameLeech = scheduler.applyRating(word, scheduledRating(rating, answer), answer.similarity(), now);
         WordCard updated = wordRepository.save(word);
-        reviewLogRepository.insert(new ReviewLog(
-            0,
-            wordId,
-            now,
-            answer.userAnswer(),
-            answer.correctAnswer(),
-            answer.similarity(),
-            rating,
-            answer.responseMillis()
-        ));
+        reviewLogRepository.insert(log(wordId, answer, rating, now, kind));
 
         long deckId = word.getDeckId();
         GoalUpdate goalUpdate = goalService == null
@@ -310,30 +518,89 @@ public class ReviewService {
         if (goalService != null) {
             progress = goalService.getTodayProgress(deckId);
         }
-        int sessionGoal = sessionTarget < 0 ? defaultSessionTarget(deckId) : sessionTarget;
-        return new SavedReview(updated, progress, earnedXp, unlocked, sessionGoal, becameLeech);
+        return new SavedReview(updated, progress, earnedXp, unlocked, becameLeech, kind, reviewCard);
     }
 
+    /** Logs the practice of a word that is not due; only a failed answer can bring its due date forward. */
+    private SavedReview savePractice(WordCard word, ReviewRating rating, ReviewAnswer answer, LocalDateTime now)
+        throws SQLException {
+        LocalDateTime due = practiceDue(word, rating, answer, now);
+        if (!Objects.equals(due, word.getNextReviewAt())) {
+            word.setNextReviewAt(due);
+            wordRepository.save(word);
+        }
+        reviewLogRepository.insert(log(word.getId(), answer, rating, now, ReviewKind.PRACTICE));
+        GoalUpdate goalUpdate = goalService == null
+            ? null
+            : goalService.recordPractice(word.getDeckId(), rating, answer.similarity());
+        return new SavedReview(word, goalUpdate == null ? null : goalUpdate.progress(),
+            goalUpdate == null ? 0 : goalUpdate.xpEarned(), List.of(), false, ReviewKind.PRACTICE, false);
+    }
+
+    /**
+     * When a practiced word is due afterwards: as before, or, after a failed answer, at the start of
+     * the next study day if it was due later.
+     */
+    private LocalDateTime practiceDue(WordCard word, ReviewRating rating, ReviewAnswer answer, LocalDateTime now) {
+        LocalDateTime due = word.getNextReviewAt();
+        if (ReviewScheduler.effectiveRating(rating, answer.similarity()) != ReviewRating.AGAIN) {
+            return due;
+        }
+        LocalDateTime tomorrow = scheduler.studyDay().end(now);
+        return due == null || due.isAfter(tomorrow) ? tomorrow : due;
+    }
+
+    /**
+     * What rating {@code word} at {@code now} is: the first review of a new card, a practice of a
+     * review card that is not due, or a review. Learning cards shown early (learn-ahead) are reviews.
+     */
+    private ReviewKind kindOf(WordCard word, LocalDateTime now) {
+        if (word.getState() == CardState.NEW) {
+            return ReviewKind.LEARN;
+        }
+        boolean notDue = word.getState() == CardState.REVIEW && !word.isDue(now, scheduler.studyDay().end(now));
+        return notDue ? ReviewKind.PRACTICE : ReviewKind.REVIEW;
+    }
+
+    /** The rating the schedule uses: an Easy recognition in Mixed mode counts as Good, see the class comment. */
+    private static ReviewRating scheduledRating(ReviewRating rating, ReviewAnswer answer) {
+        return answer.isRecognitionInMixedMode() && rating == ReviewRating.EASY ? ReviewRating.GOOD : rating;
+    }
+
+    private static ReviewLog log(long wordId, ReviewAnswer answer, ReviewRating rating, LocalDateTime now,
+                                 ReviewKind kind) {
+        return new ReviewLog(
+            0,
+            wordId,
+            now,
+            answer.userAnswer(),
+            answer.correctAnswer(),
+            answer.similarity(),
+            rating,
+            answer.responseMillis(),
+            kind,
+            answer.direction()
+        );
+    }
+
+    /** @param reviewCard whether the card was in review before; the interleaving of new cards counts these */
     private record SavedReview(
         WordCard word,
         DailyGoalProgress progress,
         int earnedXp,
         List<Achievement> unlocked,
-        int sessionGoal,
-        boolean becameLeech
+        boolean becameLeech,
+        ReviewKind kind,
+        boolean reviewCard
     ) {
     }
 
     public ReviewSessionSummary sessionSummary() {
-        return sessionSummary(sessionTarget < 0 ? defaultSessionTarget(activeSessionDeckId) : sessionTarget);
-    }
-
-    private ReviewSessionSummary sessionSummary(int sessionGoal) {
         return new ReviewSessionSummary(
             sessionReviewed,
             sessionCorrect,
             sessionXp,
-            sessionGoal,
+            sessionTarget,
             List.copyOf(sessionAchievements),
             sessionWords.size()
         );
@@ -341,18 +608,25 @@ public class ReviewService {
 
     private void ensureSession(long deckId, ReviewMode mode) {
         ReviewMode requested = mode == null ? ReviewMode.EN_TO_ZH : mode;
-        if (activeSessionDeckId != deckId || activeSessionMode != requested || sessionTarget < 0) {
-            startSession(deckId, requested, defaultSessionTarget(deckId));
+        if (!sessionStarted || activeSessionDeckId != deckId || activeSessionMode != requested) {
+            startSession(deckId, requested, sessionTarget);
         }
-        activeSessionDeckId = deckId;
-        activeSessionMode = requested;
     }
 
-    private int defaultSessionTarget(long deckId) {
-        if (goalService == null || deckId <= 0) {
-            return GoalService.DEFAULT_SESSION_GOAL;
+    private static int boundedTarget(int target) {
+        return Math.min(ReviewSettings.MAX_SESSION_SIZE, Math.max(0, target));
+    }
+
+    /** Saves a session choice; failing to save it must not stop the review. */
+    private void remember(Runnable save) {
+        if (settings == null) {
+            return;
         }
-        return goalService.getTodayProgress(deckId).sessionGoal();
+        try {
+            save.run();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Cannot save the review session settings", e);
+        }
     }
 
     private ReviewMode questionModeFor(ReviewMode mode) {

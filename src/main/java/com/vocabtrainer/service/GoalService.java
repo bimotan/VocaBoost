@@ -80,6 +80,22 @@ public class GoalService {
         }
     }
 
+    /**
+     * Records the practice of a word that was not due (see {@code ReviewKind.PRACTICE}): it earns half
+     * the XP of a review and does not count towards the review goal, the accuracy or the streak.
+     */
+    public GoalUpdate recordPractice(long deckId, ReviewRating rating, double similarity) {
+        LocalDate today = LocalDate.now(clock);
+        try {
+            goalRepository.ensure(deckId, today, DEFAULT_REVIEW_GOAL, DEFAULT_NEW_WORD_GOAL, DEFAULT_SESSION_GOAL);
+            int xp = practiceXp(rating, similarity);
+            GoalRepository.GoalRow after = goalRepository.addProgress(deckId, today, 0, 0, 0, xp);
+            return new GoalUpdate(toProgress(after), xp, false);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot record practice XP", e);
+        }
+    }
+
     public GoalUpdate recordNewWords(int count) {
         return recordNewWords(0L, count);
     }
@@ -151,9 +167,14 @@ public class GoalService {
         }
     }
 
-    private int reviewXp(ReviewRating rating, double similarity) {
+    private static int reviewXp(ReviewRating rating, double similarity) {
         int base = rating == ReviewRating.AGAIN ? 2 : 5;
         return base + rating.getQuality() + (int) Math.round(Math.max(0.0, Math.min(1.0, similarity)) * 8.0);
+    }
+
+    /** Half the XP the same answer earns in a review. */
+    static int practiceXp(ReviewRating rating, double similarity) {
+        return reviewXp(rating, similarity) / 2;
     }
 
     private static GoalRepository.GoalRow emptyDay(long deckId, LocalDate date) {

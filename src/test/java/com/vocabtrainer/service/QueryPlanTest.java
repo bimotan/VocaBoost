@@ -103,6 +103,12 @@ class QueryPlanTest {
         review.previewRatings(next.getId());
         review.rateCurrent(next.getId(), ReviewRating.GOOD);
         wordRepository.findLearningDueBy(deck.getId(), NOW.plusMinutes(20), 1);
+        // The review session's queues: due reviews, new cards and the new cards introduced today.
+        wordRepository.findDueReviews(deck.getId(), NOW, NOW.plusDays(1), 10);
+        wordRepository.findNewCards(deck.getId(), NOW.plusDays(1), 10);
+        wordRepository.countDueByState(deck.getId(), NOW, NOW.plusDays(1));
+        logRepository.countNewCardsIntroducedSince(deck.getId(), NOW.minusHours(5));
+        logRepository.newCardsIntroducedByDeckSince(NOW.minusHours(5));
         review.nextWord(deck.getId(), ReviewMode.WEAK_WORDS);
         wordRepository.countMastered(deck.getId());
         // Startup: deriving the card state of words stored without one, as an older version leaves them.

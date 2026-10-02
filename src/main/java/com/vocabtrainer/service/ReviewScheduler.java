@@ -1,6 +1,7 @@
 package com.vocabtrainer.service;
 
 import com.vocabtrainer.domain.CardState;
+import com.vocabtrainer.domain.ReviewKind;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
@@ -127,7 +128,8 @@ public class ReviewScheduler {
      * it recorded. Those versions had no learning steps, so neither does the replay: every review
      * moves the card into review, as it did then, and a failed review is a lapse. FSRS stability and
      * difficulty do not depend on the steps. Counters (reviews, lapses, current run of correct
-     * answers) are recounted; the text fields stay as they are.
+     * answers) are recounted; the text fields stay as they are. Practice logs are skipped: practicing
+     * a card that was not due did not change its schedule.
      */
     public void replay(WordCard word, List<ReviewLog> history) {
         word.setState(CardState.NEW);
@@ -141,6 +143,7 @@ public class ReviewScheduler {
         word.setLastReviewedAt(null);
         word.setEasinessFactor(WordCard.DEFAULT_EASINESS);
         history.stream()
+            .filter(log -> log.getKind() != ReviewKind.PRACTICE)
             .sorted(Comparator.comparing(ReviewLog::getReviewedAt).thenComparingLong(ReviewLog::getId))
             .forEach(log -> applyRating(withoutSteps, word, log.getRating(), log.getSimilarity(), log.getReviewedAt()));
     }

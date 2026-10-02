@@ -67,7 +67,7 @@ class ReviewUiTest extends MainWindowUiTest {
         assertEquals(String.valueOf(services.goalService().totalXp(deckId())), text("xpLabel"));
         assertNotEquals("0", text("xpLabel"));
         assertEquals(0.05, Fx.call(() -> find("reviewGoalProgress", ProgressBar.class).getProgress()), 1e-9);
-        assertEquals(String.valueOf(STARTER_WORDS - 1), text("dueTodayLabel"));
+        assertEquals(String.valueOf(NEW_WORDS_PER_DAY - 1), text("dueTodayLabel"));
 
         // The next card is ready for a new answer.
         selectTab("reviewTab");

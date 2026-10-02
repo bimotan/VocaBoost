@@ -10,6 +10,7 @@ import com.vocabtrainer.service.CompositeDictionaryService;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.MockAiService;
+import com.vocabtrainer.service.ReviewSettings;
 import com.vocabtrainer.service.SettingsService;
 import javafx.event.ActionEvent;
 import javafx.scene.Node;
@@ -70,6 +71,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 abstract class MainWindowUiTest {
     static final String STARTER_DECK = "默认词库";
     static final int STARTER_WORDS = 215;
+    /** The default new-words-per-day limit: how many of the new starter words are due on a day. */
+    static final int NEW_WORDS_PER_DAY = ReviewSettings.DEFAULT_NEW_CARDS_PER_DAY;
     static final Path SNAPSHOT_DIR = Path.of("target", "ui-snapshots");
 
     private static final String BACKGROUND_THREAD_NAME = "vocaboost-background-task";

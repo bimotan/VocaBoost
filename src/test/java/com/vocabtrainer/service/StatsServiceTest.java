@@ -96,7 +96,7 @@ class StatsServiceTest {
         for (DeckOverview overview : overviews) {
             long deckId = overview.deck().getId();
             assertEquals(wordRepository.countAll(deckId), overview.words(), overview.deck().getName());
-            assertEquals(statsService.overdueCount(deckId), overview.due(), overview.deck().getName());
+            assertEquals(statsService.dashboardStats(deckId).dueToday(), overview.due(), overview.deck().getName());
             assertEquals(statsService.latestReviewAt(deckId), overview.latestReviewAt(), overview.deck().getName());
         }
         assertEquals(new DeckOverview(gre, 2, 1, reviewed), overviews.get(0));

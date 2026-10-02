@@ -22,6 +22,7 @@ import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ImportExportService;
 import com.vocabtrainer.service.ReviewScheduler;
 import com.vocabtrainer.service.ReviewService;
+import com.vocabtrainer.service.ReviewSettings;
 import com.vocabtrainer.service.SettingsService;
 import com.vocabtrainer.service.SimilarityService;
 import com.vocabtrainer.service.StarterImportService;
@@ -34,6 +35,7 @@ import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.util.Objects;
+import java.util.Random;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -166,6 +168,7 @@ public record AppServices(
             StarterImportService starterImportService = new StarterImportService(
                 importExportService, wordRepository, reviewLogRepository, goalRepository, settingsService);
             starterImportService.importOnce(startupDeck.getId());
+            ReviewSettings reviewSettings = new ReviewSettings(settingsService);
             ReviewService reviewService = new ReviewService(
                 wordRepository,
                 reviewLogRepository,
@@ -173,10 +176,12 @@ public record AppServices(
                 reviewScheduler,
                 goalService,
                 achievementService,
-                clock
+                clock,
+                reviewSettings,
+                new Random()
             );
             StatsService statsService = new StatsService(wordRepository, reviewLogRepository, clock,
-                reviewScheduler.studyDay());
+                reviewScheduler.studyDay(), reviewSettings);
             BackupService backupService = new BackupService(deckRepository, wordRepository, reviewLogRepository,
                 goalRepository, achievementRepository, databaseManager, validationService, clock, cardStates);
             BiFunction<DictionaryCacheRepository, SettingsService, DictionaryService> dictionaryFactory =

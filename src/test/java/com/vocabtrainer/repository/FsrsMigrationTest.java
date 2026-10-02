@@ -51,7 +51,7 @@ class FsrsMigrationTest {
 
         DatabaseManager databaseManager = databases.open(file);
 
-        assertEquals(5, SchemaMigrationTest.intQuery(file, "PRAGMA user_version"));
+        assertEquals(SchemaMigrations.CURRENT_VERSION, SchemaMigrationTest.intQuery(file, "PRAGMA user_version"));
         assertEquals(3, SchemaMigrationTest.intQuery(file, "SELECT COUNT(*) FROM words WHERE card_state IS NULL"));
         WordRepository words = new WordRepository(databaseManager);
         ReviewLogRepository logs = new ReviewLogRepository(databaseManager);

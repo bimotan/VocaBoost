@@ -27,7 +27,8 @@ class MainWindowSmokeTest extends MainWindowUiTest {
         assertEquals("Deck: " + STARTER_DECK + " | Dictionary: starter/online fallback | AI: mock", headerSubtitle());
 
         assertEquals(String.valueOf(STARTER_WORDS), text("totalWordsLabel"));
-        assertEquals(String.valueOf(STARTER_WORDS), text("dueTodayLabel"));
+        // Only the first 20 new words are due today (the default new-words-per-day limit).
+        assertEquals(String.valueOf(NEW_WORDS_PER_DAY), text("dueTodayLabel"));
         assertEquals("0 / 20", text("reviewedTodayLabel"));
         assertEquals("0 / 5", text("newWordsTodayLabel"));
         assertEquals("0%", text("accuracyTodayLabel"));

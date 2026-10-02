@@ -10,7 +10,9 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.vocabtrainer.domain.Achievement;
 import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.Deck;
+import com.vocabtrainer.domain.ReviewKind;
 import com.vocabtrainer.domain.ReviewLog;
+import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.ValidatedWord;
 import com.vocabtrainer.domain.WordCard;
@@ -236,7 +238,9 @@ public class BackupService {
                 log.getCorrectAnswer(),
                 log.getSimilarity(),
                 log.getRating().name(),
-                log.getElapsedMillis()
+                log.getElapsedMillis(),
+                log.getKind().name(),
+                log.getDirection() == null ? null : log.getDirection().name()
             ));
         }
         List<BackupFile.DailyGoalEntry> goals = new ArrayList<>();
@@ -468,8 +472,34 @@ public class BackupService {
             entry.correctAnswer() == null ? "" : entry.correctAnswer(),
             entry.similarity(),
             rating,
-            entry.elapsedMillis() == null ? 0L : entry.elapsedMillis()
+            entry.elapsedMillis() == null ? 0L : entry.elapsedMillis(),
+            reviewKind(entry.kind()),
+            direction(entry.direction())
         );
+    }
+
+    /** The logged kind; a backup written before kinds were logged has none, which is a review. */
+    private static ReviewKind reviewKind(String value) {
+        if (value == null || value.isBlank()) {
+            return ReviewKind.REVIEW;
+        }
+        try {
+            return ReviewKind.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("unknown kind \"" + value + "\"", e);
+        }
+    }
+
+    /** The logged question direction, or null when the backup does not say. */
+    private static ReviewMode direction(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String name = value.trim().toUpperCase(Locale.ROOT);
+        if (name.equals(ReviewMode.EN_TO_ZH.name()) || name.equals(ReviewMode.ZH_TO_EN.name())) {
+            return ReviewMode.valueOf(name);
+        }
+        throw new IllegalArgumentException("unknown direction \"" + value + "\"");
     }
 
     private void restoreDailyGoal(JsonNode row, long deckId, RestoreTally tally)

@@ -32,6 +32,8 @@ public class StatsService {
     private final ReviewLogRepository reviewLogRepository;
     private final Clock clock;
     private final StudyDay studyDay;
+    /** The new-cards-per-day limits; null for the default limit in every deck. */
+    private final ReviewSettings reviewSettings;
 
     public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository) {
         this(wordRepository, reviewLogRepository, Clock.systemDefaultZone());
@@ -44,10 +46,17 @@ public class StatsService {
     /** {@code studyDay} decides which words are due today. */
     public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository, Clock clock,
                         StudyDay studyDay) {
+        this(wordRepository, reviewLogRepository, clock, studyDay, null);
+    }
+
+    /** @param reviewSettings each deck's new-cards-per-day limit, which caps the new words counted as due today */
+    public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository, Clock clock,
+                        StudyDay studyDay, ReviewSettings reviewSettings) {
         this.wordRepository = wordRepository;
         this.reviewLogRepository = reviewLogRepository;
         this.clock = clock;
         this.studyDay = studyDay;
+        this.reviewSettings = reviewSettings;
     }
 
     /** @deprecated the queries moved into the repositories; use {@link #StatsService(WordRepository, ReviewLogRepository)}. */
@@ -71,12 +80,15 @@ public class StatsService {
             int reviewedToday = reviewLogRepository.countSince(deckId, startOfDay);
             int correctToday = reviewLogRepository.countCorrectSince(deckId, startOfDay);
             double accuracy = reviewedToday == 0 ? 0.0 : (double) correctToday / reviewedToday;
+            ReviewQueueCounts queue = queueCounts(deckId, now);
             return new DashboardStats(
                 wordRepository.countAll(deckId),
-                wordRepository.countDue(deckId, now, studyDay.end(now)),
+                queue.dueToday(),
                 wordRepository.countMastered(deckId),
                 reviewedToday,
-                accuracy
+                accuracy,
+                queue.dueReviews(),
+                queue.newAvailableToday()
             );
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read dashboard stats", e);
@@ -154,14 +166,24 @@ public class StatsService {
         }
     }
 
-    /** The deck's words due today, see {@link WordCard#isDue}. */
+    /**
+     * The deck's due reviews: learning and relearning cards whose step time has come and review cards
+     * due today (see {@link WordCard#isDue}); new words are not counted.
+     */
     public int overdueCount(long deckId) {
         try {
-            LocalDateTime now = LocalDateTime.now(clock);
-            return wordRepository.countDue(deckId, now, studyDay.end(now));
+            return queueCounts(deckId, LocalDateTime.now(clock)).dueReviews();
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read overdue count", e);
         }
+    }
+
+    private ReviewQueueCounts queueCounts(long deckId, LocalDateTime now) throws SQLException {
+        return ReviewQueueCounts.read(wordRepository, reviewLogRepository, studyDay, deckId, now, newCardsPerDay(deckId));
+    }
+
+    private int newCardsPerDay(long deckId) {
+        return reviewSettings == null ? ReviewSettings.DEFAULT_NEW_CARDS_PER_DAY : reviewSettings.newCardsPerDay(deckId);
     }
 
     /** When the deck was last reviewed, or null if never. */
@@ -175,18 +197,23 @@ public class StatsService {
 
     /**
      * Word count, due count and latest review of each deck, read with one query per kind instead
-     * of three queries per deck.
+     * of three queries per deck. The due count is the dashboard's "Due today": due reviews and the
+     * new words the deck's new-cards-per-day limit still allows today.
      */
     public List<DeckOverview> deckOverviews(List<Deck> decks) {
         try {
             LocalDateTime now = LocalDateTime.now(clock);
             Map<Long, WordRepository.DeckWordCounts> counts = wordRepository.countByDeck(now, studyDay.end(now));
+            Map<Long, Integer> introducedToday =
+                reviewLogRepository.newCardsIntroducedByDeckSince(studyDay.start(studyDay.of(now)));
             Map<Long, LocalDateTime> latestReviews = reviewLogRepository.latestReviewByDeck();
-            WordRepository.DeckWordCounts none = new WordRepository.DeckWordCounts(0, 0);
+            WordRepository.DeckWordCounts none = new WordRepository.DeckWordCounts(0, 0, 0);
             return decks.stream()
                 .map(deck -> {
                     WordRepository.DeckWordCounts deckCounts = counts.getOrDefault(deck.getId(), none);
-                    return new DeckOverview(deck, deckCounts.total(), deckCounts.due(), latestReviews.get(deck.getId()));
+                    ReviewQueueCounts queue = new ReviewQueueCounts(0, deckCounts.due() - deckCounts.dueNew(),
+                        deckCounts.dueNew(), newCardsPerDay(deck.getId()), introducedToday.getOrDefault(deck.getId(), 0));
+                    return new DeckOverview(deck, deckCounts.total(), queue.dueToday(), latestReviews.get(deck.getId()));
                 })
                 .toList();
         } catch (SQLException e) {

@@ -38,15 +38,15 @@ class LazyRefreshUiTest extends MainWindowUiTest {
 
         assertEquals("0 / 20", text("reviewedTodayLabel"));
         assertEquals("Due", cell("wordTable", reviewed.getEnglish(), 5));
-        assertEquals(String.valueOf(STARTER_WORDS), cell("deckTable", STARTER_DECK, 2));
+        assertEquals(String.valueOf(NEW_WORDS_PER_DAY), cell("deckTable", STARTER_DECK, 2));
 
         selectTab("dashboardTab");
         assertEquals("1 / 20", text("reviewedTodayLabel"));
-        assertEquals(String.valueOf(STARTER_WORDS - 1), text("dueTodayLabel"));
+        assertEquals(String.valueOf(NEW_WORDS_PER_DAY - 1), text("dueTodayLabel"));
         selectTab("wordListTab");
         assertEquals("Learning", cell("wordTable", reviewed.getEnglish(), 5));
         selectTab("decksTab");
-        assertEquals(String.valueOf(STARTER_WORDS - 1), cell("deckTable", STARTER_DECK, 2));
+        assertEquals(String.valueOf(NEW_WORDS_PER_DAY - 1), cell("deckTable", STARTER_DECK, 2));
     }
 
     @Test

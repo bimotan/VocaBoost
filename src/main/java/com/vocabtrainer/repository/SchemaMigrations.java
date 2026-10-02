@@ -23,7 +23,7 @@ import java.util.logging.Logger;
  */
 final class SchemaMigrations {
     /** The version a fully migrated database has: the last step's. */
-    static final int CURRENT_VERSION = 5;
+    static final int CURRENT_VERSION = 6;
 
     private static final Logger LOGGER = Logger.getLogger(SchemaMigrations.class.getName());
 
@@ -68,7 +68,8 @@ final class SchemaMigrations {
         new Step(2, "deck names unique among active decks only", true, this::uniqueActiveDeckNames),
         new Step(3, "review logs unique per word, time and rating", false, this::uniqueReviewLogs),
         new Step(4, "indexes for statistics", false, this::statisticsIndexes),
-        new Step(5, "FSRS card state on words", false, this::fsrsCardState)
+        new Step(5, "FSRS card state on words", false, this::fsrsCardState),
+        new Step(6, "review log kind and question direction, review queue index", false, this::reviewQueue)
     );
 
     SchemaMigrations(Connection connection) {
@@ -346,6 +347,21 @@ final class SchemaMigrations {
         addColumnIfMissing("words", "difficulty", "REAL NOT NULL DEFAULT 0");
         addColumnIfMissing("words", "learning_step", "INTEGER NOT NULL DEFAULT 0");
         execute("CREATE INDEX IF NOT EXISTS idx_words_without_card_state ON words(id) WHERE card_state IS NULL");
+    }
+
+    /**
+     * Version 6: review logs record what the review was ({@code kind}: {@code LEARN} for the first
+     * review of a new card, {@code REVIEW}, or {@code PRACTICE} for a card practiced before it was
+     * due) and how the question was asked ({@code direction}: {@code EN_TO_ZH} or {@code ZH_TO_EN}).
+     * Existing logs read as reviews of an unknown direction; older versions insert logs the same way.
+     * The index serves the review session's separate queries for review and new cards, which only
+     * read active words; being partial, it is not mistaken for a way to find words by state alone.
+     */
+    private void reviewQueue() throws SQLException {
+        addColumnIfMissing("review_logs", "kind", "TEXT NOT NULL DEFAULT 'REVIEW'");
+        addColumnIfMissing("review_logs", "direction", "TEXT");
+        execute("CREATE INDEX IF NOT EXISTS idx_words_queue ON words(deck_id, card_state, next_review_at)"
+            + " WHERE archived = 0");
     }
 
     /**

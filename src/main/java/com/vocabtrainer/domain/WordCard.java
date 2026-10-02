@@ -65,8 +65,8 @@ public class WordCard {
     /**
      * Whether the card is due. A learning or relearning card is due once its step time has come; any
      * other card from the start of the study day it is due on, that is when it is due before
-     * {@code dayEnd}, the next day rollover after {@code now}. {@code WordRepository.findDue} and
-     * {@code countDue} select the same cards in SQL.
+     * {@code dayEnd}, the next day rollover after {@code now}. {@code WordRepository.countDue},
+     * {@code countDueByState} and the review queue queries select the same cards in SQL.
      */
     public boolean isDue(LocalDateTime now, LocalDateTime dayEnd) {
         if (archived) {

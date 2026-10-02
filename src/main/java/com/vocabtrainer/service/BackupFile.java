@@ -56,6 +56,11 @@ record BackupFile(
     ) {
     }
 
+    /**
+     * @param kind      {@code LEARN}, {@code REVIEW} or {@code PRACTICE}; absent in backups written before
+     *                  it was logged, which restore as {@code REVIEW}
+     * @param direction {@code EN_TO_ZH} or {@code ZH_TO_EN}; absent when unknown
+     */
     record ReviewLogEntry(
         @JsonAlias("wordEnglish") String english,
         String reviewedAt,
@@ -63,7 +68,9 @@ record BackupFile(
         String correctAnswer,
         Double similarity,
         String rating,
-        Long elapsedMillis
+        Long elapsedMillis,
+        String kind,
+        String direction
     ) {
     }
 

@@ -1,7 +1,9 @@
 package com.vocabtrainer.repository;
 
 import com.vocabtrainer.domain.HardWordStat;
+import com.vocabtrainer.domain.ReviewKind;
 import com.vocabtrainer.domain.ReviewLog;
+import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.util.DateTimeUtil;
 
@@ -31,18 +33,13 @@ public class ReviewLogRepository {
 
     public ReviewLog insert(ReviewLog log) throws SQLException {
         String sql = """
-            INSERT INTO review_logs(word_id, reviewed_at, user_answer, correct_answer, similarity, rating, elapsed_millis)
-            VALUES(?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO review_logs(word_id, reviewed_at, user_answer, correct_answer, similarity, rating, elapsed_millis,
+                                    kind, direction)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            statement.setLong(1, log.getWordId());
-            statement.setString(2, DateTimeUtil.toDatabase(log.getReviewedAt()));
-            statement.setString(3, log.getUserAnswer());
-            statement.setString(4, log.getCorrectAnswer());
-            statement.setDouble(5, log.getSimilarity());
-            statement.setString(6, log.getRating().name());
-            statement.setLong(7, log.getElapsedMillis());
+            bindLog(statement, log);
             statement.executeUpdate();
             try (ResultSet keys = statement.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -64,8 +61,9 @@ public class ReviewLogRepository {
             return 0;
         }
         String sql = """
-            INSERT INTO review_logs(word_id, reviewed_at, user_answer, correct_answer, similarity, rating, elapsed_millis)
-            SELECT ?, ?, ?, ?, ?, ?, ?
+            INSERT INTO review_logs(word_id, reviewed_at, user_answer, correct_answer, similarity, rating, elapsed_millis,
+                                    kind, direction)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM review_logs WHERE word_id = ? AND reviewed_at = ? AND rating = ?)
             """;
         return databaseManager.inTransaction(() -> {
@@ -73,17 +71,10 @@ public class ReviewLogRepository {
                  PreparedStatement statement = connection.prepareStatement(sql)) {
                 int inserted = 0;
                 for (ReviewLog log : logs) {
-                    String reviewedAt = DateTimeUtil.toDatabase(log.getReviewedAt());
-                    statement.setLong(1, log.getWordId());
-                    statement.setString(2, reviewedAt);
-                    statement.setString(3, log.getUserAnswer());
-                    statement.setString(4, log.getCorrectAnswer());
-                    statement.setDouble(5, log.getSimilarity());
-                    statement.setString(6, log.getRating().name());
-                    statement.setLong(7, log.getElapsedMillis());
-                    statement.setLong(8, log.getWordId());
-                    statement.setString(9, reviewedAt);
-                    statement.setString(10, log.getRating().name());
+                    bindLog(statement, log);
+                    statement.setLong(10, log.getWordId());
+                    statement.setString(11, DateTimeUtil.toDatabase(log.getReviewedAt()));
+                    statement.setString(12, log.getRating().name());
                     inserted += statement.executeUpdate();
                 }
                 return inserted;
@@ -138,6 +129,19 @@ public class ReviewLogRepository {
         }
     }
 
+    /** Binds the nine inserted columns, word id to direction. */
+    private static void bindLog(PreparedStatement statement, ReviewLog log) throws SQLException {
+        statement.setLong(1, log.getWordId());
+        statement.setString(2, DateTimeUtil.toDatabase(log.getReviewedAt()));
+        statement.setString(3, log.getUserAnswer());
+        statement.setString(4, log.getCorrectAnswer());
+        statement.setDouble(5, log.getSimilarity());
+        statement.setString(6, log.getRating().name());
+        statement.setLong(7, log.getElapsedMillis());
+        statement.setString(8, log.getKind().name());
+        statement.setString(9, log.getDirection() == null ? null : log.getDirection().name());
+    }
+
     private static List<ReviewLog> mapLogs(ResultSet rs) throws SQLException {
         List<ReviewLog> logs = new ArrayList<>();
         while (rs.next()) {
@@ -149,10 +153,64 @@ public class ReviewLogRepository {
                 rs.getString("correct_answer"),
                 rs.getDouble("similarity"),
                 ReviewRating.valueOf(rs.getString("rating")),
-                rs.getLong("elapsed_millis")
+                rs.getLong("elapsed_millis"),
+                kind(rs.getString("kind")),
+                direction(rs.getString("direction"))
             ));
         }
         return logs;
+    }
+
+    /** The stored kind; one this version does not know reads as a review. */
+    private static ReviewKind kind(String value) {
+        try {
+            return value == null ? ReviewKind.REVIEW : ReviewKind.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            return ReviewKind.REVIEW;
+        }
+    }
+
+    /** The stored direction, or null when unknown. */
+    private static ReviewMode direction(String value) {
+        if (ReviewMode.EN_TO_ZH.name().equals(value)) {
+            return ReviewMode.EN_TO_ZH;
+        }
+        return ReviewMode.ZH_TO_EN.name().equals(value) ? ReviewMode.ZH_TO_EN : null;
+    }
+
+    /**
+     * How many new cards of the deck were introduced (had their first review, {@link ReviewKind#LEARN})
+     * since {@code since}, the start of the study day; the new-cards-per-day limit counts them.
+     */
+    public int countNewCardsIntroducedSince(long deckId, LocalDateTime since) throws SQLException {
+        return scalarInt("""
+            SELECT COUNT(*)
+            FROM review_logs l
+            JOIN words w ON w.id = l.word_id
+            WHERE w.deck_id = ? AND l.reviewed_at >= ? AND l.kind = 'LEARN'
+            """, deckId, since);
+    }
+
+    /** {@link #countNewCardsIntroducedSince} of every deck that introduced new cards, by deck id, in one query. */
+    public Map<Long, Integer> newCardsIntroducedByDeckSince(LocalDateTime since) throws SQLException {
+        String sql = """
+            SELECT w.deck_id, COUNT(*) AS introduced
+            FROM review_logs l
+            JOIN words w ON w.id = l.word_id
+            WHERE l.reviewed_at >= ? AND l.kind = 'LEARN'
+            GROUP BY w.deck_id
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, DateTimeUtil.toDatabase(since));
+            try (ResultSet rs = statement.executeQuery()) {
+                Map<Long, Integer> introduced = new HashMap<>();
+                while (rs.next()) {
+                    introduced.put(rs.getLong("deck_id"), rs.getInt("introduced"));
+                }
+                return introduced;
+            }
+        }
     }
 
     /**

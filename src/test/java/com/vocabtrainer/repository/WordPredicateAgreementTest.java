@@ -108,14 +108,74 @@ class WordPredicateAgreementTest {
             .collect(Collectors.toSet());
 
         assertEquals(java.size(), words.countDue(deck.getId(), NOW, DAY_END));
-        assertEquals(java, words.findDue(deck.getId(), NOW, DAY_END, 10_000).stream().map(WordCard::getId)
-            .collect(Collectors.toSet()));
         assertTrue(java.size() < active.size(), "the cases must include words that are not due");
         // Later today: due for a review card, not yet for a learning card.
         assertTrue(active.stream().anyMatch(card -> card.getState() == CardState.REVIEW
             && card.getNextReviewAt().equals(DAY_END.minusSeconds(1)) && java.contains(card.getId())));
         assertTrue(active.stream().noneMatch(card -> card.getState().isLearning()
             && card.getNextReviewAt().isAfter(NOW) && java.contains(card.getId())));
+    }
+
+    @Test
+    void theReviewQueuesSplitTheDueWordsByState() throws SQLException {
+        List<WordCard> due = active.stream().filter(card -> card.isDue(NOW, DAY_END)).toList();
+        Set<Long> reviews = ids(due.stream().filter(card -> card.getState() == CardState.REVIEW));
+        Set<Long> newCards = ids(due.stream().filter(card -> card.getState() == CardState.NEW));
+        Set<Long> learning = ids(due.stream().filter(card -> card.getState().isLearning()));
+
+        assertEquals(new WordRepository.DueCounts(learning.size(), reviews.size(), newCards.size()),
+            words.countDueByState(deck.getId(), NOW, DAY_END));
+        assertEquals(due.size(), learning.size() + reviews.size() + newCards.size());
+        assertEquals(reviews, ids(words.findDueReviews(deck.getId(), NOW, DAY_END, 10_000).stream()));
+        assertEquals(newCards, ids(words.findNewCards(deck.getId(), DAY_END, 10_000).stream()));
+        assertEquals(learning, ids(words.findLearningDueBy(deck.getId(), NOW, 10_000).stream()));
+        assertFalse(reviews.isEmpty() || newCards.isEmpty() || learning.isEmpty());
+    }
+
+    @Test
+    void dueReviewsComeLowestRetrievabilityFirstAndNewCardsInTheOrderTheyWereAdded() throws SQLException {
+        Deck queue = decks.create("Queue");
+        // Due reviews last reviewed 10 days ago at a stability of 30 days, 5 at 2, 20 at 10, and one never timed.
+        WordCard fresh = words.insert(review(queue, "fresh", 30, NOW.minusDays(10)));
+        WordCard forgotten = words.insert(review(queue, "forgotten", 2, NOW.minusDays(5)));
+        WordCard overdue = words.insert(review(queue, "overdue", 10, NOW.minusDays(20)));
+        WordCard untimed = words.insert(review(queue, "untimed", 5, null));
+        WordCard later = WordCard.createNew(queue.getId(), "later", "词");
+        later.setAddedAt(NOW.minusDays(1));
+        later.setNextReviewAt(NOW.minusDays(1));
+        WordCard earlier = WordCard.createNew(queue.getId(), "earlier", "词");
+        earlier.setAddedAt(NOW.minusDays(2));
+        earlier.setNextReviewAt(NOW.minusDays(2));
+        WordCard sameTime = WordCard.createNew(queue.getId(), "same time", "词");
+        sameTime.setAddedAt(NOW.minusDays(1));
+        sameTime.setNextReviewAt(NOW.minusDays(1));
+        words.insert(later);
+        words.insert(earlier);
+        words.insert(sameTime);
+
+        // Elapsed time over stability, highest (lowest recall) first: 2.5, 2, 1 (no last review: as if just due), 1/3.
+        assertEquals(List.of(forgotten.getId(), overdue.getId(), untimed.getId(), fresh.getId()),
+            words.findDueReviews(queue.getId(), NOW, DAY_END, 10).stream().map(WordCard::getId).toList());
+        assertEquals(List.of(earlier.getId(), later.getId(), sameTime.getId()),
+            words.findNewCards(queue.getId(), DAY_END, 10).stream().map(WordCard::getId).toList());
+        assertEquals(1, words.findNewCards(queue.getId(), DAY_END, 1).size());
+    }
+
+    private static WordCard review(Deck deck, String english, double stability, LocalDateTime lastReviewedAt) {
+        WordCard card = WordCard.createNew(deck.getId(), english, "词");
+        card.setState(CardState.REVIEW);
+        card.setStability(stability);
+        card.setDifficulty(5);
+        card.setRepetitions(3);
+        card.setConsecutiveCorrect(3);
+        card.setLastReviewedAt(lastReviewedAt);
+        // Due today in any case, e.g. after the desired retention was raised.
+        card.setNextReviewAt(NOW.minusHours(1));
+        return card;
+    }
+
+    private static Set<Long> ids(java.util.stream.Stream<WordCard> cards) {
+        return cards.map(WordCard::getId).collect(Collectors.toSet());
     }
 
     @Test
@@ -141,7 +201,8 @@ class WordPredicateAgreementTest {
 
         for (Deck each : List.of(deck, other)) {
             assertEquals(new WordRepository.DeckWordCounts(words.countAll(each.getId()),
-                words.countDue(each.getId(), NOW, DAY_END)), counts.get(each.getId()), each.getName());
+                words.countDue(each.getId(), NOW, DAY_END), words.countDueByState(each.getId(), NOW, DAY_END).newCards()),
+                counts.get(each.getId()), each.getName());
         }
         assertFalse(counts.containsKey(empty.getId()));
     }

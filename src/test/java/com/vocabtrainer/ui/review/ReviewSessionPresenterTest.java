@@ -80,7 +80,7 @@ class ReviewSessionPresenterTest {
     }
 
     @Test
-    void showingADeckStartsADefaultSessionOnADueCard() throws SQLException {
+    void showingADeckStartsASessionOfTheDefaultSizeOnADueCard() throws SQLException {
         presenter.showDeck(deckId);
 
         assertEquals(State.AWAITING_ANSWER, presenter.state());
@@ -89,7 +89,7 @@ class ReviewSessionPresenterTest {
         assertEquals(card.getEnglish(), presenter.question());
         assertEquals("英译中 | New | Lapses 0", presenter.details());
         assertEquals("Enter Chinese meaning", presenter.answerPrompt());
-        assertEquals("Session 0/10 | Accuracy 0% | XP 0", presenter.sessionProgress());
+        assertEquals("Session 0/20 | Accuracy 0% | XP 0", presenter.sessionProgress());
         assertEquals("", presenter.result());
         assertTrue(presenter.canSubmit());
         assertFalse(presenter.canRate());
@@ -149,7 +149,7 @@ class ReviewSessionPresenterTest {
         assertNotEquals(card.getId(), presenter.card().orElseThrow().getId());
         assertEquals("", presenter.answer());
         assertTrue(presenter.result().startsWith("Saved. XP +"), presenter.result());
-        assertTrue(presenter.sessionProgress().startsWith("Session 1/10 | Accuracy 100% | XP "), presenter.sessionProgress());
+        assertTrue(presenter.sessionProgress().startsWith("Session 1/20 | Accuracy 100% | XP "), presenter.sessionProgress());
         assertEquals(List.of(Set.of(DataChange.REVIEWS)), published);
         assertTrue(failures.isEmpty(), failures.toString());
     }
@@ -349,7 +349,7 @@ class ReviewSessionPresenterTest {
 
         assertEquals(State.COMPLETE, presenter.state());
         assertEquals("No due words right now.", presenter.details());
-        assertTrue(presenter.completionMetrics().startsWith("Completed: 0/10 | Accuracy: 0% | XP: 0"),
+        assertTrue(presenter.completionMetrics().startsWith("Completed: 0/20 | Accuracy: 0% | XP: 0"),
             presenter.completionMetrics());
         assertTrue(presenter.result().startsWith("Use Weak Words mode"), presenter.result());
     }
@@ -387,7 +387,7 @@ class ReviewSessionPresenterTest {
         assertEquals(failed, presenter.question(), "the failed word comes back before the session ends");
         assertEquals(CardState.LEARNING, presenter.card().orElseThrow().getState());
         assertTrue(presenter.details().startsWith("英译中 | Learning | Recall "), presenter.details());
-        assertTrue(presenter.sessionProgress().startsWith("Session 2/10 | Accuracy 50% | XP "), presenter.sessionProgress());
+        assertTrue(presenter.sessionProgress().startsWith("Session 2/20 | Accuracy 50% | XP "), presenter.sessionProgress());
     }
 
     @Test
