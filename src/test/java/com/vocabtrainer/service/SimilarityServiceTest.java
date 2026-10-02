@@ -47,6 +47,10 @@ class SimilarityServiceTest {
         降低         | vt. 减轻, 减少, 降低\\nvi. 减弱, 减退
         减弱         | vt. 减轻, 减少, 降低\\nvi. 减弱, 减退
         减弱         | vt. & vi. 减弱
+        抛弃         | n.放弃 v.抛弃
+        放弃         | n.放弃 v.抛弃
+        抛弃         | n.放弃v.抛弃
+        抛弃         | adj.清楚的 vt.抛弃
         清晰         | ADJ. 清晰的
         adj. 清晰的  | 清晰的
         放弃         | [网络] 放弃; 遗弃
@@ -86,6 +90,17 @@ class SimilarityServiceTest {
     }
 
     @Test
+    void aPartOfSpeechMarkerWithoutASpaceAfterItStillStartsAMeaning() {
+        // "n.放弃 v.抛弃" was one meaning, 放弃v抛弃: either meaning alone scored 0.4, a lapse.
+        assertEquals(List.of("放弃", "抛弃"), service.splitMeanings("n.放弃 v.抛弃"));
+        assertEquals(List.of("放弃", "抛弃"), service.splitMeanings("n.放弃v.抛弃"));
+        assertEquals(List.of("放弃", "抛弃"), service.splitMeanings("N.放弃 V. 抛弃"));
+        // Not a part of speech: a Latin letter and a dot inside a meaning, or with no meaning after it.
+        assertEquals(List.of("at 5 a.m. 开会"), service.splitMeanings("at 5 a.m. 开会"));
+        assertEquals(List.of("维生素a."), service.splitMeanings("维生素a."));
+    }
+
+    @Test
     void aTrailingParticleIsDroppedOnlyWhenTwoCharactersRemain() {
         assertEquals(1.0, service.calculate("清晰", "清晰的"), 1e-9);
         assertTrue(service.calculate("获", "获得") < 1.0, "得 is part of 获得");
@@ -118,6 +133,7 @@ class SimilarityServiceTest {
         lucid       | lucid         | 0 | 1.0
         LUCID       | lucid         | 0 | 1.0
         well known  | well-known    | 0 | 1.0
+        naive       | naïve         | 0 | 1.0
         lucud       | lucid         | 1 | 0.8
         lucdi       | lucid         | 1 | 0.8
         lucidd      | lucid         | 1 | 0.8333333333

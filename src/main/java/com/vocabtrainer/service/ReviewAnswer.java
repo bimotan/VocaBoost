@@ -47,6 +47,15 @@ public record ReviewAnswer(
         return overridden && canOverride() ? rating : rating.atMost(grade.maxRating());
     }
 
+    /**
+     * Whether overriding the check ({@code overridden}) changes what {@code chosen} counts as. Only
+     * then is the override recorded: "I was right" followed by Again, or by a rating the check did not
+     * lower, is a review like any other.
+     */
+    public boolean overrideApplies(ReviewRating chosen, boolean overridden) {
+        return overridden && countsAs(chosen, true) != countsAs(chosen, false);
+    }
+
     /** Whether the check lowers a rating, so the user may override it ("I was right"). */
     public boolean canOverride() {
         return grade.capsRatings();

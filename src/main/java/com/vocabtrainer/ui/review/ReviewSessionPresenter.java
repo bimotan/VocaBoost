@@ -325,12 +325,12 @@ public final class ReviewSessionPresenter {
         long wordId = card.getId();
         LocalDateTime dueBefore = card.getNextReviewAt();
         ReviewRating countsAs = checked == null ? rating : checked.countsAs(rating, overridden);
-        boolean override = overridden;
+        boolean override = checked != null && checked.overrideApplies(rating, overridden);
         state = State.SAVING;
         fireChanged();
         ReviewOutcome outcome;
         try {
-            outcome = reviewService.rateCurrent(wordId, rating, override);
+            outcome = reviewService.rateCurrent(wordId, rating, overridden);
         } catch (RuntimeException e) {
             // Nothing was saved. The service normally keeps the submitted answer, so the same card
             // and answer stay on screen and rating again retries.

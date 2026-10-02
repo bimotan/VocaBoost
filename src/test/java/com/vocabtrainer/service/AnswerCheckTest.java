@@ -137,6 +137,30 @@ class AnswerCheckTest {
     }
 
     @Test
+    void anOverrideIsRecordedOnlyWhenItChangesWhatTheRatingCountsAs() throws SQLException {
+        WordCard lucid = words.insert(dueReview("lucid", LUCID));
+        WordCard abate = words.insert(dueReview("abate", "减弱; 减少"));
+
+        // "I was right", then Again: an ordinary Again, not a claim that the answer was right.
+        service.submitAnswer(lucid.getId(), "清楚", ReviewMode.EN_TO_ZH);
+        service.rateCurrent(lucid.getId(), ReviewRating.AGAIN, true);
+        // A typo caps at Hard: overriding it and choosing Hard changes nothing either.
+        ReviewAnswer typo = service.submitAnswer(abate.getId(), "abat", ReviewMode.ZH_TO_EN);
+        service.rateCurrent(abate.getId(), ReviewRating.HARD, true);
+
+        assertEquals(ReviewRating.HARD, typo.grade().maxRating());
+        assertFalse(typo.overrideApplies(ReviewRating.HARD, true));
+        assertTrue(typo.overrideApplies(ReviewRating.GOOD, true));
+        assertFalse(typo.overrideApplies(ReviewRating.GOOD, false));
+        ReviewLog again = onlyLog(lucid);
+        assertEquals(ReviewRating.AGAIN, again.getEffectiveRating());
+        assertFalse(again.isOverridden());
+        ReviewLog hard = onlyLog(abate);
+        assertEquals(ReviewRating.HARD, hard.getEffectiveRating());
+        assertFalse(hard.isOverridden());
+    }
+
+    @Test
     void aTypoCountsAtMostAsHard() throws SQLException {
         WordCard lucid = words.insert(dueReview("lucid", LUCID));
         CardScheduler.Outcome hard = CARDS.outcome(lucid, ReviewRating.HARD, NOW);

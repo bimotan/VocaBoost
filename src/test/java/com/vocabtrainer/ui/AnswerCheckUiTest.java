@@ -81,6 +81,30 @@ class AnswerCheckUiTest extends MainWindowUiTest {
     }
 
     @Test
+    void afterIWasRightTheSuggestedRatingHasTheFocusEvenWhenItIsTheSame() throws SQLException {
+        selectTab("reviewTab");
+        WordCard word = questionWord();
+        word.setChinese("明白易懂的");
+        services.wordRepository().update(word);
+        // Close but not equal (83%): Easy counts as Good, and Good stays the suggestion either way.
+        answer("明白易懂了");
+        assertEquals("rateGoodButton", focusOwnerId());
+        assertTrue(text("rateEasyButton").startsWith("Easy (4) → Good (83%) · "), text("rateEasyButton"));
+
+        // A mouse click focuses the toggle before firing it.
+        Fx.run(() -> find("overrideButton", ToggleButton.class).requestFocus());
+        click("overrideButton");
+
+        assertTrue(isOverrideSelected());
+        assertEquals("rateGoodButton", focusOwnerId(), "Space must not toggle \"I was right\" back");
+        pressKey(null, KeyCode.SPACE);
+        ReviewLog log = onlyLog();
+        assertEquals(ReviewRating.GOOD, log.getEffectiveRating());
+        assertFalse(log.isOverridden(), "Good was not capped, so the override changed nothing");
+        assertTrue(text("reviewResultArea").startsWith("Saved. XP +"), text("reviewResultArea"));
+    }
+
+    @Test
     void aMatchingAnswerSuggestsGoodAndHasNothingToOverride() throws SQLException {
         selectTab("reviewTab");
         answer(correctAnswer(questionWord()));

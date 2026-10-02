@@ -22,7 +22,7 @@ import java.util.Set;
  * ({@link ReviewRating#maxForSimilarity}): a meaning that matches counts as anything, below 55%
  * only as Again.
  *
- * <p><b>Chinese to English.</b> The word, ignoring case, spaces and hyphens, counts as anything.
+ * <p><b>Chinese to English.</b> The word, ignoring case, accents, spaces and hyphens, counts as anything.
  * Another real word is wrong (0%), however close its spelling: a well-known confusable such as
  * affect for effect, or another word of the deck, unless that word shares a meaning with the asked
  * gloss: then it is a synonym and counts as right, since the prompt allows it. Otherwise a typo
@@ -36,7 +36,8 @@ public class AnswerGrader {
 
     /**
      * Well-known pairs of English words that differ by a letter or two but mean different things;
-     * typing one for the other is wrong even when the deck does not have it.
+     * typing one for the other is wrong even when the deck does not have it. Variant spellings of one
+     * word (forgo and forego) are not confusables.
      */
     private static final List<List<String>> CONFUSABLES = List.of(
         List.of("affect", "effect"),
@@ -63,7 +64,6 @@ public class AnswerGrader {
         List.of("ascent", "assent"),
         List.of("exalt", "exult"),
         List.of("forbear", "forebear"),
-        List.of("forgo", "forego"),
         List.of("capital", "capitol"),
         List.of("desert", "dessert"),
         List.of("precede", "proceed"),

@@ -14,7 +14,8 @@ import java.util.regex.Pattern;
  *
  * <p><b>Meanings</b> (English to Chinese, {@link #calculate}). A gloss is split into meanings at
  * ; , / 、 and line breaks (a literal {@code \n} too, as ECDICT writes them), at spaces between
- * two Chinese characters and before a part-of-speech marker, but never inside brackets. Each
+ * two Chinese characters and before a part-of-speech marker (also one written right after a Chinese
+ * character, as in {@code n.放弃v.抛弃}), but never inside brackets. Each
  * meaning drops leading part-of-speech markers ({@code vt.}, {@code adj.}, several in a row),
  * bracket tags such as {@code [网络]} or {@code 【医】}, punctuation and spaces; full-width
  * characters count as half-width and case is ignored. A trailing 的, 地 or 得 is ignored when at
@@ -24,8 +25,8 @@ import java.util.regex.Pattern;
  * with every correct one and the best pair counts. A pair that is equal scores 1.0, any other the
  * mean of their character-bigram Dice coefficient and Levenshtein similarity.
  *
- * <p><b>English words</b> (Chinese to English, {@link #englishSimilarity}). Case, spaces and
- * hyphens are ignored; otherwise only letters are compared, by Damerau-Levenshtein distance
+ * <p><b>English words</b> (Chinese to English, {@link #englishSimilarity}). Case, accents, spaces
+ * and hyphens are ignored; otherwise only letters are compared, by Damerau-Levenshtein distance
  * ({@link #spellingDistance}). Whether a near miss is a typo or another word is decided by
  * {@link AnswerGrader}.
  */
@@ -34,12 +35,17 @@ public class SimilarityService {
     private static final String PART_OF_SPEECH = "(?:vt|vi|v|n|adj|adv|ad|a|prep|conj|pron|int|num|art|abbr)\\.";
     private static final Pattern PART_OF_SPEECH_PREFIX =
         Pattern.compile("^(?:" + PART_OF_SPEECH + "\\s*(?:[&/]\\s*)?)+", Pattern.CASE_INSENSITIVE);
+    /** A part-of-speech marker that starts a new meaning after a space: "放弃 v.抛弃" and "放弃 v. 抛弃", not "5 a.m.". */
     private static final Pattern PART_OF_SPEECH_AHEAD =
-        Pattern.compile("^" + PART_OF_SPEECH + "(?:\\s|$)", Pattern.CASE_INSENSITIVE);
+        Pattern.compile("^" + PART_OF_SPEECH + "(?:\\s|$|(?=[^\\p{IsLatin}]))", Pattern.CASE_INSENSITIVE);
+    /** A part-of-speech marker written right after a Chinese character and before the next meaning: "放弃v.抛弃". */
+    private static final Pattern PART_OF_SPEECH_GLUED =
+        Pattern.compile("^" + PART_OF_SPEECH + "\\s*(?=\\p{IsHan})", Pattern.CASE_INSENSITIVE);
     private static final Pattern BRACKET_TAG = Pattern.compile("\\[[^\\]]*\\]|【[^】]*】");
     private static final Pattern OPTIONAL_PART = Pattern.compile("\\([^()]*\\)");
     private static final Pattern PUNCTUATION_AND_SPACE = Pattern.compile("[\\p{Punct}\\p{IsPunctuation}\\s]+");
     private static final Pattern SPACE_OR_HYPHEN = Pattern.compile("[\\s\\-\\u2010-\\u2015]+");
+    private static final Pattern ACCENT = Pattern.compile("\\p{M}+");
     private static final Pattern NOT_A_LETTER = Pattern.compile("\\P{L}+");
     private static final Pattern SPACE_BETWEEN_HAN = Pattern.compile("(?<=\\p{IsHan})\\s+(?=\\p{IsHan})");
     private static final String MEANING_SEPARATORS = ";,/、\n\r";
@@ -104,7 +110,7 @@ public class SimilarityService {
 
     /**
      * How similar a typed English word is to {@code expected}, from 0 to 1: 1.0 when they are equal
-     * apart from case, spaces and hyphens, otherwise 1 - d / n, where d is the
+     * apart from case, accents, spaces and hyphens, otherwise 1 - d / n, where d is the
      * {@link #spellingDistance} and n the length of the longer one in letters.
      */
     public double englishSimilarity(String typed, String expected) {
@@ -120,7 +126,7 @@ public class SimilarityService {
         return Math.max(0.0, 1.0 - spellingDistance(typed, expected) / (double) longer);
     }
 
-    /** Whether two English answers are the same apart from case, spaces and hyphens. */
+    /** Whether two English answers are the same apart from case, accents, spaces and hyphens. */
     public boolean sameEnglish(String typed, String expected) {
         return normalizeEnglish(typed).equals(normalizeEnglish(expected));
     }
@@ -128,15 +134,15 @@ public class SimilarityService {
     /**
      * How many letters must be inserted, deleted, replaced or swapped with a neighbour to turn the
      * letters of {@code typed} into those of {@code expected} (Damerau-Levenshtein, optimal string
-     * alignment); everything but letters is ignored, and case too.
+     * alignment); everything but letters is ignored, and case and accents too.
      */
     public int spellingDistance(String typed, String expected) {
         return damerauLevenshtein(letters(typed).codePoints().toArray(), letters(expected).codePoints().toArray());
     }
 
-    /** The letters of an English answer, lower case; what {@link #spellingDistance} compares. */
+    /** The letters of an English answer, lower case and without accents; what {@link #spellingDistance} compares. */
     public String letters(String value) {
-        return NOT_A_LETTER.matcher(prepare(value)).replaceAll("");
+        return NOT_A_LETTER.matcher(withoutAccents(prepare(value))).replaceAll("");
     }
 
     /** Lower case, half-width, without punctuation or spaces; what equal meanings have in common. */
@@ -148,7 +154,12 @@ public class SimilarityService {
     }
 
     private String normalizeEnglish(String value) {
-        return SPACE_OR_HYPHEN.matcher(prepare(value).trim()).replaceAll("");
+        return SPACE_OR_HYPHEN.matcher(withoutAccents(prepare(value)).trim()).replaceAll("");
+    }
+
+    /** Drops accents from Latin letters, so naive is naïve and cafe is café. */
+    private static String withoutAccents(String value) {
+        return ACCENT.matcher(Normalizer.normalize(value, Normalizer.Form.NFD)).replaceAll("");
     }
 
     /** Half-width (NFKC), lower case, with ECDICT's literal line breaks turned into real ones. */
@@ -197,8 +208,9 @@ public class SimilarityService {
     }
 
     /**
-     * Splits at meaning separators, at spaces between two Chinese characters and at spaces before a
-     * part-of-speech marker, but not inside (), [] or 【】.
+     * Splits at meaning separators, at spaces between two Chinese characters, at spaces before a
+     * part-of-speech marker and before one that directly follows a Chinese character, but not inside
+     * (), [] or 【】.
      */
     private static List<String> splitOutsideBrackets(String text) {
         List<String> parts = new ArrayList<>();
@@ -215,6 +227,10 @@ public class SimilarityService {
             }
             if (depth == 0 && MEANING_SEPARATORS.indexOf(codePoint) >= 0) {
                 cut(parts, current);
+            } else if (depth == 0 && endsWithHan(current) && isLatinLetter(codePoint)
+                && PART_OF_SPEECH_GLUED.matcher(text).region(index, text.length()).lookingAt()) {
+                cut(parts, current);
+                current.appendCodePoint(codePoint);
             } else if (depth == 0 && Character.isWhitespace(codePoint)) {
                 int end = next;
                 while (end < text.length() && Character.isWhitespace(text.codePointAt(end))) {
@@ -244,6 +260,14 @@ public class SimilarityService {
             return true;
         }
         return PART_OF_SPEECH_AHEAD.matcher(text.substring(start)).lookingAt();
+    }
+
+    private static boolean isLatinLetter(int codePoint) {
+        return Character.isLetter(codePoint) && Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.LATIN;
+    }
+
+    private static boolean endsWithHan(StringBuilder text) {
+        return !text.isEmpty() && isHan(text.codePointBefore(text.length()));
     }
 
     private static boolean isHan(int codePoint) {

@@ -63,6 +63,8 @@ class AnswerGraderTest {
         ' Lucid '      | lucid         | MATCH      | EASY
         lucid.         | lucid         | MATCH      | EASY
         well known     | well-known    | MATCH      | EASY
+        naive          | naïve         | MATCH      | EASY
+        Cafe           | café          | MATCH      | EASY
         lucud          | lucid         | MISSPELLED | HARD
         lucdi          | lucid         | MISSPELLED | HARD
         lucidd         | lucid         | MISSPELLED | HARD
@@ -80,6 +82,7 @@ class AnswerGraderTest {
         illicit        | elicit        | CONFUSABLE | AGAIN
         elicit         | illicit       | CONFUSABLE | AGAIN
         Ingenious      | ingenuous     | CONFUSABLE | AGAIN
+        forego         | forgo         | MISSPELLED | HARD
         """)
     void anEnglishAnswerIsGradedBySpelling(String typed, String expected, AnswerGrade.Verdict verdict,
                                            ReviewRating maxRating) throws SQLException {

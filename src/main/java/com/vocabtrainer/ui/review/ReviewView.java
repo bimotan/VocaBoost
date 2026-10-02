@@ -82,6 +82,7 @@ public final class ReviewView {
     private long renderedCardNumber = -1;
     private boolean renderedCanRate;
     private ReviewRating renderedSuggestion;
+    private boolean renderedOverridden;
     private boolean swallowTypedKey;
     /** Set while {@link #render} updates the selectors, whose listeners only react to the user. */
     private boolean rendering;
@@ -434,11 +435,14 @@ public final class ReviewView {
             answerField.requestFocus();
         }
         ReviewRating suggestion = presenter.suggestedRating().orElse(null);
-        if (suggestion != null && (!renderedCanRate || suggestion != renderedSuggestion)) {
-            // The answer field is disabled now; keep the keyboard on the suggested rating.
+        if (suggestion != null && (!renderedCanRate || suggestion != renderedSuggestion
+            || presenter.isOverridden() != renderedOverridden)) {
+            // The answer field is disabled now; keep the keyboard on the suggested rating, also after
+            // "I was right" took the focus, so Space confirms a rating instead of toggling it back.
             ratingButtonsByRating.get(suggestion).requestFocus();
         }
         renderedCanRate = presenter.canRate();
         renderedSuggestion = suggestion;
+        renderedOverridden = presenter.isOverridden();
     }
 }

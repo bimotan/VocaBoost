@@ -487,14 +487,15 @@ public class ReviewService {
      * this again retries with the same answer.
      *
      * @param overridden the user says the answer was right although the check capped it ("I was
-     *                   right"); ignored for an answer the check did not cap
+     *                   right"); ignored, and not logged, unless it changes what {@code rating}
+     *                   counts as ({@link ReviewAnswer#overrideApplies})
      */
     public ReviewOutcome rateCurrent(long wordId, ReviewRating rating, boolean overridden) {
         ReviewAnswer answer = pendingAnswers.get(wordId);
         if (answer == null) {
             throw new IllegalStateException("No answer was submitted for word " + wordId + "; submit an answer before rating it");
         }
-        boolean override = overridden && answer.canOverride();
+        boolean override = answer.overrideApplies(rating, overridden);
         SavedReview saved;
         try {
             saved = transactions.inTransaction(() -> saveRating(wordId, rating, override, answer));
