@@ -146,7 +146,7 @@ class StartupDeckTest {
     void databaseFromBeforeTheFlagWithOnlyGoalHistoryIsNotSeededAgain() throws Exception {
         DatabaseManager databaseManager = initializedDatabase();
         Deck legacyDeck = new DeckRepository(databaseManager).ensureDefaultDeck();
-        new GoalRepository(databaseManager).ensure(legacyDeck.getId(), LocalDate.now(), 20, 5, 10);
+        new GoalRepository(databaseManager).ensure(legacyDeck.getId(), LocalDate.of(2026, 5, 28), 20, 5, 10);
 
         Launch launch = launch();
 
