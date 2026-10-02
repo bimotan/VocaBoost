@@ -1,6 +1,7 @@
 package com.vocabtrainer.service;
 
 import com.vocabtrainer.domain.DictionaryEntry;
+import com.vocabtrainer.domain.WordVerificationResult;
 import com.vocabtrainer.repository.EcdictRepository;
 import com.vocabtrainer.service.ecdict.EcdictFixtures;
 import com.vocabtrainer.service.ecdict.EcdictImportService;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -54,6 +56,29 @@ class LocalDictionaryServiceTest {
                 status.toDisplayText());
             assertTrue(status.toDisplayText().endsWith(" (skipped rows: 1). Bundled GRE starter: 215 entries."),
                 status.toDisplayText());
+        }
+    }
+
+    @Test
+    void theImportedDictionaryListsInflectionsAndGivesThePhoneticOfTheWordAsked() throws Exception {
+        Path csv = EcdictFixtures.write(tempDir.resolve("ecdict.csv"), false, List.of(
+            EcdictFixtures.ABANDON, EcdictFixtures.ABANDONED, "lucid,ˈluːsɪd,,\"a. 清楚的, 透明的\",,,,,0,0,,,"));
+        try (EcdictRepository ecdict = new EcdictRepository(tempDir.resolve("ecdict.db"))) {
+            LocalDictionaryService service = new LocalDictionaryService(ecdict);
+            assertEquals(Set.of(), service.inflections("abandon"), "nothing is imported yet");
+            new EcdictImportService(ecdict).importCsv(csv, progress -> { }, () -> false);
+
+            assertEquals(Set.of("abandoned", "abandoning", "abandons"), service.inflections("Abandon"));
+            assertEquals(Set.of(), service.inflections("abandoned"), "an inflected form's own row lists no forms of it");
+            assertEquals(Set.of(), service.inflections("lucid"));
+            assertEquals(Set.of(), service.inflections("notarealword"));
+
+            assertEquals("ˈluːsɪd", service.verify("lucid").phonetic());
+            assertEquals("ә'bændәn", service.verify("abandon").phonetic());
+            WordVerificationResult form = service.verify("abandons");
+            assertTrue(form.found());
+            assertEquals("", form.phonetic(), "the base form's phonetic is not the form's");
+            assertEquals("", service.verify("abate").phonetic(), "the starter words have no phonetic");
         }
     }
 

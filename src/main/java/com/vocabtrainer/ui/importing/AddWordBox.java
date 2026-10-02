@@ -47,7 +47,8 @@ import java.util.function.UnaryOperator;
  * window: the Add button stays usable, changing the English word cancels the check, and a check
  * that finishes for a word no longer in the form is dropped. A word the dictionaries do not have is
  * added as UNVERIFIED only after confirmation; when they could not be asked, the user can retry,
- * add it unchecked (tag UNCHECKED) or cancel, and in offline mode add it unchecked or cancel.
+ * add it unchecked (tag UNCHECKED) or cancel, and in offline mode add it unchecked or cancel. A word
+ * the dictionaries have gets their phonetic when the form leaves it empty.
  */
 final class AddWordBox {
     private static final String UNVERIFIED_TAG = "UNVERIFIED";
@@ -195,9 +196,16 @@ final class AddWordBox {
 
     private void decide(String english, WordVerificationResult verification) {
         switch (verification.status()) {
-            case VERIFIED -> addFromForm(english,
-                tags -> WordFields.appendTag(WordFields.appendTag(tags, "VERIFIED"), verification.source()),
-                " | Verified by " + verification.source());
+            case VERIFIED -> {
+                String filled = "";
+                if (phoneticField.getText().isBlank() && !verification.phonetic().isEmpty()) {
+                    phoneticField.setText(verification.phonetic());
+                    filled = " | Phonetic " + verification.phonetic();
+                }
+                addFromForm(english,
+                    tags -> WordFields.appendTag(WordFields.appendTag(tags, "VERIFIED"), verification.source()),
+                    " | Verified by " + verification.source() + filled);
+            }
             case UNVERIFIED -> {
                 if (confirmUnverifiedAdd(english, verification.message())) {
                     addFromForm(english, tags -> WordFields.appendTag(tags, UNVERIFIED_TAG), " | Marked " + UNVERIFIED_TAG);

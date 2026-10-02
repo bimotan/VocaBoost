@@ -31,6 +31,7 @@ import com.vocabtrainer.service.SimilarityService;
 import com.vocabtrainer.service.StarterImportService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.service.WordValidationService;
+import com.vocabtrainer.service.cloze.ClozeMaker;
 import com.vocabtrainer.service.ecdict.EcdictImportService;
 import com.vocabtrainer.ui.Dialogs;
 import com.vocabtrainer.ui.MainWindow;
@@ -51,6 +52,7 @@ import java.util.function.Supplier;
  *
  * @param ecdictRepository   the imported ECDICT dictionary, in its own file next to the database
  * @param localDictionary    the offline dictionaries (imported ECDICT, bundled starter words)
+ * @param clozeMaker         finds a word and its inflected forms (also those ECDICT lists) in its example
  * @param dictionaryServices builds the dictionary service (offline dictionaries, then online ones,
  *                           which are skipped while offline mode is on)
  * @param aiServices         builds the AI service from the saved settings; called again when the
@@ -81,6 +83,7 @@ public record AppServices(
     EcdictRepository ecdictRepository,
     EcdictImportService ecdictImportService,
     LocalDictionaryService localDictionary,
+    ClozeMaker clozeMaker,
     Supplier<DictionaryService> dictionaryServices,
     Supplier<AiService> aiServices,
     Deck startupDeck,
@@ -181,6 +184,11 @@ public record AppServices(
             StarterImportService starterImportService = new StarterImportService(
                 importExportService, wordRepository, reviewLogRepository, goalRepository, settingsService);
             starterImportService.importOnce(startupDeck.getId());
+            // Only opened by the first lookup; the ECDICT CSV itself is never read here.
+            EcdictRepository ecdictRepository = new EcdictRepository(databasePath.resolveSibling("ecdict.db"));
+            EcdictImportService ecdictImportService = new EcdictImportService(ecdictRepository);
+            LocalDictionaryService localDictionary = new LocalDictionaryService(ecdictRepository);
+            ClozeMaker clozeMaker = new ClozeMaker(localDictionary::inflections);
             ReviewService reviewService = new ReviewService(
                 wordRepository,
                 reviewLogRepository,
@@ -190,16 +198,13 @@ public record AppServices(
                 achievementService,
                 clock,
                 reviewSettings,
-                new Random()
+                new Random(),
+                clozeMaker
             );
             StatsService statsService = new StatsService(wordRepository, reviewLogRepository, clock,
                 reviewScheduler.studyDay(), reviewSettings);
             BackupService backupService = new BackupService(deckRepository, wordRepository, reviewLogRepository,
                 goalRepository, achievementRepository, databaseManager, validationService, clock, cardStates);
-            // Only opened by the first lookup; the ECDICT CSV itself is never read here.
-            EcdictRepository ecdictRepository = new EcdictRepository(databasePath.resolveSibling("ecdict.db"));
-            EcdictImportService ecdictImportService = new EcdictImportService(ecdictRepository);
-            LocalDictionaryService localDictionary = new LocalDictionaryService(ecdictRepository);
             BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> dictionaryFactory =
                 dictionaryServiceFactory != null
                     ? dictionaryServiceFactory
@@ -228,6 +233,7 @@ public record AppServices(
                 ecdictRepository,
                 ecdictImportService,
                 localDictionary,
+                clozeMaker,
                 () -> dictionaryFactory.apply(dictionaryCacheRepository, localDictionary),
                 () -> aiFactory.apply(aiCacheRepository, settingsService),
                 startupDeck,

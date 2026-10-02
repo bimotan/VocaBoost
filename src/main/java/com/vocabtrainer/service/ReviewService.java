@@ -14,6 +14,9 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.TransactionRunner;
 import com.vocabtrainer.repository.WordRepository;
+import com.vocabtrainer.service.cloze.ClozeMaker;
+import com.vocabtrainer.service.cloze.SentenceSpan;
+import com.vocabtrainer.service.cloze.WordForms;
 import com.vocabtrainer.service.scheduling.IntervalPreview;
 import com.vocabtrainer.service.scheduling.StudyDay;
 
@@ -94,6 +97,7 @@ public class ReviewService {
     private final ReviewSettings settings;
     private final Map<Long, Integer> newCardLimits = new HashMap<>();
     private final Random random;
+    private final ClozeMaker clozeMaker;
     private final Map<Long, ReviewAnswer> pendingAnswers = new HashMap<>();
     /** The different cards rated in this session; the session target counts them and none is shown twice. */
     private final Set<Long> sessionWords = new HashSet<>();
@@ -142,6 +146,20 @@ public class ReviewService {
                          SimilarityService similarityService, ReviewScheduler scheduler,
                          GoalService goalService, AchievementService achievementService, Clock clock,
                          ReviewSettings settings, Random random) {
+        this(wordRepository, reviewLogRepository, similarityService, scheduler, goalService, achievementService,
+            clock, settings, random, new ClozeMaker(WordForms.NONE));
+    }
+
+    /**
+     * @param settings   the saved new-cards-per-day limits and the session size and mode to start with;
+     *                   null keeps them in memory, with the defaults
+     * @param random     picks the question direction in Mixed mode
+     * @param clozeMaker finds the word and its inflected forms in its example sentence
+     */
+    public ReviewService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository,
+                         SimilarityService similarityService, ReviewScheduler scheduler,
+                         GoalService goalService, AchievementService achievementService, Clock clock,
+                         ReviewSettings settings, Random random, ClozeMaker clozeMaker) {
         this.wordRepository = wordRepository;
         this.reviewLogRepository = reviewLogRepository;
         this.grader = new AnswerGrader(similarityService);
@@ -152,6 +170,7 @@ public class ReviewService {
         this.clock = clock;
         this.settings = settings;
         this.random = random;
+        this.clozeMaker = clozeMaker;
         this.sessionTarget = settings == null ? ReviewSettings.DEFAULT_SESSION_SIZE : settings.sessionSize();
         this.activeSessionMode = settings == null ? ReviewMode.EN_TO_ZH : settings.mode();
     }
@@ -400,6 +419,14 @@ public class ReviewService {
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot submit answer", e);
         }
+    }
+
+    /**
+     * The word's example sentence split into the word itself, also inflected ("abated" for abate),
+     * and the text around it; empty without an example.
+     */
+    public List<SentenceSpan> exampleSpans(WordCard word) {
+        return clozeMaker.highlight(word.getExampleSentence(), word.getEnglish());
     }
 
     /** Whether the word still exists and is not archived; false once it was deleted from the Word List. */

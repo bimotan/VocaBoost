@@ -4,12 +4,15 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.ReviewScheduler;
 import com.vocabtrainer.service.WordValidationService;
+import com.vocabtrainer.service.cloze.ClozeMaker;
 import com.vocabtrainer.service.scheduling.StudyDay;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.Formats;
 import com.vocabtrainer.ui.LazyRefresh;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
+import com.vocabtrainer.ui.WordDetails;
+import com.vocabtrainer.ui.WordDetailsCard;
 import com.vocabtrainer.util.DateTimeUtil;
 import javafx.animation.PauseTransition;
 import javafx.beans.property.SimpleStringProperty;
@@ -33,13 +36,18 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.OptionalDouble;
 
-/** The Word List tab: search and filter the current deck's words, edit or delete one. */
+/**
+ * The Word List tab: search and filter the current deck's words, edit or delete one. Under the table
+ * a card shows the selected word's phonetic, part of speech, example (the word in bold), note and tags.
+ */
 public final class WordListView {
     private final ViewContext context;
     private final WordRepository wordRepository;
     private final Clock clock;
     private final StudyDay studyDay;
     private final WordEditDialog editDialog;
+    private final ClozeMaker examples;
+    private final WordDetailsCard detailsCard = new WordDetailsCard("wordDetails");
     private final ObservableList<WordCard> wordItems = FXCollections.observableArrayList();
     private final TableView<WordCard> wordTable = new TableView<>(wordItems);
     private final TextField searchField = new TextField();
@@ -49,10 +57,14 @@ public final class WordListView {
     private final Tab tab;
     private final LazyRefresh lazy;
 
-    /** {@code clock} and {@code studyDay} decide which words are due today and how strong their memory is. */
+    /**
+     * {@code clock} and {@code studyDay} decide which words are due today and how strong their memory
+     * is; {@code examples} finds the word in its example sentence.
+     */
     public WordListView(ViewContext context, WordRepository wordRepository, WordValidationService validationService,
-                        Clock clock, StudyDay studyDay) {
+                        Clock clock, StudyDay studyDay, ClozeMaker examples) {
         this.context = context;
+        this.examples = examples;
         this.wordRepository = wordRepository;
         this.clock = clock;
         this.studyDay = studyDay;
@@ -131,7 +143,11 @@ public final class WordListView {
         });
         wordTable.getColumns().addAll(List.of(englishCol, chineseCol, nextCol, intervalCol, strengthCol, statusCol));
 
-        VBox content = new VBox(12, controls, wordTable);
+        wordTable.getSelectionModel().selectedItemProperty().addListener(
+            (observable, oldWord, word) -> showDetails(word));
+        showDetails(null);
+
+        VBox content = new VBox(12, controls, wordTable, detailsCard.root());
         content.setPadding(new Insets(24));
         VBox.setVgrow(wordTable, Priority.ALWAYS);
         return content;
@@ -144,10 +160,31 @@ public final class WordListView {
                 posFilterField.getText());
             LocalDateTime now = LocalDateTime.now(clock);
             LocalDateTime dayEnd = studyDay.end(now);
+            WordCard selected = wordTable.getSelectionModel().getSelectedItem();
             wordItems.setAll(words.stream().filter(word -> filter.matches(word, now, dayEnd)).toList());
+            // Keep the selected word selected, with its details as they are now (e.g. after an edit).
+            if (selected != null) {
+                wordItems.stream()
+                    .filter(word -> word.getId() == selected.getId())
+                    .findFirst()
+                    .ifPresentOrElse(word -> {
+                        wordTable.getSelectionModel().select(word);
+                        showDetails(word);
+                    }, () -> showDetails(null));
+            }
         } catch (SQLException e) {
             context.errors().reportFailure("Refresh failed", e);
         }
+    }
+
+    private void showDetails(WordCard word) {
+        if (word == null) {
+            detailsCard.showMessage("Select a word to see its phonetic, part of speech, example, note and tags.");
+            return;
+        }
+        detailsCard.show(word.getEnglish() + "   " + word.getChinese(),
+            WordDetails.of(word, examples.highlight(word.getExampleSentence(), word.getEnglish())),
+            "No phonetic, part of speech, example, note or tags yet: choose Edit selected to add them.");
     }
 
     private void editSelectedWord() {

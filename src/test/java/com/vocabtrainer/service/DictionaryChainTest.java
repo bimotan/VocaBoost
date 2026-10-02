@@ -230,6 +230,23 @@ class DictionaryChainTest {
     }
 
     @Test
+    void verifyingAWordGivesThePhoneticOfTheEntryForThatWordOnly() {
+        api.answer("zeugma", DictionaryLookupResult.success("api answered", List.of(
+            new DictionaryEntry("Zeugma", "轭式修饰法", "noun", "/ˈzjuːɡmə/", "", HttpDictionaryService.SOURCE))));
+        api.answer("abandons", DictionaryLookupResult.success("api answered", List.of(
+            new DictionaryEntry("abandon", "放弃", "verb", "/əˈbændən/", "", HttpDictionaryService.SOURCE))));
+
+        WordVerificationResult zeugma = chain(api).verify("zeugma");
+        WordVerificationResult abandons = chain(api).verify("abandons");
+
+        assertTrue(zeugma.found());
+        assertEquals("/ˈzjuːɡmə/", zeugma.phonetic(), "ignoring case");
+        assertTrue(abandons.found());
+        assertEquals("", abandons.phonetic(), "an entry for the base form does not give the form's phonetic");
+        assertEquals("", chain(api).verify("snarkle").phonetic());
+    }
+
+    @Test
     void anInterruptedLookupStopsTheChain() {
         api.answer("petrichor", DictionaryLookupResult.interrupted());
         DictionaryService chain = chain(api);

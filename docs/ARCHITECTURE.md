@@ -65,6 +65,14 @@ Schema version 5 adds the FSRS columns; the SM-2 columns stay and are still writ
 - **Correct.** An answer is correct when its review did not count as Again: `ReviewLog.isCorrect()`, and the same rule in SQL (`ReviewLogRepository.CORRECT`, with the similarity cap for logs without an effective rating). Session accuracy, the daily goal's correct count, the dashboard and daily accuracy, the hardest words' Again count and the Markdown report all use it; `CorrectAnswerAgreementTest` keeps the two in step. Achievements do not depend on correctness. Review XP depends on the rating the review counted as.
 - **Starter words.** Every bundled starter word has a meaning no other starter word has (`StarterGlossTest`), so a Chinese-to-English prompt points at one word; words that share a meaning accept each other as synonyms.
 
+## Word Details
+
+A word's phonetic, part of speech, example sentence, note and tags are shown in a details card (`WordDetailsCard`, built from the FX-free `WordDetails`), one row each and only the rows that have a value. The example has the word in bold, also an inflected form of it ("The mentor **admonished** him"): `service.cloze.ClozeMaker` finds the word as a whole word, ignoring case, with the forms ECDICT's exchange field lists for it (`LocalDictionaryService.inflections`, so "forwent" for forgo once ECDICT is imported) and the forms simple rules give (`Inflections`: -s, -es, -ed, -d, -ing, -ly, -ies, -ied, -ily, a dropped e, a doubled final consonant, -ic to -icked and -ically); in an expression of several words the first or last word may be inflected.
+
+- **Review tab.** Before the answer is submitted, a line under the question shows only what cannot give the answer away (`ReviewSessionPresenter.hint`): English to Chinese shows the phonetic, the part of speech and the example, unless the example has Chinese in it (a translation would give the meaning away); Chinese to English shows only the part of speech, since the phonetic and the example give the English word away. The note and tags, which often hold the meaning or an English definition, are never shown before. Once the answer is checked, the card under the result shows all of them; it is hidden again for the next card.
+- **Word List.** The card under the table shows the selected word, which stays selected (with its new details) after Edit or a refresh. The edit dialog edits the phonetic too.
+- **Adding.** The lookup fills the add form's phonetic. When "Add word" finds the word in a dictionary and the form's phonetic is empty, it takes the dictionary's phonetic for that word (`WordVerificationResult.phonetic`): only from an entry for the word itself, never from the base form an inflection was found under.
+
 ## Dictionary Services
 
 `DictionaryServiceFactory` composes the lookup chain, asked in this order until a dictionary has the word:

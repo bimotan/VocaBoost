@@ -9,10 +9,13 @@ import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
+import com.vocabtrainer.ui.WordDetails;
+import com.vocabtrainer.ui.WordDetailsCard;
 import javafx.event.ActionEvent;
 import javafx.event.EventTarget;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBase;
@@ -68,10 +71,12 @@ public final class ReviewView {
     private final Spinner<Integer> newCardsPerDaySpinner = new Spinner<>();
     private final Label sessionProgressLabel = new Label();
     private final Label reviewWordLabel = new Label(ReviewSessionPresenter.LOADING);
+    private final Label reviewHintLabel = new Label();
     private final Label reviewMetaLabel = new Label();
     private final TextField answerField = new TextField();
     private final Button submitAnswerButton = new Button("Submit");
     private final TextArea reviewResultArea = new TextArea();
+    private final WordDetailsCard detailsCard = new WordDetailsCard("reviewDetails");
     private final Button regenerateExplanationButton = new Button("Regenerate explanation");
     private final Label completionTitleLabel = new Label("Review complete");
     private final Label completionMetricsLabel = new Label();
@@ -221,6 +226,9 @@ public final class ReviewView {
 
         reviewWordLabel.setId("reviewWordLabel");
         reviewWordLabel.setStyle("-fx-font-size: 34px; -fx-font-weight: 700;");
+        reviewHintLabel.setId("reviewHintLabel");
+        reviewHintLabel.setWrapText(true);
+        reviewHintLabel.setStyle("-fx-font-size: 15px; -fx-text-fill: #374151;");
         reviewMetaLabel.setId("reviewMetaLabel");
         reviewMetaLabel.setStyle("-fx-text-fill: #4b5563;");
         answerField.setId("answerField");
@@ -272,8 +280,10 @@ public final class ReviewView {
         HBox explanationActions = new HBox(10, regenerateExplanationButton);
         explanationActions.setAlignment(Pos.CENTER_RIGHT);
         explanationActions.managedProperty().bind(regenerateExplanationButton.visibleProperty());
-        VBox content = new VBox(16, modeBox, sessionBox, reviewWordLabel, reviewMetaLabel, answerBox,
-            completionCard, reviewResultArea, explanationActions, ratingButtons);
+        showIf(detailsCard.root(), false);
+        VBox question = new VBox(6, reviewWordLabel, reviewHintLabel);
+        VBox content = new VBox(16, modeBox, sessionBox, question, reviewMetaLabel, answerBox,
+            completionCard, reviewResultArea, detailsCard.root(), explanationActions, ratingButtons);
         content.setPadding(new Insets(28));
         VBox.setVgrow(reviewResultArea, Priority.ALWAYS);
         return content;
@@ -375,6 +385,11 @@ public final class ReviewView {
         spinner.getEditor().setText(factory.getConverter().toString(factory.getValue()));
     }
 
+    private static void showIf(Node node, boolean visible) {
+        node.setVisible(visible);
+        node.setManaged(visible);
+    }
+
     /** The id of a rating button: rateAgainButton, rateHardButton, rateGoodButton or rateEasyButton. */
     private static String ratingButtonId(ReviewRating rating) {
         String name = rating.name();
@@ -431,6 +446,11 @@ public final class ReviewView {
             rendering = false;
         }
         reviewWordLabel.setText(presenter.question());
+        reviewHintLabel.setText(presenter.hint());
+        showIf(reviewHintLabel, !presenter.hint().isEmpty());
+        Optional<WordDetails> revealed = presenter.revealedDetails().filter(details -> !details.isEmpty());
+        revealed.ifPresent(details -> detailsCard.show("", details, ""));
+        showIf(detailsCard.root(), revealed.isPresent());
         reviewMetaLabel.setText(presenter.details());
         sessionProgressLabel.setText(presenter.sessionProgress());
         answerField.setPromptText(presenter.answerPrompt());

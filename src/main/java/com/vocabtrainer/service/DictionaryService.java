@@ -18,8 +18,9 @@ public interface DictionaryService {
         return lookup(english);
     }
 
+    /** Whether the dictionary has the word, with its phonetic when the dictionary gives one. */
     default WordVerificationResult verify(String english) {
-        return WordVerificationResult.of(lookup(english));
+        return WordVerificationResult.of(english, lookup(english));
     }
 
     boolean isConfigured();

@@ -10,6 +10,7 @@ import com.vocabtrainer.service.csv.CsvReader;
 import com.vocabtrainer.service.csv.CsvRecord;
 import com.vocabtrainer.service.csv.WordColumn;
 import com.vocabtrainer.service.csv.WordColumns;
+import com.vocabtrainer.service.ecdict.EcdictExchange;
 import com.vocabtrainer.service.ecdict.EcdictTranslationCleaner;
 
 import java.io.IOException;
@@ -22,6 +23,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
@@ -92,8 +94,10 @@ public class LocalDictionaryService implements DictionaryService {
     @Override
     public WordVerificationResult verify(String english) {
         String key = normalizeKey(english);
-        if (find(key).isPresent()) {
-            return WordVerificationResult.found("Local dictionary", "本地词库已验证该词条。");
+        Optional<DictionaryEntry> entry = find(key);
+        if (entry.isPresent()) {
+            return WordVerificationResult.found("Local dictionary", "本地词库已验证该词条。")
+                .withPhonetic(entry.get().phonetic());
         }
         List<EcdictRepository.BaseForm> baseForms = findBaseForms(key);
         if (!baseForms.isEmpty()) {
@@ -106,6 +110,26 @@ public class LocalDictionaryService implements DictionaryService {
     @Override
     public boolean isConfigured() {
         return !starterEntries.isEmpty() || status().ecdictImported();
+    }
+
+    /**
+     * The inflections the imported ECDICT dictionary lists for {@code english} in its exchange field
+     * (past tense, participles, third person, comparative, superlative, plural), such as "forwent"
+     * and "forgone" for forgo; empty when nothing is imported or the dictionary has no such entry.
+     */
+    public Set<String> inflections(String english) {
+        String key = normalizeKey(english);
+        if (ecdict == null || key.isBlank()) {
+            return Set.of();
+        }
+        try {
+            return ecdict.find(key)
+                .map(row -> EcdictExchange.inflections(row.word(), row.exchange()))
+                .orElse(Set.of());
+        } catch (SQLException e) {
+            LOGGER.log(Level.WARNING, "Cannot read the inflections of '" + key + "' in the imported ECDICT dictionary", e);
+            return Set.of();
+        }
     }
 
     /** What is imported and loaded; reads only the dictionary's metadata, never the CSV. */

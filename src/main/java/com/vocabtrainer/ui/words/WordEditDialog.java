@@ -28,14 +28,14 @@ final class WordEditDialog {
 
     /** Shows the form for {@code word} and saves it on OK; true when the word was saved. */
     boolean edit(WordCard word) {
-        TextField englishField = new TextField(word.getEnglish());
-        TextField chineseField = new TextField(word.getChinese());
-        TextField posField = new TextField(word.getPartOfSpeech() == null ? "" : word.getPartOfSpeech());
-        TextField tagsField = new TextField(word.getTags() == null ? "" : word.getTags());
-        TextArea exampleArea = new TextArea(word.getExampleSentence() == null ? "" : word.getExampleSentence());
-        TextArea noteArea = new TextArea(word.getNote() == null ? "" : word.getNote());
-        exampleArea.setPrefRowCount(3);
-        noteArea.setPrefRowCount(3);
+        TextField englishField = field("editEnglishField", word.getEnglish());
+        TextField chineseField = field("editChineseField", word.getChinese());
+        TextField phoneticField = field("editPhoneticField", word.getPhonetic());
+        TextField posField = field("editPosField", word.getPartOfSpeech());
+        TextField tagsField = field("editTagsField", word.getTags());
+        TextArea exampleArea = area("editExampleArea", word.getExampleSentence());
+        TextArea noteArea = area("editNoteArea", word.getNote());
+        phoneticField.setPromptText("e.g. /əˈbeɪt/");
 
         GridPane form = new GridPane();
         form.setHgap(10);
@@ -44,14 +44,16 @@ final class WordEditDialog {
         form.add(englishField, 1, 0);
         form.add(new Label("Chinese"), 0, 1);
         form.add(chineseField, 1, 1);
-        form.add(new Label("POS"), 0, 2);
-        form.add(posField, 1, 2);
-        form.add(new Label("Tags"), 0, 3);
-        form.add(tagsField, 1, 3);
-        form.add(new Label("Example"), 0, 4);
-        form.add(exampleArea, 1, 4);
-        form.add(new Label("Notes"), 0, 5);
-        form.add(noteArea, 1, 5);
+        form.add(new Label("Phonetic"), 0, 2);
+        form.add(phoneticField, 1, 2);
+        form.add(new Label("POS"), 0, 3);
+        form.add(posField, 1, 3);
+        form.add(new Label("Tags"), 0, 4);
+        form.add(tagsField, 1, 4);
+        form.add(new Label("Example"), 0, 5);
+        form.add(exampleArea, 1, 5);
+        form.add(new Label("Notes"), 0, 6);
+        form.add(noteArea, 1, 6);
 
         if (!context.dialogs().showForm("Edit word", form)) {
             return false;
@@ -60,7 +62,7 @@ final class WordEditDialog {
             ValidatedWord validated = validationService.validate(
                 englishField.getText(),
                 chineseField.getText(),
-                word.getPhonetic(),
+                phoneticField.getText(),
                 posField.getText(),
                 exampleArea.getText(),
                 noteArea.getText(),
@@ -80,5 +82,19 @@ final class WordEditDialog {
             context.errors().reportFailure("Save failed", e);
             return false;
         }
+    }
+
+    private static TextField field(String id, String value) {
+        TextField field = new TextField(value == null ? "" : value);
+        field.setId(id);
+        return field;
+    }
+
+    private static TextArea area(String id, String value) {
+        TextArea area = new TextArea(value == null ? "" : value);
+        area.setId(id);
+        area.setPrefRowCount(3);
+        area.setWrapText(true);
+        return area;
     }
 }

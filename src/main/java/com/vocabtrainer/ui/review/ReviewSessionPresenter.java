@@ -22,11 +22,13 @@ import com.vocabtrainer.ui.DataChanges;
 import com.vocabtrainer.ui.Formats;
 import com.vocabtrainer.ui.LatestRequest;
 import com.vocabtrainer.ui.TaskRunner;
+import com.vocabtrainer.ui.WordDetails;
 import com.vocabtrainer.util.ErrorMessages;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
@@ -38,6 +40,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 /**
  * The Review tab without JavaFX: which card is shown, what the user can do next and every text the
@@ -55,6 +58,10 @@ import java.util.logging.Logger;
  * check caps it, what it counts as instead ("Hard (53%)"); the suggested rating is the best the
  * answer counts as, at most Good. When the check capped the ratings the user may override it ("I was
  * right"): the rating they choose then counts as it is, and the log says so.
+ *
+ * Before the answer is submitted, only what cannot give the answer away is shown with the question
+ * ({@link #hint()}); once it is checked, the card's phonetic, part of speech, example (the word in
+ * bold), note and tags are shown too ({@link #revealedDetails()}).
  *
  * Call it on the UI thread only.
  */
@@ -93,6 +100,8 @@ public final class ReviewSessionPresenter {
     /** What the result area says after a failed practice brought the word's due date forward. */
     static final String PRACTICE_MISSED =
         "Practice saved: the word was not due, but after this miss it is due again from the next study day.";
+    /** Chinese text, which in an example sentence would give an English-to-Chinese answer away. */
+    private static final Pattern HAN = Pattern.compile("\\p{IsHan}");
 
     private final ReviewService reviewService;
     private final GoalService goalService;
@@ -136,6 +145,9 @@ public final class ReviewSessionPresenter {
     private String question = LOADING;
     private String details = "";
     private String answerPrompt = ReviewMode.EN_TO_ZH.getPrompt();
+    private String hint = "";
+    /** The answered card's details; null until its answer is checked. */
+    private WordDetails revealed;
     private String result = "";
     private String sessionProgress = "";
     private String completionTitle = "Review complete";
@@ -310,6 +322,7 @@ public final class ReviewSessionPresenter {
         // the direction it chose for the card, and an Easy recognition must count as Mixed mode's.
         checked = reviewService.submitAnswer(answered.getId(), answer, mode, effectivelyShownAt);
         overridden = false;
+        revealed = WordDetails.of(answered, reviewService.exampleSpans(answered));
         previewRatings();
         checkedText = "Correct answer: " + checked.correctAnswer()
             + System.lineSeparator() + "Your answer: " + checked.userAnswer()
@@ -566,6 +579,23 @@ public final class ReviewSessionPresenter {
         return answerPrompt;
     }
 
+    /**
+     * What is shown with the question before it is answered, as long as it cannot give the answer
+     * away (see {@link #hint(WordCard, ReviewMode)}); empty without a card.
+     */
+    public String hint() {
+        return hint;
+    }
+
+    /**
+     * The answered card's phonetic, part of speech, example (with the word marked), note and tags;
+     * empty until the answer is checked, so nothing there gives the answer away.
+     */
+    public Optional<WordDetails> revealedDetails() {
+        boolean answered = canRate() || state == State.SAVING;
+        return answered ? Optional.ofNullable(revealed) : Optional.empty();
+    }
+
     /** The checked answer with its explanation, the saved rating, or a hint. */
     public String result() {
         return result;
@@ -628,6 +658,8 @@ public final class ReviewSessionPresenter {
         result = "";
         ratingPreviews.clear();
         checked = null;
+        revealed = null;
+        hint = "";
         overridden = false;
         cardNumber++;
         Optional<WordCard> next;
@@ -650,7 +682,36 @@ public final class ReviewSessionPresenter {
         }
         state = State.AWAITING_ANSWER;
         question = questionMode == ReviewMode.ZH_TO_EN ? card.getChinese() : card.getEnglish();
+        hint = hint(card, questionMode);
         details = questionMode.getLabel() + " | " + cardDetails(card, now);
+    }
+
+    /**
+     * What may be shown with a question asked in {@code direction} before it is answered. English to
+     * Chinese: the phonetic and part of speech and, on a line of its own, the example sentence unless
+     * it has Chinese in it (a translation would give the meaning away). Chinese to English: only the
+     * part of speech, since the phonetic and the example give the word away. Never the note or tags,
+     * which often hold the meaning or a definition.
+     */
+    static String hint(WordCard card, ReviewMode direction) {
+        String partOfSpeech = clean(card.getPartOfSpeech());
+        if (direction == ReviewMode.ZH_TO_EN) {
+            return partOfSpeech;
+        }
+        String line = String.join(" · ", nonEmpty(clean(card.getPhonetic()), partOfSpeech));
+        String example = clean(card.getExampleSentence());
+        if (example.isEmpty() || HAN.matcher(example).find()) {
+            return line;
+        }
+        return line.isEmpty() ? example : line + System.lineSeparator() + example;
+    }
+
+    private static List<String> nonEmpty(String... values) {
+        return Arrays.stream(values).filter(value -> !value.isEmpty()).toList();
+    }
+
+    private static String clean(String value) {
+        return value == null ? "" : value.strip();
     }
 
     private ReviewSessionSummary updateSessionProgress() {

@@ -15,9 +15,11 @@ import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.service.AiService;
 import com.vocabtrainer.service.ReviewService;
 import com.vocabtrainer.service.SimilarityService;
+import com.vocabtrainer.service.cloze.SentenceSpan;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.DataChanges;
 import com.vocabtrainer.ui.TaskRunner;
+import com.vocabtrainer.ui.WordDetails;
 import com.vocabtrainer.ui.review.ReviewSessionPresenter.State;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +34,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
@@ -120,6 +123,60 @@ class ReviewSessionPresenterTest {
 
         assertTrue(presenter.result().endsWith(nl() + nl() + "Explanation of " + card.getEnglish()), presenter.result());
         assertTrue(presenter.result().startsWith("Correct answer: " + card.getChinese()), presenter.result());
+    }
+
+    @Test
+    void theCardsDetailsAreShownOnlyOnceTheAnswerIsChecked() throws SQLException {
+        presenter.showDeck(deckId);
+        WordCard card = presenter.card().orElseThrow();
+        card.setPhonetic("/ˈtest/");
+        card.setNote("English definition: a note that names the meaning, " + card.getChinese());
+        services.wordRepository().update(card);
+        presenter.resetSession();
+        assertEquals(card.getId(), presenter.card().orElseThrow().getId());
+
+        assertEquals("/ˈtest/ · " + card.getPartOfSpeech() + nl() + card.getExampleSentence(), presenter.hint());
+        assertTrue(presenter.revealedDetails().isEmpty());
+
+        presenter.setAnswer(firstMeaning(card));
+        presenter.submit();
+
+        WordDetails details = presenter.revealedDetails().orElseThrow();
+        assertEquals("/ˈtest/", details.phonetic());
+        assertEquals(card.getPartOfSpeech(), details.partOfSpeech());
+        assertEquals(card.getExampleSentence(), details.exampleText());
+        assertEquals(List.of(card.getEnglish().toLowerCase(Locale.ROOT)), details.example().stream()
+            .filter(SentenceSpan::target).map(span -> span.text().toLowerCase(Locale.ROOT)).toList());
+        assertEquals(card.getNote(), details.note());
+        assertEquals(card.getTags(), details.tags());
+
+        presenter.rate(ReviewRating.GOOD);
+
+        assertTrue(presenter.revealedDetails().isEmpty(), "the next card's details wait for its answer");
+        assertFalse(presenter.hint().contains(card.getExampleSentence()));
+    }
+
+    @Test
+    void theHintBeforeAnAnswerNeverGivesItAway() {
+        WordCard word = WordCard.createNew(deckId, "abate", "减弱; 减少");
+        word.setPhonetic("/əˈbeɪt/");
+        word.setPartOfSpeech("verb");
+        word.setExampleSentence("The storm began to abate.");
+        word.setNote("减弱 (English: to lessen)");
+        word.setTags("mine");
+
+        assertEquals("/əˈbeɪt/ · verb" + nl() + "The storm began to abate.",
+            ReviewSessionPresenter.hint(word, ReviewMode.EN_TO_ZH));
+        assertEquals("verb", ReviewSessionPresenter.hint(word, ReviewMode.ZH_TO_EN),
+            "the phonetic and the example would give the English word away");
+        word.setExampleSentence("The storm began to abate. 暴风雨开始减弱。");
+        assertEquals("/əˈbeɪt/ · verb", ReviewSessionPresenter.hint(word, ReviewMode.EN_TO_ZH),
+            "an example with Chinese in it could give the meaning away");
+        word.setExampleSentence("The storm began to abate.");
+        word.setPhonetic(" ");
+        word.setPartOfSpeech(null);
+        assertEquals("The storm began to abate.", ReviewSessionPresenter.hint(word, ReviewMode.EN_TO_ZH));
+        assertEquals("", ReviewSessionPresenter.hint(word, ReviewMode.ZH_TO_EN));
     }
 
     @Test
@@ -848,7 +905,7 @@ class ReviewSessionPresenterTest {
     void thePresenterAndWhatItUsesFromTheUiPackageDoNotNeedJavaFx() throws Exception {
         for (Class<?> type : List.of(ReviewSessionPresenter.class, ReviewSessionPresenter.State.class,
             ReviewSessionPresenter.FailureReporter.class, DataChanges.class, DataChange.class, TaskRunner.class,
-            com.vocabtrainer.ui.Formats.class, com.vocabtrainer.ui.LatestRequest.class)) {
+            com.vocabtrainer.ui.Formats.class, com.vocabtrainer.ui.LatestRequest.class, WordDetails.class)) {
             String fileName = type.getName().substring(type.getName().lastIndexOf('.') + 1) + ".class";
             try (InputStream classFile = type.getResourceAsStream(fileName)) {
                 String constants = new String(classFile.readAllBytes(), StandardCharsets.ISO_8859_1);

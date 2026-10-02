@@ -241,33 +241,20 @@ public class EcdictImportService {
      * row that is itself a form names its base form ("0:abandon/1:p").
      */
     private static void addForms(EcdictRepository.EcdictImport target, String word, String exchange) throws SQLException {
-        if (exchange.isEmpty()) {
-            return;
-        }
         String lemma = null;
         String lemmaKinds = "";
-        for (String item : exchange.split("/")) {
-            int colon = item.indexOf(':');
-            if (colon <= 0) {
-                continue;
-            }
-            String code = item.substring(0, colon).strip();
-            String value = item.substring(colon + 1).strip();
-            if (value.isEmpty()) {
-                continue;
-            }
-            switch (code) {
-                case "0" -> lemma = value;
-                case "1" -> lemmaKinds = value;
-                case "p", "d", "i", "3", "r", "t", "s" -> {
-                    if (!value.equalsIgnoreCase(word)) {
-                        target.addForm(value, word, code);
-                    }
+        for (EcdictExchange.Item item : EcdictExchange.parse(exchange)) {
+            String value = item.value();
+            if (item.isInflection()) {
+                if (!value.equalsIgnoreCase(word)) {
+                    target.addForm(value, word, item.code());
                 }
-                default -> {
-                    // Other codes are not inflections.
-                }
+            } else if (item.code().equals("0")) {
+                lemma = value;
+            } else if (item.code().equals("1")) {
+                lemmaKinds = value;
             }
+            // Other codes are not inflections.
         }
         if (lemma != null && !lemma.equalsIgnoreCase(word)) {
             target.addForm(word, lemma, lemmaKinds);

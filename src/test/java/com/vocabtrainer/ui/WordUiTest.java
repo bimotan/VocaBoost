@@ -47,6 +47,30 @@ class WordUiTest extends MainWindowUiTest {
     }
 
     @Test
+    void theDictionaryFillsInAPhoneticTheFormLeftEmpty() throws Exception {
+        selectTab("addImportTab");
+        type("addEnglishField", "obfuscate");
+        type("addChineseField", "使模糊");
+        click("addWordButton");
+
+        waitForText("addWordStatusLabel", "Added to " + STARTER_DECK + ": obfuscate | Verified by "
+            + TestDictionary.SOURCE + " | Phonetic /ˈɒbfʌskeɪt/");
+        long deckId = currentDeck().getId();
+        assertEquals("/ˈɒbfʌskeɪt/", services.wordRepository().findByEnglish(deckId, "obfuscate").orElseThrow().getPhonetic());
+        assertEquals("", text("addPhoneticField"), "the form is cleared after adding");
+
+        // A phonetic the user typed is kept.
+        services.wordRepository().deleteById(services.wordRepository().findByEnglish(deckId, "obfuscate").orElseThrow().getId());
+        type("addEnglishField", "obfuscate");
+        type("addChineseField", "使模糊");
+        type("addPhoneticField", "/ɒbˈfʌskeɪt/");
+        click("addWordButton");
+
+        waitForText("addWordStatusLabel", "Added to " + STARTER_DECK + ": obfuscate | Verified by " + TestDictionary.SOURCE);
+        assertEquals("/ɒbˈfʌskeɪt/", services.wordRepository().findByEnglish(deckId, "obfuscate").orElseThrow().getPhonetic());
+    }
+
+    @Test
     void aWordNoDictionaryKnowsIsAddedAsUnverifiedOnlyAfterConfirmation() throws Exception {
         selectTab("addImportTab");
         type("addEnglishField", "snarkle");
