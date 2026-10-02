@@ -166,19 +166,24 @@ final class AddWordBox {
                 statusLabel.setText("Please select a target deck first.");
                 return;
             }
-            ValidatedWord validated = validateForm();
-            if (wordRepository.findByEnglish(targetDeck.getId(), validated.english()).isPresent()) {
+            String english = validationService.validateEnglishOnly(englishField.getText());
+            if (wordRepository.findByEnglish(targetDeck.getId(), english).isPresent()) {
                 statusLabel.setText("Word already exists in " + targetDeck.getName() + ": "
-                    + validated.english() + ". Edit it in Word List.");
+                    + english + ". Edit it in Word List.");
                 return;
+            }
+            // A meaning left empty can still be copied from another deck; any other mistake is shown first.
+            boolean hasMeaning = !validationService.normalizeChinese(chineseField.getText()).isBlank();
+            if (hasMeaning) {
+                validateForm();
             }
             copiedFrom = null;
-            List<WordCard> elsewhere = wordRepository.findInOtherDecks(validated.english(), targetDeck.getId());
-            if (!elsewhere.isEmpty() && !askAboutOtherDecks(validated.english(), targetDeck, elsewhere)) {
-                statusLabel.setText("Canceled: " + validated.english());
+            List<WordCard> elsewhere = wordRepository.findInOtherDecks(english, targetDeck.getId());
+            if (!elsewhere.isEmpty() && !askAboutOtherDecks(english, targetDeck, elsewhere, hasMeaning)) {
+                statusLabel.setText("Canceled: " + english);
                 return;
             }
-            checkThenAdd(validated.english());
+            checkThenAdd(validateForm().english());
         } catch (IllegalArgumentException e) {
             statusLabel.setText(e.getMessage());
         } catch (SQLException | RuntimeException e) {
@@ -188,10 +193,12 @@ final class AddWordBox {
 
     /**
      * Says which other decks have {@code english} and what they have for it, and offers to copy the
-     * first one's meaning, part of speech, example and phonetic into the form. False when the user
-     * cancels; true to go on adding, with the form as typed or as copied.
+     * first one's meaning, part of speech, example and phonetic into the form. Adding it as typed is
+     * offered only when {@code hasMeaning}: the form has a Chinese meaning of its own. False when the
+     * user cancels; true to go on adding, with the form as typed or as copied.
      */
-    private boolean askAboutOtherDecks(String english, Deck targetDeck, List<WordCard> elsewhere) {
+    private boolean askAboutOtherDecks(String english, Deck targetDeck, List<WordCard> elsewhere,
+                                       boolean hasMeaning) {
         WordCard source = elsewhere.get(0);
         String sourceDeck = deckName(source.getDeckId());
         StringBuilder content = new StringBuilder();
@@ -207,8 +214,11 @@ final class AddWordBox {
         ButtonType cancel = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
         String decks = elsewhere.stream().map(word -> deckName(word.getDeckId())).distinct()
             .collect(Collectors.joining(", "));
-        Optional<ButtonType> choice = context.dialogs().choose("Word in another deck",
-            english + " is already in " + decks, content.toString(), copy, asTyped, cancel);
+        Optional<ButtonType> choice = hasMeaning
+            ? context.dialogs().choose("Word in another deck", english + " is already in " + decks,
+                content.toString(), copy, asTyped, cancel)
+            : context.dialogs().choose("Word in another deck", english + " is already in " + decks,
+                content.toString(), copy, cancel);
         if (choice.isEmpty() || choice.get() == cancel) {
             return false;
         }

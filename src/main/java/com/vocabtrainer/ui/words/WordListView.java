@@ -349,7 +349,10 @@ public final class WordListView {
             context.errors().showInfo("Please select a word to delete.");
             return;
         }
-        if (context.dialogs().confirm("Delete word", "Delete " + selected.getEnglish() + "?",
+        // With "All decks" the same word can be listed once per deck: say which one goes.
+        String fromDeck = deckCol.isVisible()
+            ? " from " + deckNames.getOrDefault(selected.getDeckId(), "its deck") : "";
+        if (context.dialogs().confirm("Delete word", "Delete " + selected.getEnglish() + fromDeck + "?",
             "Related review logs will also be removed.")) {
             try {
                 wordRepository.deleteById(selected.getId());

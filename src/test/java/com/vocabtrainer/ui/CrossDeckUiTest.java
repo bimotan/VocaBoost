@@ -67,6 +67,28 @@ class CrossDeckUiTest extends MainWindowUiTest {
     }
 
     @Test
+    void deletingFromAllDecksSaysWhichDecksWordGoes() throws Exception {
+        long starterDeckId = currentDeck().getId();
+        dialogs.answerText("TOEFL");
+        click("newDeckButton");
+        long toeflId = currentDeck().getId();
+        services.wordRepository().insert(WordCard.createNew(toeflId, "abate", "减轻"));
+        selectDeck("deckSelector", STARTER_DECK);
+        selectTab("wordListTab");
+        click("wordAllDecksToggle");
+        type("wordSearchField", "abate");
+        Fx.run(() -> this.<WordCard>table("wordTable").getSelectionModel().select(0));
+        dialogs.confirm(true);
+
+        click("deleteWordButton");
+
+        assertEquals("Delete abate from TOEFL?", dialogs.last(ScriptedDialogs.Kind.CONFIRM).header());
+        assertTrue(services.wordRepository().findByEnglish(toeflId, "abate").isEmpty());
+        assertTrue(services.wordRepository().findByEnglish(starterDeckId, "abate").isPresent());
+        assertEquals(List.of("abate " + STARTER_DECK), rows());
+    }
+
+    @Test
     void addingAWordAnotherDeckHasOffersToCopyItsDetails() throws Exception {
         WordCard starterAbate = services.wordRepository().findByEnglish(currentDeck().getId(), "abate").orElseThrow();
         dialogs.answerText("TOEFL");
@@ -95,6 +117,28 @@ class CrossDeckUiTest extends MainWindowUiTest {
         assertEquals(CardState.NEW, copy.getState(), "the copy has a schedule of its own");
         assertTrue(copy.getId() != starterAbate.getId());
         assertEquals(STARTER_ABATE, services.wordRepository().findById(starterAbate.getId()).orElseThrow().getChinese());
+    }
+
+    @Test
+    void aWordTypedWithoutAMeaningCanTakeTheOtherDecksMeaning() throws Exception {
+        dialogs.answerText("TOEFL");
+        click("newDeckButton");
+        long toeflId = currentDeck().getId();
+        selectTab("addImportTab");
+        type("addEnglishField", "abate");
+        dialogs.chooseButton("Copy and add");
+        click("addWordButton");
+
+        waitForTextStartingWith("addWordStatusLabel", "Added to TOEFL: abate | Verified by");
+        // Adding it as typed would fail without a meaning, so it is not offered.
+        assertEquals("Copy and add | Cancel", dialogs.last(ScriptedDialogs.Kind.CHOOSE).value());
+        assertEquals(STARTER_ABATE, services.wordRepository().findByEnglish(toeflId, "abate").orElseThrow().getChinese());
+
+        // A word no other deck has still needs a meaning.
+        type("addEnglishField", "obfuscate");
+        click("addWordButton");
+        assertEquals("Chinese meaning cannot be empty.", text("addWordStatusLabel"));
+        assertTrue(services.wordRepository().findByEnglish(toeflId, "obfuscate").isEmpty());
     }
 
     @Test
