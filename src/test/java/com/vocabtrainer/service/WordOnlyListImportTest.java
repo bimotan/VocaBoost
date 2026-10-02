@@ -1,6 +1,7 @@
 package com.vocabtrainer.service;
 
 import com.vocabtrainer.domain.Deck;
+import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
@@ -201,6 +202,56 @@ class WordOnlyListImportTest {
             result.messages());
         assertEquals(1, progress.size());
         assertEquals(WordColumn.ENGLISH, service.previewGreCsv(file, deck.getId()).mapping().fieldAt(0).orElseThrow());
+    }
+
+    @Test
+    void aListWhoseFirstWordNamesAnotherFieldIsStillAListOfWords() throws Exception {
+        Path file = write("list.txt", "definition\nabandon\nabate\n");
+
+        ImportPreview preview = service.previewGreCsv(file, deck.getId());
+        ImportResult result = service.importGreCsv(file, deck.getId());
+
+        assertEquals("english (no header row)", preview.columns());
+        assertEquals(2, result.importedCount(), result.toSummary());
+        assertEquals(List.of("Line 1 skipped: definition is not in the local dictionary, so it has no meaning to import"),
+            result.messages());
+    }
+
+    @Test
+    void aWordAddedToTheDeckDuringTheLookupsIsSkippedInsteadOfFailingTheImport() throws Exception {
+        Path file = write("list.txt", "abandon\nabate\nlucid\n");
+        LocalDictionaryService local = new LocalDictionaryService(ecdict);
+        // The user adds "abate" on the add form while the import looks up "abandon".
+        DictionaryService addsAbate = new DictionaryService() {
+            @Override
+            public DictionaryLookupResult lookup(String english) {
+                if (english.equals("abandon")) {
+                    try {
+                        words.insert(WordCard.createNew(deck.getId(), "Abate", "减轻"));
+                    } catch (SQLException e) {
+                        throw new IllegalStateException(e);
+                    }
+                }
+                return local.lookup(english);
+            }
+
+            @Override
+            public boolean isConfigured() {
+                return true;
+            }
+        };
+        ImportExportService racing = new ImportExportService(words, new WordValidationService(), addsAbate, null,
+            () -> true);
+
+        ImportResult result = racing.importWordList(file, deck.getId(), WordListOptions.DETECT, progress -> { },
+            () -> false);
+
+        assertEquals(2, result.importedCount(), result.toSummary());
+        assertEquals(2, result.meaningsFilled());
+        assertEquals(List.of("Line 2 skipped: duplicate word abate (added to the deck during the import)"),
+            result.messages());
+        assertEquals("减轻", word("abate").getChinese(), "the word the user added stays");
+        assertEquals(3, words.findAll(deck.getId()).size());
     }
 
     private Path write(String name, String text) throws Exception {

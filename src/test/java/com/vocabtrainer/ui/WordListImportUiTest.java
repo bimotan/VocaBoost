@@ -202,6 +202,7 @@ class WordListImportUiTest extends MainWindowUiTest {
 
         assertTrue(isVisible("importProgressBar"));
         assertTrue(isDisabled("importCsvButton"), "the same file cannot be imported twice at once");
+        assertTrue(isDisabled("importOnlineLookupCheckBox"), "the running import has its lookup choice");
         waitForTextStartingWith("importStatusLabel", "Importing..." + System.lineSeparator()
             + "Looking up meanings: 1 of 3");
         showImportSection();
@@ -214,6 +215,7 @@ class WordListImportUiTest extends MainWindowUiTest {
         assertEquals("Import canceled. Nothing was imported.", text("importStatusLabel"));
         assertFalse(isVisible("importProgressBar"));
         assertFalse(isDisabled("importCsvButton"));
+        assertFalse(isDisabled("importOnlineLookupCheckBox"));
         assertTrue(services.wordRepository().findByEnglish(currentDeck().getId(), "petrichor").isEmpty());
         selectTab("wordListTab");
         assertEquals(STARTER_WORDS, rowCount("wordTable"));

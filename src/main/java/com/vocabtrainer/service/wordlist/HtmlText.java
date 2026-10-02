@@ -7,12 +7,16 @@ import java.util.regex.Pattern;
 /**
  * Turns the HTML of an Anki field into the plain text a word field holds, and back for the Anki
  * export. Line breaks ({@code <br>}, {@code <div>}, {@code <p>}, {@code <li>}) become "; " (a space
- * after a line that ends in punctuation), other tags are dropped and entities are unescaped. Anki's {@code [sound:...]} references and {@code <img>}
+ * after a line that ends in punctuation), style sheets and scripts are dropped with their text, other
+ * tags are dropped and entities are unescaped. Anki's {@code [sound:...]} references and {@code <img>}
  * tags are dropped from every field, HTML or not, since a card has no use for them here.
  */
 public final class HtmlText {
     private static final Pattern SOUND = Pattern.compile("\\[sound:[^\\]]*\\]");
     private static final Pattern IMAGE = Pattern.compile("<img\\b[^>]*>", Pattern.CASE_INSENSITIVE);
+    /** Style sheets and scripts pasted into a field: their text is not part of the field's text. */
+    private static final Pattern STYLE_OR_SCRIPT = Pattern.compile("<(style|script)\\b[^>]*>.*?</\\1\\s*>",
+        Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern BREAK = Pattern.compile("<\\s*(?:br|/?div|/?p|/?li|hr)\\b[^>]*>",
         Pattern.CASE_INSENSITIVE);
     /** A tag or comment; "a < b" and "<3" are text. */
@@ -20,7 +24,7 @@ public final class HtmlText {
     private static final Pattern ENTITY = Pattern.compile("&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});");
     /** What makes a field of a file without "#html:" read as HTML. */
     private static final Pattern LOOKS_LIKE_HTML = Pattern.compile(
-        "</?(?:br|div|p|span|b|i|u|em|strong|font|img|sup|sub|ul|ol|li|a|hr)\\b[^>]*>|&(?:nbsp|amp|lt|gt|quot|#[0-9]+);",
+        "</?(?:br|div|p|span|b|i|u|em|strong|font|img|sup|sub|ul|ol|li|a|hr|style|script)\\b[^>]*>|&(?:nbsp|amp|lt|gt|quot|#[0-9]+);",
         Pattern.CASE_INSENSITIVE);
     private static final String ENDS_CLAUSE = ",.;:!?，。；：！？、";
     private static final Map<String, String> NAMED_ENTITIES = Map.ofEntries(
@@ -54,6 +58,7 @@ public final class HtmlText {
         if (!html) {
             return text.strip();
         }
+        text = STYLE_OR_SCRIPT.matcher(text).replaceAll("");
         text = BREAK.matcher(text).replaceAll("\n");
         text = TAG.matcher(text).replaceAll("");
         text = unescape(text).replace(' ', ' ');

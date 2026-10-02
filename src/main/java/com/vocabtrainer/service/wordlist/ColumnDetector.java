@@ -31,7 +31,12 @@ final class ColumnDetector {
         "(?:(?:" + POS_ABBREVIATIONS + ")\\.?|" + POS_WORDS + ")(?:\\s*[,/&;、，]\\s*(?:(?:" + POS_ABBREVIATIONS
             + ")\\.?|" + POS_WORDS + "))*", Pattern.CASE_INSENSITIVE);
     private static final Pattern ENGLISH_WORD = Pattern.compile("[A-Za-z][A-Za-z'\\-]*(?: [A-Za-z][A-Za-z'\\-]*){0,3}");
-    private static final Pattern PHONETIC = Pattern.compile("[/\\[].{1,60}[/\\]]|.*[ˈˌəɪʊʌæɑɒɔːθðʃʒŋɜ].*");
+    /**
+     * IPA anywhere, or slashes or brackets around a stress mark or length mark ("[ri:d]",
+     * "/a'beit/"); a label such as "[formal]" or "[pl.]" is not a phonetic.
+     */
+    private static final Pattern PHONETIC = Pattern.compile(
+        "[/\\[][^/\\[\\]]{0,60}['ˈˌ:ːəɪʊʌæɑɒɔθðʃʒŋɜ][^/\\[\\]]{0,60}[/\\]]|.*[ˈˌəɪʊʌæɑɒɔːθðʃʒŋɜ].*");
     private static final Pattern LATIN_WORD = Pattern.compile("[A-Za-z]{2,}");
     private static final Pattern CJK = Pattern.compile("[\\u3400-\\u4DBF\\u4E00-\\u9FFF\\uF900-\\uFAFF]");
 

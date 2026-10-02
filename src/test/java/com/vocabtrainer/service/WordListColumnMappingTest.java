@@ -62,6 +62,18 @@ class WordListColumnMappingTest {
     }
 
     @Test
+    void aUsageLabelAmongTheMeaningsIsNotTakenForAPhonetic() throws Exception {
+        Path file = write("labels.csv", "english,chinese\nformal,正式的; [formal]\nabate,减弱; v.\n");
+
+        service.importGreCsv(file, deck.getId());
+
+        assertEquals("正式的; [formal]", word("formal").getChinese());
+        assertEquals("", orEmpty(word("formal").getPhonetic()));
+        assertEquals("减弱", word("abate").getChinese());
+        assertEquals("v.", word("abate").getPartOfSpeech(), "a part of speech alone is still moved");
+    }
+
+    @Test
     void theChosenColumnsReplaceTheDetectedOnesInThePreviewAndTheImport() throws Exception {
         Path file = write("reversed.tsv", String.join("\n",
             "减弱\tabate\t/əˈbeɪt/\tv.\tThe storm began to abate.",

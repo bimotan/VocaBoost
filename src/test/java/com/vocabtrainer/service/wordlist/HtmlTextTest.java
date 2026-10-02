@@ -31,6 +31,13 @@ class HtmlTextTest {
     }
 
     @Test
+    void styleSheetsAndScriptsAreDroppedWithTheirText() {
+        assertEquals("abate", HtmlText.toText("<style>.card { font-family: arial; }</style>abate", true));
+        assertEquals("减弱; 减少", HtmlText.toText("减弱<SCRIPT type=\"text/javascript\">\nalert(1);\n</script ><br>减少", true));
+        assertTrue(HtmlText.looksLikeHtml("减弱<script>alert(1)</script>"));
+    }
+
+    @Test
     void soundAndImageReferencesAreDroppedInEveryMode() {
         assertEquals("abate", HtmlText.toText("abate[sound:abate_us.mp3]", true));
         assertEquals("abate", HtmlText.toText("[sound:abate.mp3] abate", false));

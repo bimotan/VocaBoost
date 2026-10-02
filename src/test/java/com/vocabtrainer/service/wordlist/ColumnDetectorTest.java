@@ -78,6 +78,11 @@ class ColumnDetectorTest {
         assertTrue(ColumnDetector.isPhonetic("[ə'beit]"));
         assertFalse(ColumnDetector.isPhonetic("[网络] 胡德"));
         assertFalse(ColumnDetector.isPhonetic("abate"));
+        assertTrue(ColumnDetector.isPhonetic("[ri:d]"));
+        assertTrue(ColumnDetector.isPhonetic("/a'beit/"));
+        assertFalse(ColumnDetector.isPhonetic("[formal]"), "a usage label");
+        assertFalse(ColumnDetector.isPhonetic("[pl.]"));
+        assertFalse(ColumnDetector.isPhonetic("/and/"));
     }
 
     private static WordColumns detect(List<List<String>> rows) {

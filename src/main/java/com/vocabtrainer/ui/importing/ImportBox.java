@@ -64,6 +64,8 @@ final class ImportBox {
     private Path previewedPath;
     /** The columns the import detected in that file; the user's choice differs from them or not. */
     private WordColumns detectedColumns;
+    /** True while a word list import runs. */
+    private boolean importing;
 
     ImportBox(ViewContext context, ImportExportService importExportService, SettingsService settingsService) {
         this.context = context;
@@ -155,7 +157,7 @@ final class ImportBox {
             context.errors().logFailure("Reading offline mode failed", e);
             offline = false;
         }
-        onlineLookup.setDisable(offline);
+        onlineLookup.setDisable(offline || importing);
         if (offline) {
             onlineLookup.setSelected(false);
         }
@@ -205,7 +207,7 @@ final class ImportBox {
 
     /** Previews the shown file again with the columns chosen in the mapping pane. */
     private void previewChosenColumns() {
-        if (previewedPath != null) {
+        if (previewedPath != null && !importing) {
             preview(previewedPath, mapping);
         }
     }
@@ -301,6 +303,10 @@ final class ImportBox {
         for (Node button : importButtons()) {
             button.setDisable(true);
         }
+        // The import has its columns and lookup choice; changing them now would only preview again.
+        importing = true;
+        mapping.root().setDisable(true);
+        onlineLookup.setDisable(true);
         task.setOnSucceeded(event -> {
             importFinished();
             mapping.hide();
@@ -328,6 +334,9 @@ final class ImportBox {
         for (Node button : importButtons()) {
             button.setDisable(false);
         }
+        importing = false;
+        mapping.root().setDisable(false);
+        showOfflineMode();
     }
 
     private void showProgressRow(boolean visible) {

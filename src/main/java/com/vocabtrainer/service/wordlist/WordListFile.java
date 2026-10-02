@@ -98,7 +98,7 @@ public final class WordListFile implements Closeable {
             headerRow = null;
             names = anki.columnNames(csv.delimiter());
             keep(first);
-        } else if (first != null && WordColumns.fromHeader(first).isPresent()) {
+        } else if (first != null && headerColumns(first).isPresent()) {
             layout = Layout.HEADER_ROW;
             headerRow = first;
             names = first.fields();
@@ -175,6 +175,16 @@ public final class WordListFile implements Closeable {
             throw new CsvFormatException(lines.size() + 1, encoding.undecodableMessage(), e);
         }
         return AnkiHeader.parse(lines);
+    }
+
+    /**
+     * The columns a header row names. A first line with one word that names a field other than the
+     * English word ("sentence", "definition", "note") starts a list of words; it is not a header.
+     */
+    private static Optional<WordColumns> headerColumns(CsvRecord first) {
+        Optional<WordColumns> header = WordColumns.fromHeader(first);
+        long cells = first.fields().stream().filter(cell -> !cell.isBlank()).count();
+        return cells == 1 ? header.filter(columns -> columns.has(WordColumn.ENGLISH)) : header;
     }
 
     private void keep(CsvRecord record) {
@@ -256,7 +266,7 @@ public final class WordListFile implements Closeable {
     public WordColumns detectColumns() {
         Set<Integer> skipped = anki.metadataColumns();
         WordColumns columns = switch (layout) {
-            case HEADER_ROW -> WordColumns.fromHeader(headerRow).orElseThrow();
+            case HEADER_ROW -> headerColumns(headerRow).orElseThrow();
             case ANKI_COLUMNS -> WordColumns.byNames(names, ANKI_FIELD_NAMES);
             case SKIPPED_HEADER_ROW -> WordColumns.none().with(WordColumn.ENGLISH, 0);
             case NO_HEADER -> WordColumns.none();

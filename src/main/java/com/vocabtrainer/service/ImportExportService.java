@@ -282,12 +282,11 @@ public class ImportExportService {
         Analysis analysis = analyze(file, deckId, options, dictionary != null, cancelled);
         int toLookUp = analysis.pendingCount();
         int lookedUp = 0;
-        int filled = 0;
         int skipped = analysis.skipped;
-        List<WordCard> words = new ArrayList<>();
+        List<Row> ready = new ArrayList<>();
         for (Row row : analysis.rows) {
             if (row.word != null) {
-                words.add(row.word);
+                ready.add(row);
                 continue;
             }
             if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
@@ -299,13 +298,29 @@ public class ImportExportService {
             }
             progress.accept(new ImportProgress(++lookedUp, toLookUp));
             try {
-                words.add(wordFromDictionary(row, result, deckId, dictionaryName));
-                filled++;
+                row.word = wordFromDictionary(row, result, deckId, dictionaryName);
+                row.filled = true;
+                ready.add(row);
             } catch (IllegalArgumentException e) {
                 skipped++;
                 analysis.messages.add("Line " + row.line + " skipped: " + e.getMessage());
             }
         }
+        // The lookups can take minutes online, and the user can add a word meanwhile; a word
+        // already in the deck would fail the whole transaction on the unique index.
+        Set<String> inDeck = existingEnglishKeys(deckId);
+        List<Row> stillNew = new ArrayList<>();
+        for (Row row : ready) {
+            if (inDeck.contains(key(row.english))) {
+                skipped++;
+                analysis.messages.add("Line " + row.line + " skipped: duplicate word " + row.english
+                    + " (added to the deck during the import)");
+            } else {
+                stillNew.add(row);
+            }
+        }
+        List<WordCard> words = stillNew.stream().map(row -> row.word).toList();
+        int filled = (int) stillNew.stream().filter(row -> row.filled).count();
         try {
             int imported = wordRepository.insertAll(words);
             return new ImportResult(imported, skipped, analysis.messagesWithNotes(), filled,
@@ -566,6 +581,8 @@ public class ImportExportService {
         final Map<WordColumn, String> fields;
         String english = "";
         WordCard word;
+        /** True when the word's meaning came from the dictionary. */
+        boolean filled;
         String status = "";
 
         Row(int line, Map<WordColumn, String> fields) {
