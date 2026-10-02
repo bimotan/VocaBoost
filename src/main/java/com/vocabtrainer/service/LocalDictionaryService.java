@@ -151,7 +151,12 @@ public class LocalDictionaryService implements DictionaryService {
         }
     }
 
-    private static DictionaryEntry toEntry(EcdictRow row) {
+    /**
+     * The entry an ECDICT row gives: its translation cleaned into a meaning a learner can type, with
+     * the part of speech and note from it ({@link EcdictTranslationCleaner}), its phonetic and its
+     * English definition.
+     */
+    public static DictionaryEntry toEntry(EcdictRow row) {
         EcdictTranslationCleaner.Cleaned cleaned = EcdictTranslationCleaner.clean(row.translation());
         String pos = row.pos() == null || POS_DISTRIBUTION.matcher(row.pos()).matches() ? "" : row.pos();
         return new DictionaryEntry(

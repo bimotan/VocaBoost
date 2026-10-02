@@ -40,7 +40,8 @@ public class MainWindow {
         DeckHeader header = new DeckHeader(context, services.deckService(), services.settingsService(), configured);
         DashboardView dashboard = new DashboardView(context, services.statsService(), services.goalService(),
             services.achievementService(), services.examPlanService(), databasePath);
-        DecksView decksView = new DecksView(context, services.deckService(), services.statsService());
+        DecksView decksView = new DecksView(context, services.deckService(), services.statsService(),
+            services.ecdictTagDecks());
         ReviewView review = new ReviewView(context, services.reviewService(), services.goalService(), configured,
             services.clock());
         AddImportView addImport = new AddImportView(context, services.wordRepository(), services.validationService(),

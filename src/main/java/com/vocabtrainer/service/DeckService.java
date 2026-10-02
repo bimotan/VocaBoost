@@ -70,6 +70,19 @@ public class DeckService {
         }
     }
 
+    /**
+     * The active deck named {@code name}, with its spaces trimmed and collapsed as {@link #createDeck}
+     * does; empty when there is none.
+     */
+    public Optional<Deck> findActiveDeck(String name) {
+        String cleanName = name == null ? "" : name.trim().replaceAll("\\s+", " ");
+        try {
+            return cleanName.isEmpty() ? Optional.empty() : deckRepository.findByName(cleanName);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot look up the deck " + cleanName, e);
+        }
+    }
+
     public Deck createDeck(String name) {
         String cleanName = validateName(name);
         try {

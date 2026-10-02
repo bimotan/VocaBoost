@@ -63,6 +63,9 @@ public class EcdictRepository implements AutoCloseable {
         WHERE f.form = ?
         ORDER BY CASE WHEN e.frq > 0 THEN e.frq ELSE 1000000000 END, e.word
         LIMIT ?""";
+    /** ECDICT's ranks (1 is the most common word) are 0 or empty when unknown. */
+    private static final String BY_FREQUENCY =
+        "CASE WHEN frq > 0 THEN frq WHEN bnc > 0 THEN bnc ELSE 2147483647 END";
 
     private final Path databasePath;
     private final Path importPath;
@@ -142,6 +145,40 @@ public class EcdictRepository implements AutoCloseable {
             }
             return forms;
         }, List.of());
+    }
+
+    /**
+     * The entries whose space-separated {@code tag} field names {@code tag}, such as "gre" or "cet4",
+     * in {@code order}. ECDICT has no index on its tags, so this reads the whole table once.
+     *
+     * @throws IllegalArgumentException if {@code tag} is not 1 to 16 lower-case letters and digits
+     */
+    public List<EcdictRow> findByTag(String tag, TagOrder order) throws SQLException {
+        if (tag == null || !tag.matches("[a-z0-9]{1,16}")) {
+            throw new IllegalArgumentException("Not an ECDICT tag: " + tag);
+        }
+        String sql = "SELECT " + COLUMNS + " FROM ecdict WHERE (' ' || tag || ' ') LIKE ? ORDER BY "
+            + (order == TagOrder.ALPHABETICAL ? "word, rowid" : BY_FREQUENCY + ", word, rowid");
+        return read(connection -> {
+            List<EcdictRow> rows = new ArrayList<>();
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setString(1, "% " + tag + " %");
+                try (ResultSet rs = statement.executeQuery()) {
+                    while (rs.next()) {
+                        rows.add(mapRow(rs));
+                    }
+                }
+            }
+            return rows;
+        }, List.of());
+    }
+
+    /** How {@link #findByTag} lists the entries of a tag. */
+    public enum TagOrder {
+        /** Most common first: by the {@code frq} rank, else the {@code bnc} rank; words without either last. */
+        FREQUENCY,
+        /** By word, ignoring case. */
+        ALPHABETICAL
     }
 
     /**

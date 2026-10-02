@@ -97,6 +97,15 @@ The ECDICT box on the Add / Import tab tests a file (encoding, columns and the f
 
 Lookups are indexed queries (`EcdictRepositoryTest` checks the query plans) that keep almost nothing in memory, and translations are cleaned as they are read (`EcdictTranslationCleaner`), so the add form gets a Chinese answer key the learner can type: ECDICT's literal `\n` separates lines, leading part-of-speech markers (`vt.`, `n.`, `adj.`, ...) become the part of speech ("verb; noun"), an inflected form's remark such as "(abandonment 的复数)" moves to the note, lines tagged `[网络]`, `[计]`, `[医]`, ... move to the note unless the word has nothing else, and the senses are joined with "; " without splitting inside brackets ("使(马,鹰等)戴头罩"). A meaning longer than 200 characters keeps its first senses and lists the rest in the note. A word that is not an entry but an inflection of one ("abandons") returns its base form, and the result says so.
 
+### Decks from ECDICT Tags
+
+"Create deck from ECDICT tag..." on the Decks tab (`EcdictDeckBox`, `EcdictTagDeckService`) builds a deck from the words ECDICT's `tag` field gives an exam: gre, toefl, ielts, cet4, cet6, ky (考研), gk (高考) or zk (中考). It needs an imported `ecdict.db`; without one it says where to import it. The form chooses the tag, the deck (a new name, or an active deck to fill; "GRE (ECDICT)" by default, following the tag), an optional limit and the order: most common first (ECDICT's `frq` rank, else its `bnc` rank, words without either last) or alphabetical.
+
+- `EcdictRepository.findByTag` reads the tag's entries with one query; ECDICT has no index on its tags, and a scan of 770,000 rows takes a fraction of a second, off the JavaFX thread.
+- Each word gets the meaning, part of speech and note a lookup gives (`LocalDictionaryService.toEntry`, see above), ECDICT's phonetic and the exam tag as its tag. A word whose spelling the app does not accept ("a.m.") is skipped and counted.
+- Words the deck already has, archived ones too, are skipped; the limit counts the words added, so building the same deck again adds the next words. Words are inserted in the chosen order, so new cards are introduced most common first.
+- The deck and its words are written in one transaction, in batches of 500 with a progress bar and Cancel: a cancel or a failure adds nothing, and a new deck that would stay empty is not created. Adding words earns no XP and counts no new words. The deck becomes the current deck. 36,000 words take about 1.5 seconds.
+
 ## CSV Import and Export
 
 Every CSV file is read and written through `service/csv`:

@@ -34,6 +34,7 @@ import com.vocabtrainer.service.StarterImportService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.service.ecdict.EcdictImportService;
+import com.vocabtrainer.service.ecdict.EcdictTagDeckService;
 import com.vocabtrainer.ui.Dialogs;
 import com.vocabtrainer.ui.MainWindow;
 
@@ -61,6 +62,7 @@ import java.util.function.Supplier;
  * @param reviewScheduler    schedules reviews with the saved scheduling settings and exam dates
  * @param clock              the time every service and view works with
  * @param examPlanService    the exam dates, the countdown and the new-word plan
+ * @param ecdictTagDecks     builds decks from the words ECDICT tags with an exam
  */
 public record AppServices(
     DatabaseManager databaseManager,
@@ -89,7 +91,8 @@ public record AppServices(
     Deck startupDeck,
     ReviewScheduler reviewScheduler,
     Clock clock,
-    ExamPlanService examPlanService
+    ExamPlanService examPlanService,
+    EcdictTagDeckService ecdictTagDecks
 ) implements AutoCloseable {
     public static Builder builder(Path databasePath) {
         return new Builder(databasePath);
@@ -259,7 +262,8 @@ public record AppServices(
                 startupDeck,
                 reviewScheduler,
                 clock,
-                examPlanService
+                examPlanService,
+                new EcdictTagDeckService(ecdictRepository, deckService, wordRepository, validationService)
             );
         }
     }
