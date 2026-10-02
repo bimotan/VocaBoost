@@ -31,6 +31,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextInputControl;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
@@ -40,6 +41,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * The manual add form, with a dictionary lookup that fills it in. Adding first checks the word with
@@ -49,6 +52,11 @@ import java.util.function.UnaryOperator;
  * added as UNVERIFIED only after confirmation; when they could not be asked, the user can retry,
  * add it unchecked (tag UNCHECKED) or cancel, and in offline mode add it unchecked or cancel. A word
  * the dictionaries have gets their phonetic when the form leaves it empty.
+ *
+ * <p>A word another active deck already has is not added without asking: the user can copy that
+ * deck's meaning, part of speech, example and phonetic into the form and add it, add it as typed, or
+ * cancel. Either way the new card has its own schedule in the target deck (see docs/ARCHITECTURE.md,
+ * Word List and Decks).
  */
 final class AddWordBox {
     private static final String UNVERIFIED_TAG = "UNVERIFIED";
@@ -74,6 +82,8 @@ final class AddWordBox {
     private UiAsync.Cancellable runningCheck;
     /** The English word being checked while {@link #runningCheck} runs. */
     private String checkedWord;
+    /** The deck whose details the user copied into the form for the word being added, or null. */
+    private String copiedFrom;
 
     AddWordBox(ViewContext context, WordRepository wordRepository, WordValidationService validationService,
                ConfiguredServices configured) {
@@ -161,12 +171,78 @@ final class AddWordBox {
                     + validated.english() + ". Edit it in Word List.");
                 return;
             }
+            copiedFrom = null;
+            List<WordCard> elsewhere = wordRepository.findInOtherDecks(validated.english(), targetDeck.getId());
+            if (!elsewhere.isEmpty() && !askAboutOtherDecks(validated.english(), targetDeck, elsewhere)) {
+                statusLabel.setText("Canceled: " + validated.english());
+                return;
+            }
             checkThenAdd(validated.english());
         } catch (IllegalArgumentException e) {
             statusLabel.setText(e.getMessage());
         } catch (SQLException | RuntimeException e) {
             context.errors().reportFailure("Add failed", e);
         }
+    }
+
+    /**
+     * Says which other decks have {@code english} and what they have for it, and offers to copy the
+     * first one's meaning, part of speech, example and phonetic into the form. False when the user
+     * cancels; true to go on adding, with the form as typed or as copied.
+     */
+    private boolean askAboutOtherDecks(String english, Deck targetDeck, List<WordCard> elsewhere) {
+        WordCard source = elsewhere.get(0);
+        String sourceDeck = deckName(source.getDeckId());
+        StringBuilder content = new StringBuilder();
+        for (WordCard word : elsewhere) {
+            content.append(deckName(word.getDeckId())).append(": ").append(summary(word)).append(System.lineSeparator());
+        }
+        content.append(System.lineSeparator())
+            .append("Copy fills in the meaning, part of speech, example and phonetic from ").append(sourceDeck)
+            .append(". The word in ").append(targetDeck.getName())
+            .append(" gets its own review schedule and starts as a new word there.");
+        ButtonType copy = new ButtonType("Copy and add", ButtonBar.ButtonData.OK_DONE);
+        ButtonType asTyped = new ButtonType("Add as typed", ButtonBar.ButtonData.OTHER);
+        ButtonType cancel = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+        String decks = elsewhere.stream().map(word -> deckName(word.getDeckId())).distinct()
+            .collect(Collectors.joining(", "));
+        Optional<ButtonType> choice = context.dialogs().choose("Word in another deck",
+            english + " is already in " + decks, content.toString(), copy, asTyped, cancel);
+        if (choice.isEmpty() || choice.get() == cancel) {
+            return false;
+        }
+        if (choice.get() == copy) {
+            chineseField.setText(source.getChinese());
+            copyIfPresent(posField, source.getPartOfSpeech());
+            copyIfPresent(exampleArea, source.getExampleSentence());
+            copyIfPresent(phoneticField, source.getPhonetic());
+            copiedFrom = sourceDeck;
+        }
+        return true;
+    }
+
+    /** "减轻; 减少 · verb · /əˈbeɪt/ · The storm began to abate." with the parts the word has. */
+    private static String summary(WordCard word) {
+        return Stream.of(word.getChinese(), word.getPartOfSpeech(), word.getPhonetic(),
+                word.getExampleSentence())
+            .filter(part -> part != null && !part.isBlank())
+            .map(String::trim)
+            .collect(Collectors.joining(" · "));
+    }
+
+    /** Puts {@code value} into {@code field}, unless it is blank: the form keeps what the user typed. */
+    private static void copyIfPresent(TextInputControl field, String value) {
+        if (value != null && !value.isBlank()) {
+            field.setText(value);
+        }
+    }
+
+    private String deckName(long deckId) {
+        return context.decks().activeDecks().stream()
+            .filter(deck -> deck.getId() == deckId)
+            .map(Deck::getName)
+            .findFirst()
+            .orElse("another deck");
     }
 
     /** Asks the dictionaries about {@code english} in the background; a check still running is canceled. */
@@ -281,7 +357,9 @@ final class AddWordBox {
             exampleArea.clear();
             noteArea.clear();
             tagsField.clear();
-            String addedText = "Added to " + targetDeck.getName() + ": " + wordToSave.english() + verificationText;
+            String addedText = "Added to " + targetDeck.getName() + ": " + wordToSave.english() + verificationText
+                + (copiedFrom == null ? "" : " | Details copied from " + copiedFrom);
+            copiedFrom = null;
             statusLabel.setText(addedText);
             // Adding earns no XP: the word counts as a new word on the day of its first review.
             context.errors().guard("Word added, but refreshing the views failed",

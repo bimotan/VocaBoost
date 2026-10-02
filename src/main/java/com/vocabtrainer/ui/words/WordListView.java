@@ -1,6 +1,7 @@
 package com.vocabtrainer.ui.words;
 
 import com.vocabtrainer.domain.CardState;
+import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.ReviewScheduler;
@@ -25,11 +26,13 @@ import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -44,6 +47,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.OptionalDouble;
 import java.util.function.Function;
@@ -51,11 +55,12 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
- * The Word List tab: search and filter the current deck's words, edit or delete one. Under the table
- * a card shows the selected word's phonetic, part of speech, example (the word in bold), note and tags.
+ * The Word List tab: search and filter the current deck's words, or every active deck's ("All
+ * decks", which adds a Deck column), and edit or delete one. Under the table a card shows the
+ * selected word's phonetic, part of speech, example (the word in bold), note and tags.
  *
- * <p>The words are read from the database when the tab is refreshed (a data change, a deck switch or
- * Refresh); the search box and the filters only filter those rows in memory, and the
+ * <p>The words are read from the database when the tab is refreshed (a data change, a deck switch,
+ * "All decks" or Refresh); the search box and the filters only filter those rows in memory, and the
  * table sorts them, so typing does not read the database and a list of 10,000 words stays quick.
  * Numeric and date columns sort by value. The status, memory and Due filter are those of the time
  * the list was read.
@@ -73,14 +78,18 @@ public final class WordListView {
     private final FilteredList<WordCard> filteredWords = new FilteredList<>(words);
     private final SortedList<WordCard> sortedWords = new SortedList<>(filteredWords);
     private final TableView<WordCard> wordTable = new TableView<>(sortedWords);
+    private final TableColumn<WordCard, String> deckCol = new TableColumn<>("Deck");
     private final TextField searchField = new TextField();
     private final ComboBox<String> wordStatusFilter = new ComboBox<>();
     private final TextField tagFilterField = new TextField();
     private final TextField posFilterField = new TextField();
+    private final CheckBox allDecksToggle = new CheckBox("All decks");
     private final Tab tab;
     private final LazyRefresh lazy;
     /** The cell values computed since the last refresh, by row; see {@link #computeOnce}. */
     private final List<Map<?, ?>> cellValueCaches = new ArrayList<>();
+    /** The names of the active decks, for the Deck column. */
+    private Map<Long, String> deckNames = Map.of();
     /** When the words were read: the time their status and memory are shown for. */
     private LocalDateTime listedAt = LocalDateTime.MIN;
     /** The end of the study day the words were read on, which decides which ones are due today. */
@@ -103,7 +112,7 @@ public final class WordListView {
         this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh failed", false);
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
-                || changes.contains(DataChange.REVIEW_SETTINGS)) {
+                || changes.contains(DataChange.REVIEW_SETTINGS) || changes.contains(DataChange.DECKS)) {
                 lazy.markStale();
             }
         });
@@ -131,10 +140,15 @@ public final class WordListView {
         posFilterField.setId("wordPosFilterField");
         posFilterField.setPromptText("POS");
         posFilterField.setPrefWidth(120);
+        allDecksToggle.setId("wordAllDecksToggle");
+        allDecksToggle.setTooltip(new Tooltip("Search the words of every active deck; the Deck column says"
+            + " which deck each one is in"));
         searchField.textProperty().addListener((observable, oldValue, newValue) -> applyFilters());
         tagFilterField.textProperty().addListener((observable, oldValue, newValue) -> applyFilters());
         posFilterField.textProperty().addListener((observable, oldValue, newValue) -> applyFilters());
         wordStatusFilter.valueProperty().addListener((observable, oldValue, newValue) -> applyFilters());
+        allDecksToggle.selectedProperty().addListener((observable, wasSelected, selected) ->
+            context.errors().guard("Refresh failed", lazy::refreshNow));
         Button refreshButton = new Button("Refresh");
         refreshButton.setId("refreshWordsButton");
         refreshButton.setOnAction(event -> context.errors().guard("Refresh failed", lazy::refreshNow));
@@ -145,7 +159,7 @@ public final class WordListView {
         deleteButton.setId("deleteWordButton");
         deleteButton.setOnAction(event -> deleteSelectedWord());
 
-        HBox controls = new HBox(10, searchField, wordStatusFilter, tagFilterField, posFilterField,
+        HBox controls = new HBox(10, searchField, wordStatusFilter, tagFilterField, posFilterField, allDecksToggle,
             refreshButton, editButton, deleteButton);
         controls.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(searchField, Priority.ALWAYS);
@@ -173,7 +187,12 @@ public final class WordListView {
         TableColumn<WordCard, String> statusCol = new TableColumn<>("Status");
         statusCol.setComparator(collated());
         computeOnce(statusCol, word -> WordListFilter.statusOf(word, listedAt, listedDayEnd));
-        wordTable.getColumns().addAll(List.of(englishCol, chineseCol, nextCol, intervalCol, strengthCol, statusCol));
+        deckCol.setCellValueFactory(data ->
+            new SimpleStringProperty(deckNames.getOrDefault(data.getValue().getDeckId(), "")));
+        deckCol.setComparator(collated());
+        deckCol.setVisible(false);
+        wordTable.getColumns().addAll(List.of(englishCol, chineseCol, nextCol, intervalCol, strengthCol, statusCol,
+            deckCol));
 
         wordTable.getSelectionModel().selectedItemProperty().addListener(
             (observable, oldWord, word) -> showDetails(word));
@@ -220,12 +239,27 @@ public final class WordListView {
             : new CellValue<>(null, "New");
     }
 
-    /** Reads the current deck's words from the database. */
+    /** Reads the words of the current deck, or of every active deck, from the database. */
     private void refresh() {
         try {
+            List<Deck> decks = List.copyOf(context.decks().activeDecks());
+            Map<Long, String> names = new HashMap<>();
+            decks.forEach(deck -> names.put(deck.getId(), deck.getName()));
+            boolean allDecks = allDecksToggle.isSelected();
+            List<WordCard> loaded = new ArrayList<>();
             // A blank search is every word the list shows.
-            List<WordCard> loaded = wordRepository.search(context.decks().currentId(), "");
+            if (allDecks) {
+                for (Deck deck : decks) {
+                    loaded.addAll(wordRepository.search(deck.getId(), ""));
+                }
+                // By English word like one deck's list, a word's rows in the deck selector's order.
+                loaded.sort(Comparator.comparing(word -> word.getEnglish().toLowerCase(Locale.ROOT)));
+            } else {
+                loaded.addAll(wordRepository.search(context.decks().currentId(), ""));
+            }
             WordCard selected = wordTable.getSelectionModel().getSelectedItem();
+            deckNames = names;
+            deckCol.setVisible(allDecks);
             listedAt = LocalDateTime.now(clock);
             listedDayEnd = studyDays.get().end(listedAt);
             cellValueCaches.forEach(Map::clear);
@@ -276,7 +310,8 @@ public final class WordListView {
             detailsCard.showMessage("Select a word to see its phonetic, part of speech, example, note and tags.");
             return;
         }
-        detailsCard.show(word.getEnglish() + "   " + word.getChinese(),
+        String deck = deckCol.isVisible() ? "   (" + deckNames.getOrDefault(word.getDeckId(), "") + ")" : "";
+        detailsCard.show(word.getEnglish() + "   " + word.getChinese() + deck,
             WordDetails.of(word, examples.highlight(word.getExampleSentence(), word.getEnglish())),
             "No phonetic, part of speech, example, note or tags yet: choose Edit selected to add them.");
     }

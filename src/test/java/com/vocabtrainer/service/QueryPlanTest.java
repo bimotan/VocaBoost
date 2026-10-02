@@ -38,9 +38,9 @@ import java.util.regex.Pattern;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Runs what the dashboard, the deck table, the statistics tab, a rating, a backup restore and a
- * word delete do, records every SQL statement the repositories prepare, and checks with EXPLAIN
- * QUERY PLAN that none of them reads the whole review log, goal or word table.
+ * Runs what the dashboard, the deck table, the statistics tab, a rating, a backup restore, a word
+ * delete and adding a word do, records every SQL statement the repositories prepare, and checks with
+ * EXPLAIN QUERY PLAN that none of them reads the whole review log, goal or word table.
  */
 class QueryPlanTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-05-28T09:00:00Z"), ZoneId.of("UTC"));
@@ -120,6 +120,8 @@ class QueryPlanTest {
         // Restoring the same backup again, and deleting a word with its history.
         backup.importJsonBackup(json, deck.getId());
         wordRepository.deleteById(words.get(0).getId());
+        // Adding a word: is it in another deck already?
+        wordRepository.findInOtherDecks(words.get(1).getEnglish(), other.getId());
 
         List<String> problems = new ArrayList<>();
         for (String sql : databaseManager.statements) {

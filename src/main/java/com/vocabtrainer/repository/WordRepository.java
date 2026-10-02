@@ -178,6 +178,28 @@ public class WordRepository {
     }
 
     /**
+     * The words with this English text, ignoring case, in the active decks other than {@code deckId},
+     * oldest deck first: what adding the word to {@code deckId} would duplicate elsewhere.
+     */
+    public List<WordCard> findInOtherDecks(String english, long deckId) throws SQLException {
+        // Looked up deck by deck through the unique index on (deck_id, english COLLATE NOCASE).
+        String sql = """
+            SELECT w.* FROM decks d
+            JOIN words w ON w.deck_id = d.id AND w.english = ? COLLATE NOCASE
+            WHERE d.archived = 0 AND d.id <> ?
+            ORDER BY d.id, w.id
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, english.trim());
+            statement.setLong(2, deckId);
+            try (ResultSet rs = statement.executeQuery()) {
+                return mapList(rs);
+            }
+        }
+    }
+
+    /**
      * The deck's English words in lower case, for duplicate checks without one query per word.
      * Archived words are included, because the unique index on (deck_id, english) covers them too.
      */
