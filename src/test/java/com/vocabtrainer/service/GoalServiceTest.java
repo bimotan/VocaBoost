@@ -3,6 +3,7 @@ package com.vocabtrainer.service;
 import com.vocabtrainer.TestClock;
 import com.vocabtrainer.domain.DailyGoalProgress;
 import com.vocabtrainer.domain.Deck;
+import com.vocabtrainer.domain.GoalTargets;
 import com.vocabtrainer.domain.GoalUpdate;
 import com.vocabtrainer.domain.ReviewKind;
 import com.vocabtrainer.domain.ReviewLog;
@@ -15,6 +16,7 @@ import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
+import com.vocabtrainer.repository.SettingsRepository;
 import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.scheduling.StudyDay;
@@ -60,6 +62,7 @@ class GoalServiceTest {
     private WordRepository words;
     private ReviewLogRepository logs;
     private GoalRepository goalRepository;
+    private SettingsService settings;
     private TestClock clock;
     private GoalService goals;
     private Deck deck;
@@ -71,8 +74,10 @@ class GoalServiceTest {
         words = new WordRepository(databaseManager);
         logs = new ReviewLogRepository(databaseManager);
         goalRepository = new GoalRepository(databaseManager);
+        settings = new SettingsService(new SettingsRepository(databaseManager));
         clock = new TestClock(DAY.atTime(9, 0));
-        goals = new GoalService(goalRepository, logs, new StudyDay(), clock);
+        goals = new GoalService(goalRepository, logs, new GoalSettings(settings, new ReviewSettings(settings)),
+            new StudyDay(), clock);
         deck = decks.ensureDefaultDeck();
     }
 
@@ -120,25 +125,23 @@ class GoalServiceTest {
 
     @Test
     void theDayCompletesWhenTheLogsReachBothGoals() throws Exception {
-        WordCard word = word(deck, "abate");
-        int xp = 0;
-        for (int i = 1; i < 20; i++) {
-            // Five new words, then reviews; one of them wrong.
-            GoalUpdate update = record(deck, word, DAY.atTime(9, i), i <= 5 ? ReviewKind.LEARN : ReviewKind.REVIEW,
-                i == 6 ? ReviewRating.AGAIN : ReviewRating.GOOD);
-            assertFalse(update.dailyGoalCompleted(), "after " + i + " reviews");
-            xp += update.xpEarned();
-        }
-        GoalUpdate last = record(deck, word, DAY.atTime(9, 30), ReviewKind.REVIEW, ReviewRating.GOOD);
+        goals.settings().saveDefaults(new GoalTargets(2, 1));
+        WordCard first = word(deck, "abate");
+        WordCard second = word(deck, "lucid");
 
-        assertTrue(last.dailyGoalCompleted());
+        GoalUpdate learn = record(deck, first, DAY.atTime(9, 0), ReviewKind.LEARN, ReviewRating.GOOD);
+        assertFalse(learn.dailyGoalCompleted());
+        assertEquals(1, learn.progress().newWordsCount());
+        GoalUpdate review = record(deck, second, DAY.atTime(9, 5), ReviewKind.REVIEW, ReviewRating.AGAIN);
+
+        assertTrue(review.dailyGoalCompleted());
         DailyGoalProgress progress = goals.getTodayProgress(deck.getId());
-        assertEquals(20, progress.reviewedCount());
-        assertEquals(19, progress.correctCount());
-        assertEquals(5, progress.newWordsCount());
+        assertEquals(2, progress.reviewedCount());
+        assertEquals(1, progress.correctCount());
+        assertEquals(0.5, progress.accuracy());
         assertTrue(progress.completed());
-        assertEquals(xp + last.xpEarned(), progress.xpEarned());
-        assertFalse(record(deck, word, DAY.atTime(9, 40), ReviewKind.REVIEW, ReviewRating.GOOD).dailyGoalCompleted(),
+        assertEquals(learn.xpEarned() + review.xpEarned(), progress.xpEarned());
+        assertFalse(record(deck, second, DAY.atTime(9, 10), ReviewKind.REVIEW, ReviewRating.GOOD).dailyGoalCompleted(),
             "a day completes once");
     }
 
@@ -222,6 +225,32 @@ class GoalServiceTest {
         assertEquals(500, goals.getTodayProgress(deck.getId()).currentStreak());
         long millis = (System.nanoTime() - started) / 1_000_000;
         assertTrue(millis < 2_000, "500 days took " + millis + " ms");
+    }
+
+    @Test
+    void todayUsesTheCurrentGoalsAndAPastDayTheGoalsItWasStudiedWith() throws Exception {
+        Deck other = decks.create("TOEFL");
+        WordCard word = word(deck, "abate");
+        record(deck, word, DAY.minusDays(1).atTime(12, 0), ReviewKind.REVIEW, ReviewRating.GOOD);
+
+        goals.settings().saveDefaults(new GoalTargets(40, 10));
+        goals.settings().saveDeckGoals(other.getId(), new GoalTargets(5, 0));
+        goals.settings().saveSessionGoal(30);
+
+        DailyGoalProgress today = goals.getTodayProgress(deck.getId());
+        assertEquals(40, today.reviewGoal());
+        assertEquals(10, today.newWordGoal());
+        assertEquals(30, today.sessionGoal());
+        assertEquals(5, goals.getTodayProgress(other.getId()).reviewGoal(), "the deck's own goals");
+        DailyGoalProgress yesterday = goals.progressFor(deck.getId(), DAY.minusDays(1));
+        assertEquals(GoalService.DEFAULT_REVIEW_GOAL, yesterday.reviewGoal());
+        assertEquals(GoalService.DEFAULT_NEW_WORD_GOAL, yesterday.newWordGoal());
+        assertEquals(1, yesterday.reviewedCount());
+
+        record(deck, word, DAY.atTime(12, 0), ReviewKind.REVIEW, ReviewRating.GOOD);
+        GoalRepository.GoalRow row = goalRepository.find(deck.getId(), DAY).orElseThrow();
+        assertEquals(List.of(40, 10, 30), List.of(row.reviewGoal(), row.newWordGoal(), row.sessionGoal()),
+            "the day's row keeps the goals it was studied with");
     }
 
     @Test

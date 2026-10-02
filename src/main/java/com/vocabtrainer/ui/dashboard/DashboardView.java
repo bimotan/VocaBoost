@@ -12,11 +12,13 @@ import com.vocabtrainer.ui.LazyRefresh;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.Tab;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
 import java.nio.file.Path;
@@ -25,7 +27,7 @@ import java.util.List;
 /**
  * The Dashboard tab: today's counts, goals, XP and badges for the current deck, and the streak of
  * every deck. Today is the study day; the counts are read from the review logs, like the Statistics
- * tab's.
+ * tab's. "Edit goals" changes the daily goals and the session goal.
  */
 public final class DashboardView {
     private final ViewContext context;
@@ -48,6 +50,8 @@ public final class DashboardView {
     private final Label databasePathLabel = new Label();
     private final ProgressBar reviewProgress = new ProgressBar(0);
     private final ProgressBar newWordProgress = new ProgressBar(0);
+    /** Whether the current deck has goals of its own or uses the default goals. */
+    private final Label goalScopeLabel = new Label();
     private final Tab tab;
     private final LazyRefresh lazy;
 
@@ -62,7 +66,7 @@ public final class DashboardView {
         this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh failed", false);
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
-                || changes.contains(DataChange.REVIEW_SETTINGS)) {
+                || changes.contains(DataChange.REVIEW_SETTINGS) || changes.contains(DataChange.GOALS)) {
                 lazy.markStale();
             }
         });
@@ -93,6 +97,7 @@ public final class DashboardView {
         databasePathLabel.setId("databasePathLabel");
         reviewProgress.setId("reviewGoalProgress");
         newWordProgress.setId("newWordGoalProgress");
+        goalScopeLabel.setId("goalScopeLabel");
         addStat(grid, 0, "Total words", totalWordsLabel);
         addStat(grid, 1, "Due today", dueTodayLabel);
         // "Due today" splits into the two queues: due reviews and the new words the daily limit lets in.
@@ -113,8 +118,15 @@ public final class DashboardView {
         refreshButton.setId("refreshDashboardButton");
         refreshButton.setOnAction(event -> context.errors().guard("Refresh failed", () -> lazy.refreshNow()));
 
+        Button editGoalsButton = new Button("Edit goals");
+        editGoalsButton.setId("editGoalsButton");
+        editGoalsButton.setOnAction(event -> editGoals());
+        goalScopeLabel.setStyle("-fx-text-fill: #6b7280;");
+        HBox goalsTitle = new HBox(12, Widgets.sectionTitle("Daily Goals"), editGoalsButton, goalScopeLabel);
+        goalsTitle.setAlignment(Pos.CENTER_LEFT);
+
         VBox progressBox = new VBox(10,
-            Widgets.sectionTitle("Daily Goals"),
+            goalsTitle,
             new Label("Review goal"),
             reviewProgress,
             new Label("New-word goal"),
@@ -146,6 +158,13 @@ public final class DashboardView {
         grid.add(valueLabel, 1, row);
     }
 
+    private void editGoals() {
+        if (new GoalsDialog(context, goalService.settings()).edit(context.decks().current())) {
+            context.errors().guard("Goals saved, but refreshing the views failed",
+                () -> context.changes().publish(DataChange.GOALS));
+        }
+    }
+
     private void refresh() {
         long deckId = context.decks().currentId();
         DashboardStats stats = statsService.dashboardStats(deckId);
@@ -160,6 +179,8 @@ public final class DashboardView {
         accuracyTodayLabel.setText(Formats.percent(progress.accuracy()));
         masteredWordsLabel.setText(String.valueOf(stats.masteredWords()));
         streakLabel.setText(progress.currentStreak() + " days");
+        goalScopeLabel.setText(goalService.settings().deckGoals(deckId).isPresent()
+            ? "This deck's own goals" : "Default goals of every deck");
         xpLabel.setText(String.valueOf(progress.totalXp()));
         reviewProgress.setProgress(progress.reviewProgress());
         newWordProgress.setProgress(progress.newWordProgress());

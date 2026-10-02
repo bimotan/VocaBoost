@@ -11,5 +11,7 @@ public enum DataChange {
     /** Dictionary or AI settings changed. */
     SETTINGS,
     /** Review settings changed, such as a deck's new-cards-per-day limit, which changes what is due today. */
-    REVIEW_SETTINGS
+    REVIEW_SETTINGS,
+    /** The daily goals or the session goal (the review session size) were edited. */
+    GOALS
 }

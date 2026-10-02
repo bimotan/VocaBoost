@@ -27,33 +27,43 @@ import java.util.Optional;
  * row of a deck's day keeps what the logs cannot tell: the goals of that day, the XP earned and
  * whether the goal was completed (its counters are still written, for older versions).
  *
- * <p>A day's goals are those of its row; a day without one has the default goals. The streak counts
- * the study days with a review in any deck: a user studies, not a deck.
+ * <p>The goals come from {@link GoalSettings}: today's goals are always the current ones, a past
+ * day's those of its row. The streak counts the study days with a review in any deck: a user
+ * studies, not a deck.
  */
 public class GoalService {
     public static final int DEFAULT_REVIEW_GOAL = 20;
     public static final int DEFAULT_NEW_WORD_GOAL = 5;
     /** The session size until the user chooses one. */
     public static final int DEFAULT_SESSION_GOAL = ReviewSettings.DEFAULT_SESSION_SIZE;
-    private static final GoalTargets DEFAULT_GOALS = new GoalTargets(DEFAULT_REVIEW_GOAL, DEFAULT_NEW_WORD_GOAL);
 
     private final GoalRepository goalRepository;
     private final ReviewLogRepository reviewLogRepository;
+    private final GoalSettings settings;
     private final StudyDay studyDay;
     private final Clock clock;
 
-    /** Study days starting at 4 am. */
+    /** Goals kept in memory, starting with the defaults, and study days starting at 4 am. */
     public GoalService(GoalRepository goalRepository, ReviewLogRepository reviewLogRepository, Clock clock) {
-        this(goalRepository, reviewLogRepository, new StudyDay(), clock);
+        this(goalRepository, reviewLogRepository, GoalSettings.inMemory(), new StudyDay(), clock);
     }
 
-    /** @param studyDay when a study day starts; the scheduler's, so "today" is the same day everywhere */
-    public GoalService(GoalRepository goalRepository, ReviewLogRepository reviewLogRepository, StudyDay studyDay,
-                       Clock clock) {
+    /**
+     * @param settings the goals the user set
+     * @param studyDay when a study day starts; the scheduler's, so "today" is the same day everywhere
+     */
+    public GoalService(GoalRepository goalRepository, ReviewLogRepository reviewLogRepository, GoalSettings settings,
+                       StudyDay studyDay, Clock clock) {
         this.goalRepository = goalRepository;
         this.reviewLogRepository = reviewLogRepository;
+        this.settings = settings;
         this.studyDay = studyDay;
         this.clock = clock;
+    }
+
+    /** The goals the user set, which the Dashboard edits. */
+    public GoalSettings settings() {
+        return settings;
     }
 
     /** The study day it is now. */
@@ -84,10 +94,10 @@ public class GoalService {
         LocalDate day = studyDay.of(log.getReviewedAt());
         try {
             int xp = reviewXp(log);
-            GoalRepository.GoalRow row = addProgress(deckId, day, 1, log.isCorrect() ? 1 : 0,
+            GoalTargets goals = settings.goalsFor(deckId);
+            GoalRepository.GoalRow row = addProgress(deckId, day, goals, 1, log.isCorrect() ? 1 : 0,
                 log.getKind() == ReviewKind.LEARN ? 1 : 0, xp);
             DailyCount reviews = DailyReviews.on(reviewLogRepository, studyDay, deckId, day);
-            GoalTargets goals = new GoalTargets(row.reviewGoal(), row.newWordGoal());
             boolean completedNow = !row.completed() && reviews.reviews() >= goals.reviewGoal()
                 && reviews.newWords() >= goals.newWordGoal();
             if (completedNow) {
@@ -109,7 +119,7 @@ public class GoalService {
         LocalDate day = studyDay.of(log.getReviewedAt());
         try {
             int xp = practiceXp(log);
-            GoalRepository.GoalRow row = addProgress(deckId, day, 0, 0, 0, xp);
+            GoalRepository.GoalRow row = addProgress(deckId, day, settings.goalsFor(deckId), 0, 0, 0, xp);
             return new GoalUpdate(progress(deckId, day, row, DailyReviews.on(reviewLogRepository, studyDay, deckId, day)),
                 xp, false);
         } catch (SQLException e) {
@@ -123,7 +133,7 @@ public class GoalService {
             return;
         }
         try {
-            addProgress(deckId, today(), 0, 0, 0, xp);
+            addProgress(deckId, today(), settings.goalsFor(deckId), 0, 0, 0, xp);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot award XP", e);
         }
@@ -158,25 +168,23 @@ public class GoalService {
         return reviewXp(log) / 2;
     }
 
-    /** Adds to the deck's row of {@code day}; a new row gets the default goals. */
-    private GoalRepository.GoalRow addProgress(long deckId, LocalDate day, int reviews, int correct, int newWords,
-                                               int xp) throws SQLException {
-        GoalRepository.GoalRow row = goalRepository.find(deckId, day).orElse(null);
-        GoalTargets goals = row == null ? DEFAULT_GOALS : new GoalTargets(row.reviewGoal(), row.newWordGoal());
-        int sessionGoal = row == null ? DEFAULT_SESSION_GOAL : row.sessionGoal();
-        return goalRepository.recordProgress(deckId, day, goals.reviewGoal(), goals.newWordGoal(), sessionGoal,
-            reviews, correct, newWords, xp);
+    /** Adds to the deck's row of {@code day}, giving it the current {@code goals} and session goal. */
+    private GoalRepository.GoalRow addProgress(long deckId, LocalDate day, GoalTargets goals, int reviews, int correct,
+                                               int newWords, int xp) throws SQLException {
+        return goalRepository.recordProgress(deckId, day, goals.reviewGoal(), goals.newWordGoal(),
+            settings.sessionGoal(), reviews, correct, newWords, xp);
     }
 
     /** {@code row} is the day's stored row, or null if it has none. */
     private DailyGoalProgress progress(long deckId, LocalDate day, GoalRepository.GoalRow row, DailyCount reviews)
         throws SQLException {
-        GoalTargets goals = row == null ? DEFAULT_GOALS : new GoalTargets(row.reviewGoal(), row.newWordGoal());
+        boolean current = row == null || day.equals(today());
+        GoalTargets goals = current ? settings.goalsFor(deckId) : new GoalTargets(row.reviewGoal(), row.newWordGoal());
         return new DailyGoalProgress(
             day,
             goals.reviewGoal(),
             goals.newWordGoal(),
-            row == null ? DEFAULT_SESSION_GOAL : row.sessionGoal(),
+            current ? settings.sessionGoal() : row.sessionGoal(),
             reviews.reviews(),
             reviews.correct(),
             reviews.newWords(),

@@ -1,5 +1,9 @@
 package com.vocabtrainer.ui;
 
+import com.vocabtrainer.domain.Deck;
+import javafx.scene.Node;
+import javafx.scene.control.RadioButton;
+import javafx.scene.control.Spinner;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -14,7 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Goals, XP and the streak on the Dashboard: importing earns nothing, a word counts as new on its
- * first review, and the Dashboard and the Statistics tab agree (review findings E8 and E10).
+ * first review, the Dashboard and the Statistics tab agree, and the goals are edited with "Edit
+ * goals" and kept (review findings E8, E10 and G5).
  */
 class GoalsUiTest extends MainWindowUiTest {
     @Test
@@ -54,5 +59,98 @@ class GoalsUiTest extends MainWindowUiTest {
         assertEquals(1.0, reviews.get(reviews.size() - 1).y(), "today's bar is the dashboard's count");
         List<ChartPoint> accuracy = chartPoints("accuracyChart");
         assertEquals(1.0, accuracy.get(accuracy.size() - 1).y());
+    }
+
+    @Test
+    void editedGoalsAreKeptAndADeckCanHaveItsOwn() throws Exception {
+        selectTab("dashboardTab");
+        assertEquals("0 / 20", text("reviewedTodayLabel"));
+        assertEquals("Default goals of every deck", text("goalScopeLabel"));
+
+        dialogs.submitForm(form -> {
+            assertTrue(field(form, "goalScopeEveryDeck", RadioButton.class).isSelected());
+            assertEquals(20, spinner(form, "reviewGoalSpinner").getValue());
+            setSpinner(form, "reviewGoalSpinner", "30");
+            setSpinner(form, "newWordGoalSpinner", "8");
+            setSpinner(form, "sessionGoalSpinner", "35");
+        });
+        click("editGoalsButton");
+
+        assertEquals("Edit goals", dialogs.last(ScriptedDialogs.Kind.FORM).title());
+        assertEquals("0 / 30", text("reviewedTodayLabel"));
+        assertEquals("0 / 8", text("newWordsTodayLabel"));
+        selectTab("reviewTab");
+        assertEquals("Custom", Fx.call(() -> this.<String>comboBox("sessionSizeSelector").getValue()));
+        assertEquals("35", text("customSessionSizeField"));
+        assertTrue(text("sessionProgressLabel").startsWith("Session 0/35"), text("sessionProgressLabel"));
+
+        dialogs.answerText("TOEFL");
+        click("newDeckButton");
+        selectTab("dashboardTab");
+        assertEquals("0 / 30", text("reviewedTodayLabel"), "a new deck has the default goals");
+        dialogs.submitForm(form -> {
+            field(form, "goalScopeThisDeck", RadioButton.class).setSelected(true);
+            setSpinner(form, "reviewGoalSpinner", "10");
+            setSpinner(form, "newWordGoalSpinner", "2");
+        });
+        click("editGoalsButton");
+        assertEquals("0 / 10", text("reviewedTodayLabel"));
+        assertEquals("This deck's own goals", text("goalScopeLabel"));
+
+        restartApp();
+        Deck reopened = currentDeck();
+        assertEquals("TOEFL", reopened.getName());
+        selectTab("dashboardTab");
+        assertEquals("0 / 10", text("reviewedTodayLabel"));
+        assertEquals("0 / 2", text("newWordsTodayLabel"));
+        selectDeck("deckSelector", STARTER_DECK);
+        assertEquals("0 / 30", text("reviewedTodayLabel"));
+        assertEquals("0 / 8", text("newWordsTodayLabel"));
+        assertEquals("Default goals of every deck", text("goalScopeLabel"));
+        selectTab("reviewTab");
+        assertTrue(text("sessionProgressLabel").startsWith("Session 0/35"), text("sessionProgressLabel"));
+
+        // The form shows the saved goals; choosing "Every deck" for TOEFL drops its own goals.
+        selectDeck("deckSelector", "TOEFL");
+        selectTab("dashboardTab");
+        dialogs.submitForm(form -> {
+            assertTrue(field(form, "goalScopeThisDeck", RadioButton.class).isSelected());
+            assertEquals(10, spinner(form, "reviewGoalSpinner").getValue());
+            field(form, "goalScopeEveryDeck", RadioButton.class).setSelected(true);
+            assertEquals(30, spinner(form, "reviewGoalSpinner").getValue(), "the default goals are shown");
+        });
+        click("editGoalsButton");
+        assertEquals("0 / 30", text("reviewedTodayLabel"));
+        assertEquals("Default goals of every deck", text("goalScopeLabel"));
+    }
+
+    @Test
+    void aGoalThatIsNotANumberIsNotSaved() {
+        selectTab("dashboardTab");
+        dialogs.submitForm(form -> setSpinner(form, "reviewGoalSpinner", ""));
+        click("editGoalsButton");
+
+        ScriptedDialogs.Shown error = dialogs.takeError();
+        assertEquals("Goals not saved", error.title());
+        assertEquals("Reviews per day must be a whole number.", error.content());
+        assertEquals("0 / 20", text("reviewedTodayLabel"));
+    }
+
+    private static <T extends Node> T field(Node form, String id, Class<T> type) {
+        Node node = form.lookup("#" + id);
+        if (!type.isInstance(node)) {
+            throw new AssertionError("No " + type.getSimpleName() + " #" + id + " in the form: " + node);
+        }
+        return type.cast(node);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Spinner<Integer> spinner(Node form, String id) {
+        return field(form, id, Spinner.class);
+    }
+
+    /** Types into the spinner's field without committing it, as a user who then presses OK. */
+    private static void setSpinner(Node form, String id, String text) {
+        spinner(form, id).getEditor().setText(text);
     }
 }

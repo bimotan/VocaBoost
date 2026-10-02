@@ -100,6 +100,9 @@ public final class ReviewView {
         tab.selectedProperty().addListener((observable, wasSelected, selected) -> presenter.setOnScreen(selected));
         context.decks().onSwitch(deck -> presenter.showDeck(deck.getId()));
         context.changes().subscribe(changes -> {
+            if (changes.contains(DataChange.GOALS)) {
+                presenter.goalsChanged();
+            }
             if (changes.contains(DataChange.WORDS)) {
                 presenter.wordsChanged();
             }

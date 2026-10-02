@@ -263,6 +263,27 @@ public final class ReviewSessionPresenter {
         changes.publish(DataChange.REVIEW_SETTINGS);
     }
 
+    /**
+     * The goals were edited on the Dashboard: the session takes the session goal as its target, as if
+     * it had been chosen here, and a completed session shows the new daily goals.
+     */
+    public void goalsChanged() {
+        try {
+            int target = goalService.settings().sessionGoal();
+            if (target != reviewService.sessionTarget()) {
+                customSizeChosen = false;
+                reviewService.setSessionTarget(target);
+            }
+            if (state == State.COMPLETE) {
+                loadNextCard();
+            } else {
+                updateSessionProgress();
+            }
+        } finally {
+            fireChanged();
+        }
+    }
+
     /** The text in the answer field; the user may edit it until the answer is submitted. */
     public void setAnswer(String text) {
         answer = text == null ? "" : text;

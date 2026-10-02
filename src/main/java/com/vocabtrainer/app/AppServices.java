@@ -19,6 +19,7 @@ import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.DictionaryServiceFactory;
 import com.vocabtrainer.service.GoalService;
+import com.vocabtrainer.service.GoalSettings;
 import com.vocabtrainer.service.ImportExportService;
 import com.vocabtrainer.service.ReviewScheduler;
 import com.vocabtrainer.service.ReviewService;
@@ -161,15 +162,15 @@ public record AppServices(
             ReviewScheduler reviewScheduler = new ReviewScheduler(settingsService.getSchedulingOptions());
             CardStateBackfill cardStates = new CardStateBackfill(wordRepository, reviewLogRepository, reviewScheduler);
             cardStates.run();
-            GoalService goalService = new GoalService(goalRepository, reviewLogRepository, reviewScheduler.studyDay(),
-                clock);
+            ReviewSettings reviewSettings = new ReviewSettings(settingsService);
+            GoalService goalService = new GoalService(goalRepository, reviewLogRepository,
+                new GoalSettings(settingsService, reviewSettings), reviewScheduler.studyDay(), clock);
             AchievementService achievementService = new AchievementService(achievementRepository, goalService, clock);
             WordValidationService validationService = new WordValidationService();
             ImportExportService importExportService = new ImportExportService(wordRepository, validationService);
             StarterImportService starterImportService = new StarterImportService(
                 importExportService, wordRepository, reviewLogRepository, goalRepository, settingsService);
             starterImportService.importOnce(startupDeck.getId());
-            ReviewSettings reviewSettings = new ReviewSettings(settingsService);
             ReviewService reviewService = new ReviewService(
                 wordRepository,
                 reviewLogRepository,

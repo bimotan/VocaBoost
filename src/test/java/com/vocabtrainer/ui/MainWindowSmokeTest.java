@@ -66,6 +66,7 @@ class MainWindowSmokeTest extends MainWindowUiTest {
             "mainTabs", "headerSubtitleLabel", "deckSelector", "newDeckButton", "renameDeckButton", "archiveDeckButton",
             "totalWordsLabel", "dueTodayLabel", "dueReviewsLabel", "newAvailableTodayLabel", "reviewedTodayLabel", "newWordsTodayLabel", "accuracyTodayLabel",
             "masteredWordsLabel", "streakLabel", "xpLabel", "badgesLabel", "reviewGoalProgress", "newWordGoalProgress",
+            "editGoalsButton", "goalScopeLabel",
             "deckTable", "archivedDeckTable", "switchDeckButton", "restoreDeckButton",
             "reviewModeSelector", "sessionSizeSelector", "customSessionSizeField", "newCardsPerDaySpinner",
             "startSessionButton",

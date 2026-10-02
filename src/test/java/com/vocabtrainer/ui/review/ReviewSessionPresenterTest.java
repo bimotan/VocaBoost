@@ -4,6 +4,7 @@ import com.vocabtrainer.TestClock;
 import com.vocabtrainer.app.AppServices;
 import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.Deck;
+import com.vocabtrainer.domain.GoalTargets;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewRating;
@@ -629,6 +630,34 @@ class ReviewSessionPresenterTest {
 
         assertEquals(State.AWAITING_ANSWER, presenter.state());
         assertTrue(presenter.sessionProgress().startsWith("Session 1/10 | Accuracy 100% | XP "), presenter.sessionProgress());
+    }
+
+    @Test
+    void editedGoalsSetTheSessionTargetAndLetACompletedSessionGoOn() {
+        presenter.showDeck(deckId);
+        presenter.startSession("Custom", "1");
+        presenter.setAnswer(firstMeaning(presenter.card().orElseThrow()));
+        presenter.submit();
+        presenter.rate(ReviewRating.EASY);
+        assertEquals(State.COMPLETE, presenter.state());
+        assertTrue(presenter.completionMetrics().contains("Today review goal: 1/20 | New words: 1/5"),
+            presenter.completionMetrics());
+
+        // As the Dashboard's "Edit goals" saves them.
+        services.goalService().settings().saveSessionGoal(50);
+        services.goalService().settings().saveDefaults(new GoalTargets(40, 5));
+        presenter.goalsChanged();
+
+        assertEquals(State.AWAITING_ANSWER, presenter.state());
+        assertEquals("50", presenter.sessionSizeChoice());
+        assertTrue(presenter.sessionProgress().startsWith("Session 1/50 | Accuracy 100% | XP "), presenter.sessionProgress());
+        presenter.resetSession();
+        assertEquals("Session 0/50 | Accuracy 0% | XP 0", presenter.sessionProgress(), "a new session keeps the goal");
+        presenter.startSession("Custom", "1");
+        presenter.setAnswer(firstMeaning(presenter.card().orElseThrow()));
+        presenter.submit();
+        presenter.rate(ReviewRating.EASY);
+        assertTrue(presenter.completionMetrics().contains("Today review goal: 2/40"), presenter.completionMetrics());
     }
 
     @Test
