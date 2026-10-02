@@ -13,14 +13,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,24 +24,30 @@ import java.util.Map;
 public class StatsService {
     private final WordRepository wordRepository;
     private final ReviewLogRepository reviewLogRepository;
-    private final DatabaseManager databaseManager;
     private final Clock clock;
 
     public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository) {
-        this(wordRepository, reviewLogRepository, null, Clock.systemDefaultZone());
+        this(wordRepository, reviewLogRepository, Clock.systemDefaultZone());
     }
 
-    public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository,
-                        DatabaseManager databaseManager) {
-        this(wordRepository, reviewLogRepository, databaseManager, Clock.systemDefaultZone());
-    }
-
-    public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository,
-                        DatabaseManager databaseManager, Clock clock) {
+    public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository, Clock clock) {
         this.wordRepository = wordRepository;
         this.reviewLogRepository = reviewLogRepository;
-        this.databaseManager = databaseManager;
         this.clock = clock;
+    }
+
+    /** @deprecated the queries moved into the repositories; use {@link #StatsService(WordRepository, ReviewLogRepository)}. */
+    @Deprecated
+    public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository,
+                        DatabaseManager databaseManager) {
+        this(wordRepository, reviewLogRepository);
+    }
+
+    /** @deprecated the queries moved into the repositories; use {@link #StatsService(WordRepository, ReviewLogRepository, Clock)}. */
+    @Deprecated
+    public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository,
+                        DatabaseManager databaseManager, Clock clock) {
+        this(wordRepository, reviewLogRepository, clock);
     }
 
     public DashboardStats dashboardStats(long deckId) {
@@ -71,60 +73,27 @@ public class StatsService {
         return dailyReviewStats(0, days);
     }
 
+    /** One entry per day for the last {@code days} days, today last; a deckId of 0 or less covers every deck. */
     public List<DailyReviewStat> dailyReviewStats(long deckId, int days) {
-        if (databaseManager == null) {
-            return List.of();
-        }
         LocalDate end = LocalDate.now(clock);
         LocalDate start = end.minusDays(Math.max(1, days) - 1L);
-        Map<LocalDate, MutableDailyStat> map = new LinkedHashMap<>();
+        Map<LocalDate, ReviewLogRepository.DailyCount> counts = new LinkedHashMap<>();
         for (int i = 0; i < days; i++) {
-            map.put(start.plusDays(i), new MutableDailyStat());
+            LocalDate day = start.plusDays(i);
+            counts.put(day, new ReviewLogRepository.DailyCount(day, 0, 0));
         }
-        String sql = deckId <= 0 ? """
-            SELECT substr(reviewed_at, 1, 10) AS day,
-                   COUNT(*) AS reviews,
-                   SUM(CASE WHEN rating <> 'AGAIN' THEN 1 ELSE 0 END) AS correct
-            FROM review_logs
-            WHERE reviewed_at >= ?
-            GROUP BY substr(reviewed_at, 1, 10)
-            ORDER BY day
-            """ : """
-            SELECT substr(l.reviewed_at, 1, 10) AS day,
-                   COUNT(*) AS reviews,
-                   SUM(CASE WHEN l.rating <> 'AGAIN' THEN 1 ELSE 0 END) AS correct
-            FROM review_logs l
-            JOIN words w ON w.id = l.word_id
-            WHERE w.deck_id = ? AND l.reviewed_at >= ?
-            GROUP BY substr(l.reviewed_at, 1, 10)
-            ORDER BY day
-            """;
-        try (Connection connection = databaseManager.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            if (deckId <= 0) {
-                statement.setString(1, start.atStartOfDay().toString());
-            } else {
-                statement.setLong(1, deckId);
-                statement.setString(2, start.atStartOfDay().toString());
-            }
-            try (ResultSet rs = statement.executeQuery()) {
-                while (rs.next()) {
-                    LocalDate day = LocalDate.parse(rs.getString("day"));
-                    MutableDailyStat stat = map.get(day);
-                    if (stat != null) {
-                        stat.reviews = rs.getInt("reviews");
-                        stat.correct = rs.getInt("correct");
-                    }
-                }
+        try {
+            for (ReviewLogRepository.DailyCount count : reviewLogRepository.dailyCounts(deckId, start.atStartOfDay())) {
+                counts.replace(count.day(), count);
             }
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read daily review stats", e);
         }
-        return map.entrySet().stream()
-            .map(entry -> new DailyReviewStat(
-                entry.getKey(),
-                entry.getValue().reviews,
-                entry.getValue().reviews == 0 ? 0.0 : entry.getValue().correct / (double) entry.getValue().reviews
+        return counts.values().stream()
+            .map(count -> new DailyReviewStat(
+                count.day(),
+                count.reviews(),
+                count.reviews() == 0 ? 0.0 : count.correct() / (double) count.reviews()
             ))
             .toList();
     }
@@ -154,37 +123,8 @@ public class StatsService {
     }
 
     public List<HardWordStat> hardestWords(long deckId, int limit) {
-        if (databaseManager == null) {
-            return List.of();
-        }
-        String sql = """
-            SELECT w.english, w.chinese, COUNT(l.id) AS reviews,
-                   AVG(l.similarity) AS avg_similarity,
-                   SUM(CASE WHEN l.rating = 'AGAIN' THEN 1 ELSE 0 END) AS again_count
-            FROM words w
-            JOIN review_logs l ON l.word_id = w.id
-            WHERE w.deck_id = ? AND w.archived = 0
-            GROUP BY w.id
-            ORDER BY avg_similarity ASC, again_count DESC, reviews DESC
-            LIMIT ?
-            """;
-        try (Connection connection = databaseManager.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setLong(1, deckId);
-            statement.setInt(2, limit);
-            try (ResultSet rs = statement.executeQuery()) {
-                List<HardWordStat> result = new ArrayList<>();
-                while (rs.next()) {
-                    result.add(new HardWordStat(
-                        rs.getString("english"),
-                        rs.getString("chinese"),
-                        rs.getInt("reviews"),
-                        rs.getDouble("avg_similarity"),
-                        rs.getInt("again_count")
-                    ));
-                }
-                return result;
-            }
+        try {
+            return reviewLogRepository.hardestWords(deckId, limit);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read hardest words", e);
         }
@@ -198,26 +138,10 @@ public class StatsService {
         }
     }
 
+    /** When the deck was last reviewed, or null if never. */
     public LocalDateTime latestReviewAt(long deckId) {
-        if (databaseManager == null) {
-            return null;
-        }
-        String sql = """
-            SELECT MAX(l.reviewed_at) AS latest
-            FROM review_logs l
-            JOIN words w ON w.id = l.word_id
-            WHERE w.deck_id = ?
-            """;
-        try (Connection connection = databaseManager.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setLong(1, deckId);
-            try (ResultSet rs = statement.executeQuery()) {
-                if (rs.next()) {
-                    String latest = rs.getString("latest");
-                    return latest == null ? null : LocalDateTime.parse(latest);
-                }
-            }
-            return null;
+        try {
+            return reviewLogRepository.latestReviewAt(deckId).orElse(null);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read latest review time", e);
         }
@@ -288,10 +212,5 @@ public class StatsService {
 
     private String percent(double value) {
         return String.format("%.0f%%", value * 100);
-    }
-
-    private static class MutableDailyStat {
-        int reviews;
-        int correct;
     }
 }

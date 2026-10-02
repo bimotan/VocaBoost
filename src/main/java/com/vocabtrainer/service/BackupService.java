@@ -26,9 +26,6 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -116,39 +113,36 @@ public class BackupService {
     }
 
     public Path exportReviewLogsCsv(long deckId, Path outputPath) {
-        String sql = """
-            SELECT w.english, l.reviewed_at, l.user_answer, l.correct_answer, l.similarity, l.rating, l.elapsed_millis
-            FROM review_logs l
-            JOIN words w ON w.id = l.word_id
-            WHERE w.deck_id = ?
-            ORDER BY l.reviewed_at, l.id
-            """;
         try {
             ensureParent(outputPath);
-            List<String> rows = new ArrayList<>();
-            rows.add("english,reviewed_at,user_answer,correct_answer,similarity,rating,elapsed_millis");
-            try (Connection connection = databaseManager.getConnection();
-                 PreparedStatement statement = connection.prepareStatement(sql)) {
-                statement.setLong(1, deckId);
-                try (ResultSet rs = statement.executeQuery()) {
-                    while (rs.next()) {
-                        rows.add(String.join(",",
-                            csv(rs.getString("english")),
-                            csv(rs.getString("reviewed_at")),
-                            csv(rs.getString("user_answer")),
-                            csv(rs.getString("correct_answer")),
-                            csv(String.valueOf(rs.getDouble("similarity"))),
-                            csv(rs.getString("rating")),
-                            csv(String.valueOf(rs.getLong("elapsed_millis")))
-                        ));
-                    }
-                }
-            }
+            // One transaction, so every log's word is in the word list read alongside it.
+            List<String> rows = databaseManager.inTransaction(() -> reviewLogCsvRows(deckId));
             Files.write(outputPath, rows, StandardCharsets.UTF_8);
             return outputPath;
         } catch (IOException | SQLException e) {
             throw new IllegalStateException("无法导出复习记录 CSV", e);
         }
+    }
+
+    private List<String> reviewLogCsvRows(long deckId) throws SQLException {
+        Map<Long, String> englishById = new HashMap<>();
+        for (WordCard word : wordRepository.findAllIncludingArchived(deckId)) {
+            englishById.put(word.getId(), word.getEnglish());
+        }
+        List<String> rows = new ArrayList<>();
+        rows.add("english,reviewed_at,user_answer,correct_answer,similarity,rating,elapsed_millis");
+        for (ReviewLog log : reviewLogRepository.findByDeck(deckId)) {
+            rows.add(String.join(",",
+                csv(englishById.get(log.getWordId())),
+                csv(DateTimeUtil.toDatabase(log.getReviewedAt())),
+                csv(log.getUserAnswer()),
+                csv(log.getCorrectAnswer()),
+                csv(String.valueOf(log.getSimilarity())),
+                csv(log.getRating().name()),
+                csv(String.valueOf(log.getElapsedMillis()))
+            ));
+        }
+        return rows;
     }
 
     /** Writes the deck's words with their review schedule, review logs, goal history and achievements. */

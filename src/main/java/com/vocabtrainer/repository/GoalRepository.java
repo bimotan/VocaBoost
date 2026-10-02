@@ -48,7 +48,7 @@ public class GoalRepository {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
-            statement.setString(2, date.toString());
+            statement.setString(2, DateTimeUtil.toDatabaseDate(date));
             statement.setInt(3, reviewGoal);
             statement.setInt(4, newWordGoal);
             statement.setInt(5, sessionGoal);
@@ -66,7 +66,7 @@ public class GoalRepository {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
-            statement.setString(2, date.toString());
+            statement.setString(2, DateTimeUtil.toDatabaseDate(date));
             try (ResultSet rs = statement.executeQuery()) {
                 if (rs.next()) {
                     return Optional.of(map(rs));
@@ -120,7 +120,7 @@ public class GoalRepository {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, row.deckId());
-            statement.setString(2, row.date().toString());
+            statement.setString(2, DateTimeUtil.toDatabaseDate(row.date()));
             statement.setInt(3, row.reviewGoal());
             statement.setInt(4, row.newWordGoal());
             statement.setInt(5, row.sessionGoal());
@@ -155,7 +155,7 @@ public class GoalRepository {
             statement.setInt(3, newWordDelta);
             statement.setInt(4, xpDelta);
             statement.setLong(5, deckId);
-            statement.setString(6, date.toString());
+            statement.setString(6, DateTimeUtil.toDatabaseDate(date));
             statement.executeUpdate();
         }
         return find(deckId, date).orElseThrow(() -> new SQLException("Daily goal not found: " + date));
@@ -170,7 +170,7 @@ public class GoalRepository {
              PreparedStatement statement = connection.prepareStatement(
                  "UPDATE daily_goals SET completed = 1 WHERE deck_id = ? AND goal_date = ?")) {
             statement.setLong(1, deckId);
-            statement.setString(2, date.toString());
+            statement.setString(2, DateTimeUtil.toDatabaseDate(date));
             statement.executeUpdate();
         }
     }
@@ -196,14 +196,14 @@ public class GoalRepository {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
-            statement.setString(2, date.toString());
+            statement.setString(2, DateTimeUtil.toDatabaseDate(date));
             try (ResultSet rs = statement.executeQuery()) {
                 if (!rs.next()) {
                     return Optional.empty();
                 }
-                LocalDate lastDay = LocalDate.parse(rs.getString(1));
+                LocalDate lastDay = DateTimeUtil.dateFromDatabase(rs.getString(1));
                 int days = 1;
-                while (rs.next() && LocalDate.parse(rs.getString(1)).equals(lastDay.minusDays(days))) {
+                while (rs.next() && DateTimeUtil.dateFromDatabase(rs.getString(1)).equals(lastDay.minusDays(days))) {
                     days++;
                 }
                 return Optional.of(new ReviewRun(lastDay, days));
@@ -236,7 +236,7 @@ public class GoalRepository {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             if (date != null) {
-                statement.setString(1, date.toString());
+                statement.setString(1, DateTimeUtil.toDatabaseDate(date));
             }
             try (ResultSet rs = statement.executeQuery()) {
                 return rs.next() ? rs.getInt(1) : 0;
@@ -249,7 +249,7 @@ public class GoalRepository {
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
             if (date != null) {
-                statement.setString(2, date.toString());
+                statement.setString(2, DateTimeUtil.toDatabaseDate(date));
             }
             try (ResultSet rs = statement.executeQuery()) {
                 return rs.next() ? rs.getInt(1) : 0;
@@ -260,7 +260,7 @@ public class GoalRepository {
     private GoalRow map(ResultSet rs) throws SQLException {
         return new GoalRow(
             rs.getLong("deck_id"),
-            LocalDate.parse(rs.getString("goal_date")),
+            DateTimeUtil.dateFromDatabase(rs.getString("goal_date")),
             rs.getInt("review_goal"),
             rs.getInt("new_word_goal"),
             rs.getInt("session_goal"),

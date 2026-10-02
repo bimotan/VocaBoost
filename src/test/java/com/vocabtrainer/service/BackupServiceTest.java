@@ -65,7 +65,10 @@ class BackupServiceTest {
         Path logsCsv = db.backup.exportReviewLogsCsv(deck.getId(), tempDir.resolve("logs.csv"));
 
         assertTrue(Files.readString(wordsCsv, StandardCharsets.UTF_8).contains("lucid"));
-        assertTrue(Files.readString(logsCsv, StandardCharsets.UTF_8).contains("EASY"));
+        assertEquals(List.of(
+            "english,reviewed_at,user_answer,correct_answer,similarity,rating,elapsed_millis",
+            "\"lucid\",\"2026-05-28T09:00:00\",\"清晰的\",\"清晰的\",\"1.0\",\"EASY\",\"900\""),
+            Files.readAllLines(logsCsv, StandardCharsets.UTF_8));
     }
 
     @Test
