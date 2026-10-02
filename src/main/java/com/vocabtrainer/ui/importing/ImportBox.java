@@ -38,6 +38,7 @@ final class ImportBox {
 
         importPathField.setId("importPathField");
         importPathField.setPromptText("Choose legacy txt or GRE CSV");
+        importPathField.setAccessibleText("File to import");
         Button chooseButton = new Button("Choose file");
         chooseButton.setId("chooseImportFileButton");
         chooseButton.setOnAction(event -> {

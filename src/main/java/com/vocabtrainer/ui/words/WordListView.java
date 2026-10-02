@@ -35,6 +35,7 @@ import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
 import java.sql.SQLException;
@@ -131,14 +132,18 @@ public final class WordListView {
     private VBox createContent() {
         searchField.setId("wordSearchField");
         searchField.setPromptText("Search English, Chinese or tags");
+        searchField.setAccessibleText("Search English, Chinese or tags");
         wordStatusFilter.setId("wordStatusFilter");
         wordStatusFilter.getItems().setAll(WordListFilter.STATUSES);
         wordStatusFilter.getSelectionModel().select("All");
+        wordStatusFilter.setAccessibleText("Status");
         tagFilterField.setId("wordTagFilterField");
         tagFilterField.setPromptText("Tag");
+        tagFilterField.setAccessibleText("Tag filter");
         tagFilterField.setPrefWidth(120);
         posFilterField.setId("wordPosFilterField");
         posFilterField.setPromptText("POS");
+        posFilterField.setAccessibleText("Part of speech filter");
         posFilterField.setPrefWidth(120);
         allDecksToggle.setId("wordAllDecksToggle");
         allDecksToggle.setTooltip(new Tooltip("Search the words of every active deck; the Deck column says"
@@ -159,12 +164,22 @@ public final class WordListView {
         deleteButton.setId("deleteWordButton");
         deleteButton.setOnAction(event -> deleteSelectedWord());
 
-        HBox controls = new HBox(10, searchField, wordStatusFilter, tagFilterField, posFilterField, allDecksToggle,
-            refreshButton, editButton, deleteButton);
-        controls.setAlignment(Pos.CENTER_LEFT);
+        HBox filters = new HBox(10, searchField, wordStatusFilter, tagFilterField, posFilterField, allDecksToggle,
+            refreshButton);
+        filters.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(searchField, Priority.ALWAYS);
+        // In a narrow window the search box gets narrower; the other controls keep their size.
+        searchField.setMinWidth(150);
+        for (Region region : List.of(wordStatusFilter, tagFilterField, posFilterField, allDecksToggle, refreshButton,
+            editButton, deleteButton)) {
+            region.setMinWidth(Region.USE_PREF_SIZE);
+        }
+        HBox actions = new HBox(10, editButton, deleteButton);
+        actions.setAlignment(Pos.CENTER_LEFT);
+        VBox controls = new VBox(8, filters, actions);
 
         wordTable.setId("wordTable");
+        wordTable.setAccessibleText("Words");
         wordTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         // The table sorts the filtered words; with no sort column they keep the database's order (by English).
         sortedWords.comparatorProperty().bind(wordTable.comparatorProperty());

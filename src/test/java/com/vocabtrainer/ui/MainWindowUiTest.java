@@ -12,8 +12,10 @@ import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.MockAiService;
 import com.vocabtrainer.service.ReviewSettings;
 import javafx.event.ActionEvent;
+import javafx.geometry.Bounds;
 import javafx.scene.Node;
 import javafx.scene.Parent;
+import javafx.scene.Scene;
 import javafx.scene.chart.XYChart;
 import javafx.scene.control.ButtonBase;
 import javafx.scene.control.ComboBox;
@@ -230,6 +232,54 @@ abstract class MainWindowUiTest {
             .map(Node::getId)
             .filter(id -> id != null && !id.isBlank())
             .toList());
+    }
+
+    /**
+     * Every node MainWindow built (not the internals of control skins), on every tab, selected or not;
+     * call on the FX thread.
+     */
+    List<Node> windowNodes() {
+        return allNodes(stage.getScene().getRoot());
+    }
+
+    /** The nodes of the tab {@code tabId}, selected or not; call on the FX thread. */
+    List<Node> tabNodes(String tabId) {
+        return allNodes(tab(tabId).getContent());
+    }
+
+    /** Resizes the window, as the user would by dragging its corner, and waits until its content has the size. */
+    void resizeWindow(double width, double height) {
+        Fx.run(() -> {
+            stage.setWidth(width);
+            stage.setHeight(height);
+        });
+        Fx.waitUntil("the window is " + width + " x " + height, () -> stage.getWidth() == width
+            && stage.getHeight() == height);
+        Fx.run(() -> {
+            stage.getScene().getRoot().applyCss();
+            stage.getScene().getRoot().layout();
+        });
+    }
+
+    /** The window's smallest size: {min width, min height}. */
+    double[] minimumWindowSize() {
+        return Fx.call(() -> new double[] {stage.getMinWidth(), stage.getMinHeight()});
+    }
+
+    /** Whether the node with this id and its parents are visible and it lies entirely inside the window's content. */
+    boolean isEntirelyInWindow(String id) {
+        return Fx.call(() -> {
+            Node node = find(id, Node.class);
+            Bounds bounds = node.localToScene(node.getBoundsInLocal());
+            Scene scene = stage.getScene();
+            for (Node shown = node; shown != null; shown = shown.getParent()) {
+                if (!shown.isVisible()) {
+                    return false;
+                }
+            }
+            return bounds.getMinX() >= 0 && bounds.getMinY() >= 0
+                && bounds.getMaxX() <= scene.getWidth() && bounds.getMaxY() <= scene.getHeight();
+        });
     }
 
     /** The id of every node on the tab {@code tabId} that has one, whether or not the tab is selected. */

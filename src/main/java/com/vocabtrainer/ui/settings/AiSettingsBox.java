@@ -139,18 +139,18 @@ final class AiSettingsBox {
         GridPane form = new GridPane();
         form.setHgap(10);
         form.setVgap(10);
-        form.add(new Label("Provider"), 0, 0);
+        form.add(Widgets.formLabel("_Provider", providerField), 0, 0);
         form.add(providerField, 1, 0);
-        form.add(new Label("Base URL"), 0, 1);
+        form.add(Widgets.formLabel("_Base URL", baseUrlField), 0, 1);
         form.add(baseUrlField, 1, 1);
         HBox keyRow = new HBox(10, apiKeyField, apiKeyStatus, replaceKeyButton, removeKeyButton);
         keyRow.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(apiKeyField, Priority.ALWAYS);
-        form.add(new Label("API key"), 0, 2);
+        form.add(Widgets.formLabel("API _key", apiKeyField), 0, 2);
         form.add(keyRow, 1, 2);
-        form.add(new Label("Model"), 0, 3);
+        form.add(Widgets.formLabel("_Model", modelField), 0, 3);
         form.add(modelField, 1, 3);
-        form.add(new Label("Temperature"), 0, 4);
+        form.add(Widgets.formLabel("_Temperature", temperatureField), 0, 4);
         form.add(temperatureField, 1, 4);
         GridPane.setHgrow(providerField, Priority.ALWAYS);
         GridPane.setHgrow(baseUrlField, Priority.ALWAYS);
@@ -160,7 +160,7 @@ final class AiSettingsBox {
         Label privacyNote = new Label(PRIVACY_NOTE);
         privacyNote.setId("aiPrivacyNoteLabel");
         privacyNote.setWrapText(true);
-        privacyNote.setStyle("-fx-text-fill: #6b7280;");
+        privacyNote.getStyleClass().add("muted-text");
         showKeyState();
         root = new VBox(10, Widgets.sectionTitle("AI Explanation Provider"), form, privacyNote, buttons, statusLabel);
     }

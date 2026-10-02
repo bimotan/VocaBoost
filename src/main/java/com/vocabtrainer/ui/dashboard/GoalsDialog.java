@@ -6,6 +6,7 @@ import com.vocabtrainer.service.GoalSettings;
 import com.vocabtrainer.service.ReviewSettings;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.ViewContext;
+import com.vocabtrainer.ui.Widgets;
 import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
 import javafx.scene.control.Spinner;
@@ -14,7 +15,6 @@ import javafx.scene.control.TextFormatter;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Region;
 
 /**
  * Edits the goals in a modal form: the daily review and new-word goals, either the defaults of
@@ -79,14 +79,14 @@ public final class GoalsDialog {
         form.setId("goalsForm");
         form.setHgap(10);
         form.setVgap(10);
-        form.add(new Label("Daily goals for"), 0, 0);
+        form.add(Widgets.formLabel("Daily goals _for", everyDeck), 0, 0);
         form.add(new HBox(16, everyDeck, thisDeck), 1, 0);
-        form.add(new Label("Reviews per day"), 0, 1);
+        form.add(Widgets.formLabel("_Reviews per day", reviewGoal), 0, 1);
         form.add(reviewGoal, 1, 1);
-        form.add(new Label("New words per day"), 0, 2);
+        form.add(Widgets.formLabel("_New words per day", newWordGoal), 0, 2);
         form.add(newWordGoal, 1, 2);
         form.add(newWordsHint, 1, 3);
-        form.add(new Label("Session size"), 0, 4);
+        form.add(Widgets.formLabel("_Session size", sessionGoal), 0, 4);
         form.add(sessionGoal, 1, 4);
         form.add(sessionHint, 1, 5);
 
@@ -140,12 +140,9 @@ public final class GoalsDialog {
     }
 
     private static Label hint(String text) {
-        Label label = new Label(text);
-        label.setWrapText(true);
+        Label label = Widgets.hint(text);
         // A fixed width lets the grid give the wrapped lines their height.
         label.setPrefWidth(380);
-        label.setMinHeight(Region.USE_PREF_SIZE);
-        label.setStyle("-fx-text-fill: #6b7280; -fx-font-size: 12px;");
         return label;
     }
 }

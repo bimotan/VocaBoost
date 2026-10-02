@@ -86,14 +86,14 @@ final class StudySettingsBox {
         HBox retentionRow = new HBox(10, retentionSlider, retentionLabel);
         retentionRow.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(retentionSlider, Priority.ALWAYS);
-        addRow(form, 0, "Desired retention", retentionRow, retentionHint);
-        addRow(form, 2, "New study day starts at", rolloverSelector,
+        addRow(form, 0, Widgets.formLabel("Desired _retention", retentionSlider), retentionRow, retentionHint);
+        addRow(form, 2, Widgets.formLabel("New study day _starts at", rolloverSelector), rolloverSelector,
             hint("dayRolloverHintLabel", "Reviews before this hour count for the day before. What is due today"
                 + " and the daily goals follow the study day."));
         HBox newCardsRow = new HBox(10, newCardsSpinner, useDefaultNewCardsButton);
         newCardsRow.setAlignment(Pos.CENTER_LEFT);
-        addRow(form, 4, "New words per day", newCardsRow, newCardsHint);
-        addRow(form, 6, "Daily goals", editGoalsButton, goalsSummary);
+        addRow(form, 4, Widgets.formLabel("New _words per day", newCardsSpinner), newCardsRow, newCardsHint);
+        addRow(form, 6, new Label("Daily goals"), editGoalsButton, goalsSummary);
         GridPane.setHgrow(retentionRow, Priority.ALWAYS);
 
         showSaved();
@@ -151,7 +151,7 @@ final class StudySettingsBox {
         retentionSlider.setMaxWidth(420);
         retentionLabel.setId("desiredRetentionLabel");
         retentionLabel.setMinWidth(Region.USE_PREF_SIZE);
-        retentionLabel.setStyle("-fx-font-weight: 600;");
+        retentionLabel.getStyleClass().add("strong-text");
         // A drag is saved when the thumb is let go; the keys and a click save at once.
         retentionSlider.valueProperty().addListener((observable, oldValue, value) -> {
             showRetention(value.doubleValue());
@@ -336,8 +336,7 @@ final class StudySettingsBox {
         return goals.reviewGoal() + " reviews and " + goals.newWordGoal() + " new words per day";
     }
 
-    private static void addRow(GridPane form, int row, String name, Node control, Label hint) {
-        Label label = new Label(name);
+    private static void addRow(GridPane form, int row, Label label, Node control, Label hint) {
         label.setMinWidth(Region.USE_PREF_SIZE);
         form.add(label, 0, row);
         form.add(control, 1, row);
@@ -350,11 +349,8 @@ final class StudySettingsBox {
     }
 
     private static Label hint(String id, String text) {
-        Label label = new Label(text);
+        Label label = Widgets.hint(text);
         label.setId(id);
-        label.setWrapText(true);
-        label.setMinHeight(Region.USE_PREF_SIZE);
-        label.setStyle("-fx-text-fill: #6b7280; -fx-font-size: 12px;");
         return label;
     }
 

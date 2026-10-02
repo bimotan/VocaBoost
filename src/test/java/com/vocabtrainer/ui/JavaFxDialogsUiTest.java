@@ -1,10 +1,16 @@
 package com.vocabtrainer.ui;
 
 import javafx.application.Platform;
+import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.DialogPane;
+import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
+import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
+import javafx.scene.text.Font;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import org.junit.jupiter.api.BeforeAll;
@@ -21,7 +27,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The real form dialog: OK closes it only once the form accepts its input. */
+/**
+ * The real form dialog: OK closes it only once the form accepts its input; it has the app's style
+ * and text size, and the keyboard starts in its first field.
+ */
 @Tag("ui")
 class JavaFxDialogsUiTest {
     private static final String TITLE = "Form under test";
@@ -35,7 +44,7 @@ class JavaFxDialogsUiTest {
     void okClosesTheFormOnlyOnceItsInputIsAccepted() throws Exception {
         TextField field = new TextField();
         AtomicInteger checks = new AtomicInteger();
-        CompletableFuture<Boolean> result = open(field, () -> {
+        CompletableFuture<Boolean> result = open(new JavaFxDialogs(), field, () -> {
             checks.incrementAndGet();
             return !field.getText().isBlank();
         });
@@ -56,7 +65,7 @@ class JavaFxDialogsUiTest {
     @Test
     void cancelClosesTheFormWithoutCheckingIt() throws Exception {
         AtomicInteger checks = new AtomicInteger();
-        CompletableFuture<Boolean> result = open(new TextField(), () -> {
+        CompletableFuture<Boolean> result = open(new JavaFxDialogs(), new TextField(), () -> {
             checks.incrementAndGet();
             return false;
         });
@@ -67,12 +76,33 @@ class JavaFxDialogsUiTest {
         assertEquals(0, checks.get());
     }
 
+    @Test
+    void aFormHasTheAppsStyleAndTextSizeAndTheKeyboardStartsInItsFirstField() throws Exception {
+        TextField first = new TextField();
+        TextField second = new TextField();
+        Label problem = new Label("A problem");
+        problem.getStyleClass().add("form-error");
+        VBox form = new VBox(8, new Label("Name"), first, new Label("Note"), second, problem);
+        CompletableFuture<Boolean> result = open(new JavaFxDialogs(() -> 130), form, () -> true);
+
+        // The focus owner of the dialog's window; the window itself may not get the focus under xvfb.
+        Fx.waitUntil("the first field has the keyboard", () -> first.getScene().getFocusOwner() == first);
+        Scene scene = Fx.call(() -> dialog().orElseThrow().getScene());
+        assertTrue(scene.getStylesheets().contains(AppStyle.STYLESHEET));
+        assertTrue(scene.getRoot().getStyleClass().contains("text-size-130"), scene.getRoot().getStyleClass().toString());
+        assertEquals(Font.getDefault().getSize() * 1.3, Fx.call(() -> problem.getFont().getSize()), 0.1);
+        // The app's colours reach into the dialog: the problem is red, not the default text colour.
+        assertEquals(Color.web("#b91c1c"), Fx.call(() -> problem.getTextFill()));
+        press(ButtonType.OK);
+        assertTrue(result.get(Fx.TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+    }
+
     /** Shows the blocking dialog from a later FX event, so the test thread can work it meanwhile. */
-    private static CompletableFuture<Boolean> open(TextField field, BooleanSupplier onOk) {
+    private static CompletableFuture<Boolean> open(JavaFxDialogs dialogs, Node form, BooleanSupplier onOk) {
         CompletableFuture<Boolean> result = new CompletableFuture<>();
         Platform.runLater(() -> {
             try {
-                result.complete(new JavaFxDialogs().showForm(TITLE, field, onOk));
+                result.complete(dialogs.showForm(TITLE, form, onOk));
             } catch (Throwable error) {
                 result.completeExceptionally(error);
             }

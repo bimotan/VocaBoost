@@ -63,10 +63,12 @@ public final class DecksView {
 
     private VBox createContent() {
         deckTable.setId("deckTable");
+        deckTable.setAccessibleText("Active decks");
         deckTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         configureDeckTable(deckTable);
 
         archivedDeckTable.setId("archivedDeckTable");
+        archivedDeckTable.setAccessibleText("Archived decks");
         archivedDeckTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         configureDeckTable(archivedDeckTable);
         archivedDeckTable.setPrefHeight(180);

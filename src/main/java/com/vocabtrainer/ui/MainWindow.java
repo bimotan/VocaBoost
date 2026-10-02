@@ -1,6 +1,7 @@
 package com.vocabtrainer.ui;
 
 import com.vocabtrainer.app.AppServices;
+import com.vocabtrainer.service.DisplaySettings;
 import com.vocabtrainer.service.ReviewSettings;
 import com.vocabtrainer.service.SchedulingSettings;
 import com.vocabtrainer.ui.dashboard.DashboardView;
@@ -10,16 +11,19 @@ import com.vocabtrainer.ui.review.ReviewView;
 import com.vocabtrainer.ui.settings.SettingsView;
 import com.vocabtrainer.ui.stats.StatisticsView;
 import com.vocabtrainer.ui.words.WordListView;
+import javafx.geometry.Dimension2D;
 import javafx.scene.Scene;
 import javafx.scene.control.TabPane;
 import javafx.scene.layout.BorderPane;
+import javafx.stage.Screen;
 
 import java.nio.file.Path;
 
 /**
  * The main window: the deck header above one tab per area. Each tab is its own view class; this
  * shell only builds them on the shared {@link ViewContext} (current deck, change notifications,
- * background work, dialogs and error reporting).
+ * background work, dialogs and error reporting). It sizes the window to the screen
+ * ({@link WindowSize}), styles it with app.css and shows its text at the saved text size.
  */
 public class MainWindow {
     private final AppServices services;
@@ -40,6 +44,8 @@ public class MainWindow {
             () -> root.getScene().getWindow());
         Path databasePath = services.databaseManager().getDatabasePath();
         OfflineMode offlineMode = new OfflineMode(context, services.settingsService());
+        DisplaySettings display = new DisplaySettings(services.settingsService());
+        AppStyle.applyTextSize(root, display.textSizePercent());
 
         DeckHeader header = new DeckHeader(context, services.deckService(), services.settingsService(), configured,
             offlineMode);
@@ -58,7 +64,7 @@ public class MainWindow {
             new SchedulingSettings(services.settingsService(), services.reviewScheduler()),
             new ReviewSettings(services.settingsService()), services.goalService().settings(),
             services.aiCacheRepository(), services.ecdictImportService(), services.localDictionary(), configured,
-            offlineMode, databasePath);
+            offlineMode, databasePath, display, percent -> AppStyle.applyTextSize(root, percent));
 
         TabPane tabs = new TabPane();
         tabs.setId("mainTabs");
@@ -73,7 +79,9 @@ public class MainWindow {
         decksView.refreshNow();
         wordList.refreshNow();
         review.start();
-        Scene scene = new Scene(root, 1120, 780);
+        Dimension2D size = WindowSize.initialSceneSize(Screen.getPrimary().getVisualBounds());
+        Scene scene = new Scene(root, size.getWidth(), size.getHeight());
+        AppStyle.install(scene);
         review.installShortcuts(scene);
         return scene;
     }

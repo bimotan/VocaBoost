@@ -78,15 +78,17 @@ public final class StatisticsView {
         memoryChart.setAnimated(false);
 
         overdueStatsLabel.setId("overdueStatsLabel");
-        overdueStatsLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: 600;");
+        overdueStatsLabel.getStyleClass().add("sub-stat-value");
         hardestWordsArea.setId("hardestWordsArea");
         hardestWordsArea.setEditable(false);
         hardestWordsArea.setWrapText(true);
         hardestWordsArea.setPrefRowCount(8);
+        hardestWordsArea.setAccessibleText("Hardest words");
         analyticsArea.setId("analyticsArea");
         analyticsArea.setEditable(false);
         analyticsArea.setWrapText(true);
         analyticsArea.setPrefRowCount(8);
+        analyticsArea.setAccessibleText("Portfolio summary");
 
         Button refreshButton = new Button("Refresh statistics");
         refreshButton.setId("refreshStatisticsButton");

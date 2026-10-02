@@ -13,8 +13,10 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -39,9 +41,8 @@ public final class DeckHeader {
         this.settingsService = settingsService;
         this.configured = configured;
 
-        Label title = new Label("VocaBoost");
-        title.setStyle("-fx-font-size: 24px; -fx-font-weight: 700;");
-        subtitleLabel.setStyle("-fx-text-fill: #4b5563;");
+        Label title = Widgets.styled(new Label("VocaBoost"), "app-title");
+        subtitleLabel.getStyleClass().add("secondary-text");
         subtitleLabel.setId("headerSubtitleLabel");
 
         DeckContext decks = context.decks();
@@ -72,9 +73,16 @@ public final class DeckHeader {
         archiveDeckButton.setId("archiveDeckButton");
         archiveDeckButton.setOnAction(event -> archiveCurrentDeck());
 
-        HBox deckControls = new HBox(8, new Label("Deck"), deckSelector, newDeckButton, renameDeckButton, archiveDeckButton);
+        Label deckLabel = Widgets.formLabel("_Deck", deckSelector);
+        HBox deckControls = new HBox(8, deckLabel, deckSelector, newDeckButton, renameDeckButton, archiveDeckButton);
         deckControls.setAlignment(Pos.CENTER_LEFT);
         CheckBox offlineToggle = offlineMode.checkBox("offlineModeToggle", "Offline mode / 离线模式");
+        // In a narrow window the status line is cut short first, then the deck selector, never the
+        // title or the buttons.
+        for (Region region : List.of(title, deckLabel, newDeckButton, renameDeckButton, archiveDeckButton)) {
+            region.setMinWidth(Region.USE_PREF_SIZE);
+        }
+        deckSelector.setMinWidth(120);
         HBox titleLine = new HBox(18, title, offlineToggle);
         titleLine.setAlignment(Pos.CENTER_LEFT);
 
@@ -85,7 +93,7 @@ public final class DeckHeader {
         updateSubtitle();
         root = new VBox(4, headerLine);
         root.setPadding(new Insets(18, 24, 12, 24));
-        root.setStyle("-fx-background-color: #f8fafc; -fx-border-color: #e5e7eb; -fx-border-width: 0 0 1 0;");
+        root.getStyleClass().add("app-header");
     }
 
     public Node root() {

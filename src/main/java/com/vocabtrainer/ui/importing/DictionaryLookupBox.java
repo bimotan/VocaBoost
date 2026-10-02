@@ -52,6 +52,7 @@ final class DictionaryLookupBox {
 
         lookupField.setId("lookupField");
         lookupField.setPromptText("Enter an English word to look up");
+        lookupField.setAccessibleText("Word to look up");
         Button lookupButton = new Button("Lookup online");
         lookupButton.setId("lookupButton");
         Button refreshLookupButton = new Button("Refresh cache");
@@ -62,6 +63,7 @@ final class DictionaryLookupBox {
         lookupStatus.setId("lookupStatusLabel");
         lookupStatus.setWrapText(true);
         results.setId("lookupResults");
+        results.setAccessibleText("Dictionary entries found");
         results.setPrefHeight(120);
         results.setCellFactory(list -> new ListCell<>() {
             @Override
