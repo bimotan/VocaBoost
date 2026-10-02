@@ -155,6 +155,24 @@ class EcdictTagDeckServiceTest {
     }
 
     @Test
+    void aSpellingWithDoubledSpacesIsTheWordTheDeckStores() throws Exception {
+        String single = "a la carte,,,adv. 照菜单点菜,,,,gre,500,500,,,";
+        String doubled = "a  la  carte,,,adv. 按菜单,,,,gre,600,600,,,";
+        String inDeck = "en  route,,,adv. 在途中,,,,gre,700,700,,,";
+        Path csv = EcdictFixtures.write(tempDir.resolve("ecdict.csv"), false, List.of(single, doubled, inDeck));
+        new EcdictImportService(ecdict).importCsv(csv, progress -> { }, () -> false);
+        Deck mine = decks.createDeck("Mine");
+        words.insert(WordCard.createNew(mine.getId(), "En route", "途中"));
+
+        EcdictTagDeckService.Result result = service.build(request("Mine", 0, EcdictRepository.TagOrder.FREQUENCY),
+            progress -> { }, () -> false);
+
+        assertEquals(1, result.added());
+        assertEquals(2, result.alreadyInDeck(), "a  la  carte is a la carte, en  route is in the deck");
+        assertEquals("照菜单点菜", words.findByEnglish(mine.getId(), "a la carte").orElseThrow().getChinese());
+    }
+
+    @Test
     void aCancelAddsNothingNotEvenTheDeck() throws Exception {
         importEcdict();
         int[] checks = {0};

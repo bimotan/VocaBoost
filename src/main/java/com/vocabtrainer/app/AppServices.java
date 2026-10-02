@@ -46,6 +46,8 @@ import java.util.Random;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * The repositories and services of one database, wired the way the desktop app runs them.
@@ -231,6 +233,7 @@ public record AppServices(
                 reviewScheduler.studyDay(), reviewSettings);
             ExamPlanService examPlanService = new ExamPlanService(examSettings, wordRepository, reviewLogRepository,
                 reviewSettings, reviewScheduler, clock);
+            bringReviewsBeforeExams(examPlanService);
             BackupService backupService = new BackupService(deckRepository, wordRepository, reviewLogRepository,
                 goalRepository, achievementRepository, databaseManager, validationService, clock, cardStates);
             BiFunction<AiCacheRepository, SettingsService, AiService> aiFactory = aiServiceFactory;
@@ -265,6 +268,19 @@ public record AppServices(
                 examPlanService,
                 new EcdictTagDeckService(ecdictRepository, deckService, wordRepository, validationService)
             );
+        }
+
+        /**
+         * Reviews that a backup restore, an import or the card-state backfill scheduled on or after an
+         * exam are brought forward at every start; a failure only skips that.
+         */
+        private static void bringReviewsBeforeExams(ExamPlanService examPlanService) {
+            try {
+                examPlanService.bringReviewsBeforeExams();
+            } catch (RuntimeException e) {
+                Logger.getLogger(AppServices.class.getName()).log(Level.WARNING,
+                    "Cannot bring the reviews scheduled after the exam forward", e);
+            }
         }
     }
 }

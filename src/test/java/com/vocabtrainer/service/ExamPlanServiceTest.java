@@ -190,6 +190,38 @@ class ExamPlanServiceTest {
     }
 
     @Test
+    void reviewsScheduledAfterTheExamWithoutTheClampAreBroughtForwardAtStart() throws SQLException {
+        LocalDate exam = TODAY.plusDays(30);
+        WordCard late = words.insert(reviewCard(deck, "lucid", 60, NOW.minusDays(10), TODAY.plusDays(50).atTime(4, 0)));
+        assertEquals(0, plans.bringReviewsBeforeExams(), "no exam");
+        assertEquals(TODAY.plusDays(50).atTime(4, 0), due(late));
+
+        // Saved as the dashboard saves it; then a backup restore, an import or the card-state backfill
+        // schedules a review after the exam again.
+        plans.saveExam(deck.getId(), false, new Exam("GRE", exam));
+        WordCard restored = words.insert(reviewCard(deck, "abate", 60, NOW.minusDays(10), TODAY.plusDays(70).atTime(4, 0)));
+        WordCard otherDeck = words.insert(reviewCard(other, "laud", 60, NOW.minusDays(10), TODAY.plusDays(70).atTime(4, 0)));
+
+        assertEquals(2, plans.bringReviewsBeforeExams());
+        assertEquals(scheduler.dueBeforeExam(restored, NOW, exam).orElseThrow(), due(restored));
+        assertTrue(due(otherDeck).toLocalDate().isBefore(exam), "every deck's exam");
+        assertEquals(0, plans.bringReviewsBeforeExams(), "nothing more to move");
+
+        // A deck's own exam that comes first; exams that are over or today move nothing.
+        assertEquals(Optional.of(exam), exams.firstExamAfter(TODAY));
+        plans.saveExam(other.getId(), true, new Exam("TOEFL", TODAY.plusDays(12)));
+        assertEquals(Optional.of(TODAY.plusDays(12)), exams.firstExamAfter(TODAY));
+        settingsService.save("exam.date.999", "not a date");
+        assertEquals(Optional.of(TODAY.plusDays(12)), exams.firstExamAfter(TODAY), "a broken date is skipped");
+        plans.saveExam(other.getId(), true, new Exam("TOEFL", TODAY));
+        plans.saveExam(deck.getId(), true, new Exam("GRE", TODAY.minusDays(1)));
+        exams.clearDefaultExam();
+        assertTrue(exams.firstExamAfter(TODAY).isEmpty());
+        words.insert(reviewCard(deck, "zeal", 60, NOW.minusDays(10), TODAY.plusDays(70).atTime(4, 0)));
+        assertEquals(0, plans.bringReviewsBeforeExams());
+    }
+
+    @Test
     void theNewWordPlanCountsTheNewWordsAndTodaysIntroductions() throws SQLException {
         for (int i = 0; i < 100; i++) {
             words.insert(WordCard.createNew(deck.getId(), "word" + (char) ('a' + i / 26) + (char) ('a' + i % 26), "释义"));

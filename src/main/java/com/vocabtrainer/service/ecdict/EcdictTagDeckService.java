@@ -218,7 +218,8 @@ public class EcdictTagDeckService {
             if (request.limit() > 0 && words.size() >= request.limit()) {
                 break;
             }
-            String key = row.word().trim().toLowerCase(Locale.ROOT);
+            // The spelling as the deck stores it ("a  la carte" becomes "a la carte"), ignoring case.
+            String key = validationService.normalizeEnglish(row.word()).toLowerCase(Locale.ROOT);
             if (inDeck.contains(key)) {
                 alreadyInDeck++;
                 continue;
@@ -228,7 +229,7 @@ public class EcdictTagDeckService {
                 skipped++;
                 continue;
             }
-            inDeck.add(key);
+            inDeck.add(word.get().getEnglish().toLowerCase(Locale.ROOT));
             words.add(word.get());
         }
         if (existing.isEmpty() && words.isEmpty()) {

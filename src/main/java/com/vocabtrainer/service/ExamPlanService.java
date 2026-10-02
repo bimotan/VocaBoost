@@ -124,7 +124,7 @@ public class ExamPlanService {
                     }
                     settings.clearDeckExam(deckId);
                 }
-                return bringReviewsBeforeExams();
+                return bringReviewsBeforeExams(studyDay().end(LocalDateTime.now(clock)));
             });
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot save the exam date", e);
@@ -132,13 +132,34 @@ public class ExamPlanService {
     }
 
     /**
-     * Moves every review card that is due on or after its deck's exam, and was not reviewed in the
-     * last days before it, to its last review day before the exam ({@link ReviewScheduler#dueBeforeExam}).
+     * Brings forward the reviews that were scheduled on or after an exam without the scheduler's
+     * clamp, such as those a backup restore, an import or the card-state backfill wrote after the
+     * exam was saved; the app does this at every start. Only cards due on or after the first exam
+     * day ahead are read, so it costs nothing without an exam.
+     *
+     * @return how many cards were brought forward
      */
-    private int bringReviewsBeforeExams() throws SQLException {
-        StudyDay studyDay = studyDay();
+    public int bringReviewsBeforeExams() {
         LocalDateTime now = LocalDateTime.now(clock);
-        List<WordCard> later = wordRepository.findReviewCardsDueFrom(studyDay.end(now));
+        Optional<LocalDate> firstExam = settings.firstExamAfter(studyDay().of(now));
+        if (firstExam.isEmpty()) {
+            return 0;
+        }
+        try {
+            return transactions.inTransaction(() -> bringReviewsBeforeExams(studyDay().start(firstExam.get())));
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot bring the reviews forward to before the exam", e);
+        }
+    }
+
+    /**
+     * Moves every review card that is due at {@code from} or later and on or after its deck's exam,
+     * and was not reviewed in the last days before it, to its last review day before the exam
+     * ({@link ReviewScheduler#dueBeforeExam}).
+     */
+    private int bringReviewsBeforeExams(LocalDateTime from) throws SQLException {
+        LocalDateTime now = LocalDateTime.now(clock);
+        List<WordCard> later = wordRepository.findReviewCardsDueFrom(from);
         Map<Long, Optional<LocalDate>> examDates = new HashMap<>();
         int moved = 0;
         for (WordCard word : later) {

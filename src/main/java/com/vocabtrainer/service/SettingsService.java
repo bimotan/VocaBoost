@@ -5,6 +5,7 @@ import com.vocabtrainer.service.scheduling.SchedulingOptions;
 
 import java.math.BigDecimal;
 import java.sql.SQLException;
+import java.util.Map;
 import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -230,6 +231,15 @@ public class SettingsService {
             return settingsRepository.find(key);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read setting: " + key, e);
+        }
+    }
+
+    /** Every setting whose key starts with {@code prefix}, by key. */
+    public Map<String, String> getByPrefix(String prefix) {
+        try {
+            return settingsRepository.findByPrefix(prefix);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot read the settings " + prefix + "*", e);
         }
     }
 

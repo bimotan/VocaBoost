@@ -45,6 +45,18 @@ public class ExamSettings {
         return examFor(deckId).map(Exam::date);
     }
 
+    /**
+     * The first exam day after {@code day} of every deck's exam and the decks' own; empty when no
+     * exam is set after it.
+     */
+    public Optional<LocalDate> firstExamAfter(LocalDate day) {
+        return settings.getByPrefix(DATE_KEY).values().stream()
+            .map(ExamSettings::parseDate)
+            .flatMap(Optional::stream)
+            .filter(date -> date.isAfter(day))
+            .min(LocalDate::compareTo);
+    }
+
     public void saveDefaultExam(Exam exam) {
         write(DATE_KEY, NAME_KEY, exam);
     }
@@ -73,6 +85,14 @@ public class ExamSettings {
             return Optional.of(new Exam(settings.get(nameKey).orElse(""), LocalDate.parse(date.get().trim())));
         } catch (DateTimeParseException | IllegalArgumentException e) {
             LOGGER.warning("Ignoring exam setting " + dateKey + "=" + date.get() + ": " + e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private static Optional<LocalDate> parseDate(String value) {
+        try {
+            return value == null || value.isBlank() ? Optional.empty() : Optional.of(LocalDate.parse(value.trim()));
+        } catch (DateTimeParseException e) {
             return Optional.empty();
         }
     }

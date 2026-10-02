@@ -270,17 +270,25 @@ public final class ReviewSessionPresenter {
 
     /**
      * The review settings changed elsewhere, such as the deck's new-cards-per-day limit set from the
-     * Dashboard's new-word plan: the limit is read again, and a session that ran out of cards goes on
-     * when the new limit lets more new cards in today.
+     * Dashboard's new-word plan or the exam date: the limit is read again, and a session that ran out
+     * of cards goes on when the new limit lets more new cards in today; a checked answer's rating
+     * buttons show the intervals the exam date gives now.
      */
     public void reviewSettingsChanged() {
         int limit = reviewService.newCardsPerDay(deckId);
-        if (limit == newCardsPerDay) {
+        boolean limitChanged = limit != newCardsPerDay;
+        newCardsPerDay = limit;
+        boolean previewsChanged = false;
+        if ((state == State.ANSWERED || state == State.RATING_FAILED) && card != null) {
+            Map<ReviewRating, IntervalPreview> before = new EnumMap<>(ratingPreviews);
+            previewRatings();
+            previewsChanged = !before.equals(ratingPreviews);
+        }
+        if (!limitChanged && !previewsChanged) {
             return;
         }
-        newCardsPerDay = limit;
         try {
-            if (state == State.COMPLETE) {
+            if (limitChanged && state == State.COMPLETE) {
                 loadNextCard();
             }
         } finally {

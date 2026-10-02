@@ -12,6 +12,7 @@ import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -180,6 +181,62 @@ class ExamPlanningUiTest extends MainWindowUiTest {
     }
 
     @Test
+    void ratingButtonsShownBeforeTheExamWasSavedShowTheExamIntervalsAfterwards() throws Exception {
+        WordCard word = matureCardDueNow("abate");
+        selectTab("reviewTab");
+        click("resetSessionButton");
+        assertEquals("abate", text("reviewWordLabel"));
+        type("answerField", correctAnswer(word));
+        click("submitAnswerButton");
+        waitForBackgroundTasks();
+        assertFalse(text("rateGoodButton").contains("(exam)"), text("rateGoodButton"));
+
+        // The answer is checked, then the exam date is set on the Dashboard.
+        LocalDate exam = today().plusDays(20);
+        selectTab("dashboardTab");
+        saveExam(form -> datePicker(form).getEditor().setText(exam.toString()));
+        selectTab("reviewTab");
+
+        String good = text("rateGoodButton");
+        assertTrue(good.endsWith("d (exam)"), good);
+        click("rateGoodButton");
+        LocalDate due = services.wordRepository().findById(word.getId()).orElseThrow().getNextReviewAt().toLocalDate();
+        assertEquals("Good (3) · " + (due.toEpochDay() - today().toEpochDay()) + "d (exam)", good,
+            "the button showed what the rating saved");
+        assertTrue(due.isBefore(exam), "due " + due + ", exam " + exam);
+    }
+
+    @Test
+    void reviewsThatABackupRestoreOrAnOlderVersionScheduledAfterTheExamComeBeforeIt() throws Exception {
+        LocalDate exam = today().plusDays(30);
+        selectTab("dashboardTab");
+        saveExam(form -> datePicker(form).getEditor().setText(exam.toString()));
+        // Scheduled after the exam by a version without exam dates, or by the card-state backfill.
+        WordCard lucid = scheduledAfterTheExam("lucid");
+        Path backup = tempDir.resolve("backup.json");
+        selectTab("statisticsTab");
+        dialogs.saveFile(backup);
+        click("exportBackupButton");
+        waitForBackgroundTasks();
+
+        restartApp();
+        LocalDate due = dueDate(lucid.getId());
+        assertTrue(due.isBefore(exam) && due.isAfter(exam.minusDays(8)), "brought forward at start: " + due);
+
+        // A backup restored into another deck schedules the review after the exam again.
+        dialogs.answerText("Restored");
+        click("newDeckButton");
+        long restoredDeck = currentDeck().getId();
+        selectTab("statisticsTab");
+        dialogs.openFile(backup).chooseButton("Keep current progress");
+        click("importBackupButton");
+        waitForBackgroundTasks();
+        WordCard restored = services.wordRepository().findByEnglish(restoredDeck, "lucid").orElseThrow();
+        due = restored.getNextReviewAt().toLocalDate();
+        assertTrue(due.isBefore(exam) && due.isAfter(exam.minusDays(8)), "brought forward after the restore: " + due);
+    }
+
+    @Test
     void theStatisticsTabForecastsTheWorkloadForTheNextTwoOrFourWeeks() throws Exception {
         review(true, "rateGoodButton");
         selectTab("dashboardTab");
@@ -209,6 +266,37 @@ class ExamPlanningUiTest extends MainWindowUiTest {
         assertEquals(1.0, month.stream().mapToDouble(ChartPoint::y).sum());
         assertTrue(text("forecastSummaryLabel").startsWith("Next 30 days: 1 review due and 214 new words planned."),
             text("forecastSummaryLabel"));
+    }
+
+    private WordCard matureCardDueNow(String english) throws Exception {
+        WordCard word = services.wordRepository().findByEnglish(currentDeck().getId(), english).orElseThrow();
+        word.setState(CardState.REVIEW);
+        word.setStability(60);
+        word.setDifficulty(5);
+        word.setRepetitions(4);
+        word.setConsecutiveCorrect(4);
+        word.setIntervalDays(60);
+        word.setLastReviewedAt(clock.now().minusDays(60));
+        word.setNextReviewAt(clock.now().minusHours(1));
+        services.wordRepository().save(word);
+        return word;
+    }
+
+    private WordCard scheduledAfterTheExam(String english) throws Exception {
+        WordCard word = services.wordRepository().findByEnglish(currentDeck().getId(), english).orElseThrow();
+        word.setState(CardState.REVIEW);
+        word.setStability(90);
+        word.setDifficulty(5);
+        word.setRepetitions(3);
+        word.setIntervalDays(90);
+        word.setLastReviewedAt(clock.now().minusDays(10));
+        word.setNextReviewAt(clock.now().plusDays(80));
+        services.wordRepository().save(word);
+        return word;
+    }
+
+    private LocalDate dueDate(long wordId) throws Exception {
+        return services.wordRepository().findById(wordId).orElseThrow().getNextReviewAt().toLocalDate();
     }
 
     private void saveExam(Consumer<Node> fill) {

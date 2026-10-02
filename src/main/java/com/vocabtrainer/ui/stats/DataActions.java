@@ -3,6 +3,7 @@ package com.vocabtrainer.ui.stats;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.service.BackupRestoreResult;
 import com.vocabtrainer.service.BackupService;
+import com.vocabtrainer.service.ExamPlanService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.ui.DataChange;
@@ -20,23 +21,29 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.BiFunction;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /** Report and CSV exports, JSON backup export and restore, and opening the data and log folders. */
 final class DataActions {
+    private static final Logger LOGGER = Logger.getLogger(DataActions.class.getName());
+
     private final ViewContext context;
     private final StatsService statsService;
     private final GoalService goalService;
     private final BackupService backupService;
+    private final ExamPlanService examPlanService;
     private final Path databasePath;
     private final Labeled status;
 
     /** {@code status} shows progress while an export or restore runs. */
     DataActions(ViewContext context, StatsService statsService, GoalService goalService, BackupService backupService,
-                Path databasePath, Labeled status) {
+                ExamPlanService examPlanService, Path databasePath, Labeled status) {
         this.context = context;
         this.statsService = statsService;
         this.goalService = goalService;
         this.backupService = backupService;
+        this.examPlanService = examPlanService;
         this.databasePath = databasePath;
         this.status = status;
     }
@@ -129,12 +136,25 @@ final class DataActions {
             return;
         }
         context.async().run(
-            () -> backupService.importJsonBackup(file.get(), targetDeck.getId(), policy.get()),
+            () -> {
+                BackupRestoreResult result = backupService.importJsonBackup(file.get(), targetDeck.getId(), policy.get());
+                bringReviewsBeforeExams();
+                return result;
+            },
             result -> afterRestore(result, targetDeck),
             error -> context.errors().showError("Import failed", UiErrors.rootMessage(error)),
             status,
             "Importing backup..."
         );
+    }
+
+    /** The backup may schedule reviews on or after the exam; they come before it, as at startup. */
+    private void bringReviewsBeforeExams() {
+        try {
+            examPlanService.bringReviewsBeforeExams();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Backup restored, but the reviews after the exam were not brought forward", e);
+        }
     }
 
     private Optional<BackupService.ExistingWordPolicy> askExistingWordPolicy(Deck targetDeck) {

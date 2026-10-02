@@ -94,8 +94,8 @@ public final class StatisticsView {
         Button refreshButton = new Button("Refresh statistics");
         refreshButton.setId("refreshStatisticsButton");
         refreshButton.setOnAction(event -> context.errors().guard("Refresh statistics failed", this::refreshNow));
-        DataActions actions = new DataActions(context, statsService, goalService, backupService, databasePath,
-            overdueStatsLabel);
+        DataActions actions = new DataActions(context, statsService, goalService, backupService, examPlanService,
+            databasePath, overdueStatsLabel);
         List<Button> exportButtons = new ArrayList<>();
         exportButtons.add(refreshButton);
         exportButtons.addAll(actions.exportButtons());
