@@ -64,11 +64,12 @@ class BackupServiceTest {
         Path wordsCsv = db.backup.exportWordsCsv(deck.getId(), tempDir.resolve("words.csv"));
         Path logsCsv = db.backup.exportReviewLogsCsv(deck.getId(), tempDir.resolve("logs.csv"));
 
-        assertTrue(Files.readString(wordsCsv, StandardCharsets.UTF_8).contains("lucid"));
-        assertEquals(List.of(
-            "english,reviewed_at,user_answer,correct_answer,similarity,rating,elapsed_millis",
-            "\"lucid\",\"2026-05-28T09:00:00\",\"清晰的\",\"清晰的\",\"1.0\",\"EASY\",\"900\""),
-            Files.readAllLines(logsCsv, StandardCharsets.UTF_8));
+        // UTF-8 with a byte order mark, so Excel on Chinese Windows does not read it as GBK.
+        assertEquals("\uFEFFenglish,chinese,phonetic,pos,example,note,tags\r\nlucid,清晰的,,,,,backup\r\n",
+            Files.readString(wordsCsv, StandardCharsets.UTF_8));
+        assertEquals("\uFEFFenglish,reviewed_at,user_answer,correct_answer,similarity,rating,elapsed_millis\r\n"
+                + "lucid,2026-05-28T09:00:00,清晰的,清晰的,1.0,EASY,900\r\n",
+            Files.readString(logsCsv, StandardCharsets.UTF_8));
     }
 
     @Test

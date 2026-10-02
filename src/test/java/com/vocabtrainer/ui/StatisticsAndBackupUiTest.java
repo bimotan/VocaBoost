@@ -134,4 +134,41 @@ class StatisticsAndBackupUiTest extends MainWindowUiTest {
         assertEquals(STARTER_WORDS + 1, Files.readAllLines(words).size());
         assertEquals(2, Files.readAllLines(logs).size());
     }
+
+    @Test
+    void anExportedWordsCsvImportsIntoANewDeckWithEveryField() throws Exception {
+        long starterDeckId = currentDeck().getId();
+        WordCard lucid = services.wordRepository().findByEnglish(starterDeckId, "lucid").orElseThrow();
+        lucid.setPhonetic("/ˈluːsɪd/");
+        lucid.setNote("=HYPERLINK(\"http://x\",\"点击\")");
+        services.wordRepository().update(lucid);
+        selectTab("statisticsTab");
+        Path words = tempDir.resolve("words.csv");
+        dialogs.saveFile(words);
+        click("exportWordsCsvButton");
+        waitForBackgroundTasks();
+        assertTrue(Files.readString(words).startsWith("\uFEFFenglish,chinese,phonetic,pos,example,note,tags\r\n"));
+
+        dialogs.answerText("Copy");
+        click("newDeckButton");
+        selectTab("addImportTab");
+        dialogs.openFile(words);
+        click("chooseImportFileButton");
+        click("importCsvButton");
+        waitForBackgroundTasks();
+
+        assertTrue(text("importStatusLabel").startsWith("Deck: Copy" + System.lineSeparator()
+            + "Imported " + STARTER_WORDS + ", skipped 0."), text("importStatusLabel"));
+        assertEquals(wordFields(starterDeckId), wordFields(currentDeck().getId()));
+        selectTab("wordListTab");
+        assertEquals(STARTER_WORDS, rowCount("wordTable"));
+    }
+
+    private List<List<String>> wordFields(long deckId) throws Exception {
+        return services.wordRepository().findAll(deckId).stream()
+            .map(word -> List.of(word.getEnglish(), word.getChinese(), String.valueOf(word.getPhonetic()),
+                String.valueOf(word.getPartOfSpeech()), String.valueOf(word.getExampleSentence()),
+                String.valueOf(word.getNote()), String.valueOf(word.getTags())))
+            .toList();
+    }
 }
