@@ -130,6 +130,38 @@ class DictionaryServiceTest {
     }
 
     @Test
+    void aRawEntryAnEarlierVersionCachedFromEcdictIsNotServedWhileNothingIsImported() throws Exception {
+        // During the first import after an upgrade, or after the ECDICT path was cleared.
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("leftover.db"));
+        DictionaryCacheRepository cache = new DictionaryCacheRepository(databaseManager);
+        cache.save("abandon", String.join("\t", b64("abandon"), b64("vt. 放弃, 抛弃\\nn. 放任"), b64(""), b64(""), b64(""),
+            b64("ECDICT/local CSV"), b64("")), "dictionary", LocalDateTime.now());
+        DictionaryService online = new DictionaryService() {
+            @Override
+            public DictionaryLookupResult lookup(String english) {
+                return DictionaryLookupResult.success("online", List.of(new DictionaryEntry(
+                    english, "在线释义", "", "", "", "test")));
+            }
+
+            @Override
+            public boolean isConfigured() {
+                return true;
+            }
+        };
+        try (EcdictRepository ecdict = new EcdictRepository(tempDir.resolve("not-imported.db"))) {
+            DictionaryService service = new CompositeDictionaryService(List.of(new LocalDictionaryService(ecdict),
+                new CachingDictionaryService(online, cache)));
+
+            DictionaryLookupResult result = service.lookup("abandon");
+
+            assertEquals("online", result.message());
+            assertEquals("在线释义", result.entries().get(0).chinese());
+            assertEquals("Loaded from dictionary cache.", service.lookup("abandon").message());
+            assertEquals("在线释义", service.lookup("abandon").entries().get(0).chinese());
+        }
+    }
+
+    @Test
     void compositeRefreshAsksEachDictionaryToRefresh() throws Exception {
         DatabaseManager databaseManager = databases.open(tempDir.resolve("composite.db"));
         AtomicInteger calls = new AtomicInteger();

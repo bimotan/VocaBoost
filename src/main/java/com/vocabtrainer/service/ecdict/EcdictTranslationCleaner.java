@@ -18,7 +18,8 @@ import java.util.regex.Pattern;
  * ("vt. 放弃" is not "放弃") and fills the meaning with jargon.
  *
  * <p>{@link #clean} splits the lines, moves their leading part-of-speech markers into the part of
- * speech, moves tagged lines into the note (unless the word has nothing else), and joins the senses
+ * speech, moves tagged lines and the "(abandonment 的复数)" remark of an inflected form's row into the
+ * note (tagged lines stay when the word has nothing else), and joins the senses
  * with "; ". Senses are split at commas and semicolons, but not inside brackets or quotes, so
  * "使(马,鹰等)戴头罩" stays one sense. A meaning longer than {@value #MAX_MEANING_LENGTH} characters
  * keeps its first senses and lists the rest in the note.
@@ -30,10 +31,14 @@ public final class EcdictTranslationCleaner {
     private static final Cleaned EMPTY = new Cleaned("", "", "");
     /** ECDICT writes line breaks as literal "\n" (sometimes "\r\n"); word lists may have real ones. */
     private static final Pattern LINE_BREAKS = Pattern.compile("\\\\r\\\\n|\\\\n|\\\\r|\\R");
-    private static final String MARKER = "(vt|vi|v|n|adj|a|adv|ad|prep|conj|pron|interj|int|num|art|abbr|aux|suf|pref|comb)\\.";
+    private static final String MARKER =
+        "(vt|vi|v|n|adj|a|adv|ad|prep|conj|pron|interj|int|num|art|abbr|aux|suff|suf|pref|comb|pl|na)\\.";
     private static final Pattern LEADING_MARKERS = Pattern.compile("^(?:" + MARKER + "[\\s&,/]*)+");
     private static final Pattern ONE_MARKER = Pattern.compile(MARKER);
     private static final Pattern TAG = Pattern.compile("^\\[[^\\[\\]]{1,12}]\\s*");
+    /** What ECDICT puts before the senses of an inflected form's own row: "(abandonment 的复数) n. 放弃, ...". */
+    private static final Pattern INFLECTION_NOTE =
+        Pattern.compile("^[(（]\\s*[A-Za-z][-A-Za-z'’. ]*?\\s*的[^()（）\\[\\]]{1,12}[)）]\\s*");
     private static final Map<String, String> PARTS_OF_SPEECH = Map.ofEntries(
         Map.entry("vt", "verb"), Map.entry("vi", "verb"), Map.entry("v", "verb"),
         Map.entry("n", "noun"),
@@ -42,8 +47,9 @@ public final class EcdictTranslationCleaner {
         Map.entry("prep", "preposition"), Map.entry("conj", "conjunction"), Map.entry("pron", "pronoun"),
         Map.entry("interj", "interjection"), Map.entry("int", "interjection"),
         Map.entry("num", "numeral"), Map.entry("art", "article"), Map.entry("abbr", "abbreviation"),
-        Map.entry("aux", "auxiliary verb"), Map.entry("suf", "suffix"), Map.entry("pref", "prefix"),
-        Map.entry("comb", "combining form")
+        Map.entry("aux", "auxiliary verb"), Map.entry("suff", "suffix"), Map.entry("suf", "suffix"),
+        Map.entry("pref", "prefix"), Map.entry("comb", "combining form"), Map.entry("pl", "plural")
+        // "na." (no part of speech given) is dropped without a name.
     );
     private static final String SEPARATORS = ",，;；";
     private static final String OPENING = "(（[【〔《“‘「<";
@@ -58,7 +64,8 @@ public final class EcdictTranslationCleaner {
      * @param meaning      senses joined with "; "
      * @param partOfSpeech the parts of speech of the kept lines, such as "verb; noun"; empty when the
      *                     lines have no markers
-     * @param note         the tagged lines and any senses cut from a long meaning, one per line
+     * @param note         an inflected form's remark such as "(abandonment 的复数)", the tagged lines and
+     *                     any senses cut from a long meaning, one per line
      */
     public record Cleaned(String meaning, String partOfSpeech, String note) {
     }
@@ -69,10 +76,16 @@ public final class EcdictTranslationCleaner {
         }
         Set<String> senses = new LinkedHashSet<>();
         Set<String> partsOfSpeech = new LinkedHashSet<>();
+        List<String> inflectionNotes = new ArrayList<>();
         List<String> taggedLines = new ArrayList<>();
         List<String> taggedSenses = new ArrayList<>();
         for (String rawLine : LINE_BREAKS.split(translation)) {
             String line = rawLine.strip();
+            Matcher inflection = INFLECTION_NOTE.matcher(line);
+            if (inflection.find()) {
+                inflectionNotes.add(inflection.group().strip());
+                line = line.substring(inflection.end());
+            }
             if (line.isEmpty()) {
                 continue;
             }
@@ -90,11 +103,14 @@ public final class EcdictTranslationCleaner {
                 senses.addAll(lineSenses);
                 Matcher marker = ONE_MARKER.matcher(markerText);
                 while (marker.find()) {
-                    partsOfSpeech.add(PARTS_OF_SPEECH.get(marker.group(1)));
+                    String partOfSpeech = PARTS_OF_SPEECH.get(marker.group(1));
+                    if (partOfSpeech != null) {
+                        partsOfSpeech.add(partOfSpeech);
+                    }
                 }
             }
         }
-        List<String> noteLines = new ArrayList<>();
+        List<String> noteLines = new ArrayList<>(inflectionNotes);
         if (senses.isEmpty()) {
             // Only tagged senses, as for many technical terms and names: they are the meaning.
             senses.addAll(taggedSenses);

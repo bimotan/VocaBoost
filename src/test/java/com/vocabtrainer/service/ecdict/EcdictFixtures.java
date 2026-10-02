@@ -25,6 +25,9 @@ public final class EcdictFixtures {
         "abandon,ә'bændәn,\"n. the trait of lacking restraint or control; reckless freedom from inhibition or worry\\nv. forsake, leave behind\\nv. give up with the intent of never claiming again\\nv. stop maintaining or insisting on; of ideas or claims\",\"vt. 放弃, 抛弃, 遗弃, 使屈从, 沉溺, 放纵\\nn. 放任, 无拘束, 狂热\",,3,1,gk cet4 cet6 ky toefl gre,2057,2182,d:abandoned/p:abandoned/i:abandoning/3:abandons,,";
     public static final String ABANDONED =
         "abandoned,ә'bændәnd,s. forsaken by owner or inhabitants\\ns. free from constraint,\"a. 被抛弃的, 无约束的, 恣意放荡的\",,3,1,toefl,9617,6184,0:abandon/1:dp/p:abandoned/d:abandoned,,";
+    /** Not in {@link #REAL_ROWS}: an inflected form's own row, whose translation starts with a remark. */
+    public static final String ABANDONMENTS =
+        "abandonments,,plural of abandonment\\nn. the act of giving something up\\nn. the voluntary surrender of property (or a right to property) without attempting to reclaim it or give it away,\"(abandonment 的复数) n. 放弃, 抛弃, 放纵\\n[经] 委付, 废弃, 放弃(采矿权)\",,,,,0,0,0:abandonment/1:s,,";
 
     /** The real rows above, in ECDICT's order. */
     public static final List<String> REAL_ROWS = List.of(HOOD, A, ABACUS, ABACUSES, ABANDON, ABANDONED);

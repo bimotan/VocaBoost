@@ -6,6 +6,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -16,6 +19,7 @@ import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -82,6 +86,75 @@ class EcdictRepositoryTest {
         assertFalse(repository.isImporting());
         fill(repository, 10);
         assertEquals("意义3", repository.find("w3").orElseThrow().translation());
+    }
+
+    @Test
+    void aSecondWindowNeitherDeletesNorJoinsTheImportAnotherOneIsBuilding() throws Exception {
+        repository = new EcdictRepository(tempDir.resolve("ecdict.db"));
+        try (EcdictRepository.EcdictImport running = repository.beginImport()) {
+            running.addRow(row("w1", "测试"));
+
+            try (EcdictRepository second = new EcdictRepository(tempDir.resolve("ecdict.db"))) {
+                assertTrue(Files.exists(tempDir.resolve("ecdict.db.importing")), "the starting window deleted it");
+                IllegalStateException error = assertThrows(IllegalStateException.class, second::beginImport);
+                assertEquals("Another VocaBoost window is importing ECDICT. Try again when it has finished.",
+                    error.getMessage());
+                assertTrue(Files.exists(tempDir.resolve("ecdict.db.importing")));
+
+                running.commit(new EcdictMetadata("/data/ecdict.csv", 1, 2, 1, 0, LocalDateTime.of(2026, 10, 2, 9, 0),
+                    "test", 5));
+                assertEquals("测试", second.find("w1").orElseThrow().translation());
+                fill(second, 3);
+                assertEquals("意义2", repository.find("w2").orElseThrow().translation());
+            }
+        }
+    }
+
+    @Test
+    void anImportInAnotherProcessIsLeftAloneAndBlocksThisOne() throws Exception {
+        Path database = tempDir.resolve("ecdict.db");
+        Process other = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+            "-cp", System.getProperty("java.class.path"), ImportInAnotherProcess.class.getName(), database.toString())
+            .redirectErrorStream(true)
+            .start();
+        try (BufferedReader output = new BufferedReader(new InputStreamReader(other.getInputStream(),
+            StandardCharsets.UTF_8))) {
+            String line;
+            do {
+                line = output.readLine();
+            } while (line != null && !line.equals(ImportInAnotherProcess.READY));
+            assertEquals(ImportInAnotherProcess.READY, line);
+
+            repository = new EcdictRepository(database);
+            assertTrue(Files.exists(tempDir.resolve("ecdict.db.importing")), "the starting window deleted it");
+            assertThrows(IllegalStateException.class, repository::beginImport);
+
+            other.getOutputStream().close();
+            assertTrue(other.waitFor(30, TimeUnit.SECONDS));
+            assertEquals(0, other.exitValue());
+        } finally {
+            other.destroyForcibly();
+        }
+        assertEquals("测试", repository.find("w1").orElseThrow().translation());
+        fill(repository, 3);
+        assertEquals("意义2", repository.find("w2").orElseThrow().translation());
+    }
+
+    /** Begins an import, says {@link #READY}, and commits it when its input closes. */
+    public static final class ImportInAnotherProcess {
+        static final String READY = "import running";
+
+        public static void main(String[] args) throws Exception {
+            try (EcdictRepository repository = new EcdictRepository(Path.of(args[0]));
+                 EcdictRepository.EcdictImport running = repository.beginImport()) {
+                running.addRow(row("w1", "测试"));
+                System.out.println(READY);
+                System.out.flush();
+                System.in.readAllBytes();
+                running.commit(new EcdictMetadata("/data/ecdict.csv", 1, 2, 1, 0, LocalDateTime.of(2026, 10, 2, 9, 0),
+                    "test", 5));
+            }
+        }
     }
 
     @Test

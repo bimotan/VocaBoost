@@ -51,6 +51,34 @@ class EcdictTranslationCleanerTest {
     }
 
     @Test
+    void anInflectedFormsRemarkGoesToTheNoteSoItsFirstSenseCanBeTyped() throws IOException {
+        // The real row of "abandonments" starts "(abandonment 的复数) n. 放弃": without this, 放弃 scored 0.5 again.
+        EcdictTranslationCleaner.Cleaned cleaned = EcdictTranslationCleaner.clean(translationOf(EcdictFixtures.ABANDONMENTS));
+
+        assertEquals("放弃; 抛弃; 放纵", cleaned.meaning());
+        assertEquals("noun", cleaned.partOfSpeech());
+        assertEquals("(abandonment 的复数)\n[经] 委付, 废弃, 放弃(采矿权)", cleaned.note());
+        String answerKey = new WordValidationService().normalizeChinese(cleaned.meaning());
+        assertEquals(1.0, new SimilarityService().calculate("放弃", answerKey), 1e-9);
+
+        EcdictTranslationCleaner.Cleaned verb = EcdictTranslationCleaner.clean("(aah 的过去时) v. 惊叹\\n(aah 的过去分词)");
+        assertEquals("惊叹", verb.meaning());
+        assertEquals("verb", verb.partOfSpeech());
+        assertEquals("(aah 的过去时)\n(aah 的过去分词)", verb.note());
+        // A bracket at the start that is not such a remark stays in the meaning.
+        assertEquals("(Ago)人名; (英、西、意、塞、瑞典)阿戈", EcdictTranslationCleaner.clean("n. (Ago)人名；(英、西、意、塞、瑞典)阿戈").meaning());
+    }
+
+    @Test
+    void suffixPluralAndMissingPartOfSpeechMarkersAreRemovedToo() {
+        assertEquals(new EcdictTranslationCleaner.Cleaned("参加的; 统治者的", "suffix", ""),
+            EcdictTranslationCleaner.clean("suff. 参加的；统治者的"));
+        assertEquals(new EcdictTranslationCleaner.Cleaned("算盘", "plural", ""), EcdictTranslationCleaner.clean("pl. 算盘"));
+        assertEquals(new EcdictTranslationCleaner.Cleaned("由罗马建都(公元前753年)起算", "", "[网络] 罗马建城纪年；罗马史"),
+            EcdictTranslationCleaner.clean("na. 由罗马建都(公元前753年)起算\\n[网络] 罗马建城纪年；罗马史"));
+    }
+
+    @Test
     void aWordWithOnlyTaggedSensesKeepsThemAsItsMeaning() {
         EcdictTranslationCleaner.Cleaned cleaned = EcdictTranslationCleaner.clean("[网络] 甲板间；二层舱；双层甲板");
 

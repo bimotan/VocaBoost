@@ -6,10 +6,14 @@ import com.vocabtrainer.util.DateTimeUtil;
 import org.sqlite.SQLiteConfig;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -36,6 +40,10 @@ import java.util.logging.Logger;
  * new file next to it ({@code ecdict.db.importing}), and {@link EcdictImport#commit} swaps it in
  * only when every row is written. Lookups keep answering from the old dictionary meanwhile, and a
  * canceled or failed import, or a crash, leaves the old dictionary as it was.
+ *
+ * <p>The app can run twice on the same files. An import holds a lock on {@code ecdict.db.import-lock}
+ * while it builds its file, so only one window imports at a time and a window that starts never
+ * deletes the file another one is still building.
  */
 public class EcdictRepository implements AutoCloseable {
     /** Stored as {@code PRAGMA user_version}; a file of another version reads as not imported. */
@@ -58,6 +66,7 @@ public class EcdictRepository implements AutoCloseable {
 
     private final Path databasePath;
     private final Path importPath;
+    private final Path importLockPath;
     private final Object lock = new Object();
     private final AtomicBoolean importing = new AtomicBoolean();
     /** Guarded by lock. */
@@ -69,7 +78,8 @@ public class EcdictRepository implements AutoCloseable {
     public EcdictRepository(Path databasePath) {
         this.databasePath = databasePath.toAbsolutePath();
         this.importPath = this.databasePath.resolveSibling(this.databasePath.getFileName() + ".importing");
-        deleteImportFileQuietly();
+        this.importLockPath = this.databasePath.resolveSibling(this.databasePath.getFileName() + ".import-lock");
+        deleteLeftoverImport();
     }
 
     public Path databasePath() {
@@ -138,14 +148,25 @@ public class EcdictRepository implements AutoCloseable {
      * Starts building a new dictionary file. Only one import runs at a time; close the returned
      * import (try-with-resources) so an unfinished one is discarded.
      *
-     * @throws IllegalStateException when another import is running
+     * @throws IllegalStateException when another import is running, in this window or another one
      */
     public EcdictImport beginImport() throws SQLException, IOException {
         if (!importing.compareAndSet(false, true)) {
             throw new IllegalStateException("An ECDICT import is already running.");
         }
+        ImportLock lock;
         try {
-            Files.createDirectories(importPath.getParent());
+            lock = ImportLock.tryAcquire(importLockPath);
+        } catch (IOException | RuntimeException e) {
+            importing.set(false);
+            throw e;
+        }
+        if (lock == null) {
+            importing.set(false);
+            throw new IllegalStateException(
+                "Another VocaBoost window is importing ECDICT. Try again when it has finished.");
+        }
+        try {
             // Left behind by a crash or by an import the app was closed during.
             Files.deleteIfExists(importPath);
             Connection connection = DriverManager.getConnection("jdbc:sqlite:" + importPath);
@@ -183,13 +204,14 @@ public class EcdictRepository implements AutoCloseable {
                     statement.execute("CREATE TABLE ecdict_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
                     statement.execute("BEGIN");
                 }
-                return new EcdictImport(connection);
+                return new EcdictImport(connection, lock);
             } catch (SQLException | RuntimeException e) {
                 closeQuietly(connection);
                 throw e;
             }
         } catch (SQLException | IOException | RuntimeException e) {
             deleteImportFileQuietly();
+            lock.close();
             importing.set(false);
             throw e;
         }
@@ -292,6 +314,20 @@ public class EcdictRepository implements AutoCloseable {
         }
     }
 
+    /** Deletes the file of an unfinished import, unless another window is still building it. */
+    private void deleteLeftoverImport() {
+        if (!Files.exists(importPath)) {
+            return;
+        }
+        try (ImportLock lock = ImportLock.tryAcquire(importLockPath)) {
+            if (lock != null) {
+                Files.deleteIfExists(importPath);
+            }
+        } catch (IOException | RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Cannot delete the unfinished ECDICT import " + importPath, e);
+        }
+    }
+
     private void deleteImportFileQuietly() {
         try {
             Files.deleteIfExists(importPath);
@@ -348,6 +384,44 @@ public class EcdictRepository implements AutoCloseable {
         T run(Connection connection) throws SQLException;
     }
 
+    /** An exclusive lock on a file, held by at most one import across all running app windows. */
+    private static final class ImportLock implements AutoCloseable {
+        private final FileChannel channel;
+
+        private ImportLock(FileChannel channel) {
+            this.channel = channel;
+        }
+
+        /** The lock; null when another import holds it. */
+        static ImportLock tryAcquire(Path path) throws IOException {
+            Files.createDirectories(path.getParent());
+            FileChannel channel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+            try {
+                FileLock lock = channel.tryLock();
+                if (lock != null) {
+                    return new ImportLock(channel);
+                }
+            } catch (OverlappingFileLockException e) {
+                // Held by another dictionary object of this app on the same file.
+            } catch (IOException | RuntimeException e) {
+                channel.close();
+                throw e;
+            }
+            channel.close();
+            return null;
+        }
+
+        /** Releases the lock; the lock file stays. */
+        @Override
+        public void close() {
+            try {
+                channel.close();
+            } catch (IOException e) {
+                LOGGER.log(Level.WARNING, "Cannot release the ECDICT import lock", e);
+            }
+        }
+    }
+
     /**
      * An entry found through one of its inflected forms.
      *
@@ -364,14 +438,16 @@ public class EcdictRepository implements AutoCloseable {
      */
     public final class EcdictImport implements AutoCloseable {
         private final Connection connection;
+        private final ImportLock lock;
         private final PreparedStatement insertRow;
         private final PreparedStatement insertForm;
         private int pendingRows;
         private int pendingForms;
         private boolean finished;
 
-        private EcdictImport(Connection connection) throws SQLException {
+        private EcdictImport(Connection connection, ImportLock lock) throws SQLException {
             this.connection = connection;
+            this.lock = lock;
             // The first row wins when ECDICT lists a word twice in different case.
             this.insertRow = connection.prepareStatement(
                 "INSERT OR IGNORE INTO ecdict(" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -457,6 +533,7 @@ public class EcdictRepository implements AutoCloseable {
                 deleteImportFileQuietly();
                 throw e;
             } finally {
+                lock.close();
                 importing.set(false);
             }
         }
@@ -470,6 +547,7 @@ public class EcdictRepository implements AutoCloseable {
             finished = true;
             closeQuietly(connection);
             deleteImportFileQuietly();
+            lock.close();
             importing.set(false);
         }
 

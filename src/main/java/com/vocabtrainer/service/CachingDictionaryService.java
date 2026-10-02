@@ -42,7 +42,7 @@ public class CachingDictionaryService implements DictionaryService {
             var cached = cacheRepository.findPayload(key);
             if (cached.isPresent()) {
                 List<DictionaryEntry> cachedEntries = deserialize(cached.get());
-                if (isUsableCache(cachedEntries)) {
+                if (isUsableCache(cachedEntries) && !fromOfflineDictionary(cachedEntries)) {
                     return DictionaryLookupResult.success("Loaded from dictionary cache.", cachedEntries);
                 }
                 cacheRepository.delete(key);
@@ -91,6 +91,16 @@ public class CachingDictionaryService implements DictionaryService {
             return WordVerificationResult.found(result.entries().get(0).source(), result.message());
         }
         return WordVerificationResult.missing(result.message());
+    }
+
+    /**
+     * Earlier versions cached what the offline dictionaries answered, with ECDICT's raw translation
+     * ("vt. 放弃, ...\\nn. ..."). The offline dictionaries are no longer cached, so such an entry is a
+     * leftover that must not answer while ECDICT is being imported or after it was cleared.
+     */
+    private static boolean fromOfflineDictionary(List<DictionaryEntry> entries) {
+        return entries.stream().anyMatch(entry -> LocalDictionaryService.ECDICT_SOURCE.equals(entry.source())
+            || LocalDictionaryService.STARTER_SOURCE.equals(entry.source()));
     }
 
     private String serialize(List<DictionaryEntry> entries) {
