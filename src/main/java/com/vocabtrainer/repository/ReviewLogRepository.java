@@ -21,9 +21,17 @@ import java.util.Map;
 import java.util.Optional;
 
 public class ReviewLogRepository {
+    /**
+     * {@link ReviewLog#isCorrect()} in SQL, for a review_logs row aliased {@code l}: the effective
+     * rating is not Again, where a log without one counts as its rating capped by its similarity
+     * (below {@value ReviewRating#MIN_SIMILARITY_HARD} it counts as Again).
+     */
+    static final String CORRECT = "(CASE WHEN l.effective_rating IS NOT NULL THEN l.effective_rating <> 'AGAIN'"
+        + " ELSE l.rating <> 'AGAIN' AND l.similarity >= " + ReviewRating.MIN_SIMILARITY_HARD + " END)";
+
     private final DatabaseManager databaseManager;
 
-    /** Reviews on one day, and how many of them were not rated Again. */
+    /** Reviews on one day, and how many of them were correct ({@link ReviewLog#isCorrect()}). */
     public record DailyCount(LocalDate day, int reviews, int correct) {
     }
 
@@ -34,8 +42,8 @@ public class ReviewLogRepository {
     public ReviewLog insert(ReviewLog log) throws SQLException {
         String sql = """
             INSERT INTO review_logs(word_id, reviewed_at, user_answer, correct_answer, similarity, rating, elapsed_millis,
-                                    kind, direction)
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    kind, direction, effective_rating, overridden)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -62,8 +70,8 @@ public class ReviewLogRepository {
         }
         String sql = """
             INSERT INTO review_logs(word_id, reviewed_at, user_answer, correct_answer, similarity, rating, elapsed_millis,
-                                    kind, direction)
-            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+                                    kind, direction, effective_rating, overridden)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM review_logs WHERE word_id = ? AND reviewed_at = ? AND rating = ?)
             """;
         return databaseManager.inTransaction(() -> {
@@ -72,9 +80,9 @@ public class ReviewLogRepository {
                 int inserted = 0;
                 for (ReviewLog log : logs) {
                     bindLog(statement, log);
-                    statement.setLong(10, log.getWordId());
-                    statement.setString(11, DateTimeUtil.toDatabase(log.getReviewedAt()));
-                    statement.setString(12, log.getRating().name());
+                    statement.setLong(12, log.getWordId());
+                    statement.setString(13, DateTimeUtil.toDatabase(log.getReviewedAt()));
+                    statement.setString(14, log.getRating().name());
                     inserted += statement.executeUpdate();
                 }
                 return inserted;
@@ -129,7 +137,7 @@ public class ReviewLogRepository {
         }
     }
 
-    /** Binds the nine inserted columns, word id to direction. */
+    /** Binds the eleven inserted columns, word id to overridden. */
     private static void bindLog(PreparedStatement statement, ReviewLog log) throws SQLException {
         statement.setLong(1, log.getWordId());
         statement.setString(2, DateTimeUtil.toDatabase(log.getReviewedAt()));
@@ -140,6 +148,9 @@ public class ReviewLogRepository {
         statement.setLong(7, log.getElapsedMillis());
         statement.setString(8, log.getKind().name());
         statement.setString(9, log.getDirection() == null ? null : log.getDirection().name());
+        ReviewRating effective = log.getRecordedEffectiveRating();
+        statement.setString(10, effective == null ? null : effective.name());
+        statement.setInt(11, log.isOverridden() ? 1 : 0);
     }
 
     private static List<ReviewLog> mapLogs(ResultSet rs) throws SQLException {
@@ -155,7 +166,9 @@ public class ReviewLogRepository {
                 ReviewRating.valueOf(rs.getString("rating")),
                 rs.getLong("elapsed_millis"),
                 kind(rs.getString("kind")),
-                direction(rs.getString("direction"))
+                direction(rs.getString("direction")),
+                effectiveRating(rs.getString("effective_rating")),
+                rs.getInt("overridden") != 0
             ));
         }
         return logs;
@@ -167,6 +180,18 @@ public class ReviewLogRepository {
             return value == null ? ReviewKind.REVIEW : ReviewKind.valueOf(value);
         } catch (IllegalArgumentException e) {
             return ReviewKind.REVIEW;
+        }
+    }
+
+    /** The stored effective rating, or null when the log has none (or one this version does not know). */
+    private static ReviewRating effectiveRating(String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return ReviewRating.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 
@@ -219,23 +244,23 @@ public class ReviewLogRepository {
      */
     public List<DailyCount> dailyCounts(long deckId, LocalDateTime since) throws SQLException {
         String sql = deckId <= 0 ? """
-            SELECT substr(reviewed_at, 1, 10) AS day,
-                   COUNT(*) AS reviews,
-                   SUM(CASE WHEN rating <> 'AGAIN' THEN 1 ELSE 0 END) AS correct
-            FROM review_logs
-            WHERE reviewed_at >= ?
-            GROUP BY day
-            ORDER BY day
-            """ : """
             SELECT substr(l.reviewed_at, 1, 10) AS day,
                    COUNT(*) AS reviews,
-                   SUM(CASE WHEN l.rating <> 'AGAIN' THEN 1 ELSE 0 END) AS correct
+                   SUM(CASE WHEN %s THEN 1 ELSE 0 END) AS correct
+            FROM review_logs l
+            WHERE l.reviewed_at >= ?
+            GROUP BY day
+            ORDER BY day
+            """.formatted(CORRECT) : """
+            SELECT substr(l.reviewed_at, 1, 10) AS day,
+                   COUNT(*) AS reviews,
+                   SUM(CASE WHEN %s THEN 1 ELSE 0 END) AS correct
             FROM review_logs l
             JOIN words w ON w.id = l.word_id
             WHERE w.deck_id = ? AND l.reviewed_at >= ?
             GROUP BY day
             ORDER BY day
-            """;
+            """.formatted(CORRECT);
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             int index = 1;
@@ -255,21 +280,21 @@ public class ReviewLogRepository {
     }
 
     /**
-     * The deck's active words with the lowest average answer similarity, then the most Again
-     * ratings and the most reviews. Words never reviewed are left out.
+     * The deck's active words with the lowest average answer similarity, then the most reviews that
+     * were not correct (that counted as Again) and the most reviews. Words never reviewed are left out.
      */
     public List<HardWordStat> hardestWords(long deckId, int limit) throws SQLException {
         String sql = """
             SELECT w.english, w.chinese, COUNT(l.id) AS reviews,
                    AVG(l.similarity) AS avg_similarity,
-                   SUM(CASE WHEN l.rating = 'AGAIN' THEN 1 ELSE 0 END) AS again_count
+                   SUM(CASE WHEN %s THEN 0 ELSE 1 END) AS again_count
             FROM words w
             JOIN review_logs l ON l.word_id = w.id
             WHERE w.deck_id = ? AND w.archived = 0
             GROUP BY w.id
             ORDER BY avg_similarity ASC, again_count DESC, reviews DESC
             LIMIT ?
-            """;
+            """.formatted(CORRECT);
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
@@ -320,8 +345,9 @@ public class ReviewLogRepository {
         return scalarInt("SELECT COUNT(*) FROM review_logs WHERE reviewed_at >= ?", since);
     }
 
+    /** Correct reviews ({@link ReviewLog#isCorrect()}) since {@code since}, in every deck. */
     public int countCorrectSince(LocalDateTime since) throws SQLException {
-        return scalarInt("SELECT COUNT(*) FROM review_logs WHERE reviewed_at >= ? AND rating <> 'AGAIN'", since);
+        return scalarInt("SELECT COUNT(*) FROM review_logs l WHERE l.reviewed_at >= ? AND " + CORRECT, since);
     }
 
     public int countSince(long deckId, LocalDateTime since) throws SQLException {
@@ -333,13 +359,14 @@ public class ReviewLogRepository {
             """, deckId, since);
     }
 
+    /** Correct reviews ({@link ReviewLog#isCorrect()}) of the deck since {@code since}. */
     public int countCorrectSince(long deckId, LocalDateTime since) throws SQLException {
         return scalarInt("""
             SELECT COUNT(*)
             FROM review_logs l
             JOIN words w ON w.id = l.word_id
-            WHERE w.deck_id = ? AND l.reviewed_at >= ? AND l.rating <> 'AGAIN'
-            """, deckId, since);
+            WHERE w.deck_id = ? AND l.reviewed_at >= ? AND %s
+            """.formatted(CORRECT), deckId, since);
     }
 
     public int countByRating(ReviewRating rating) throws SQLException {

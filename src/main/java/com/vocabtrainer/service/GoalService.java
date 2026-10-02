@@ -2,12 +2,14 @@ package com.vocabtrainer.service;
 
 import com.vocabtrainer.domain.DailyGoalProgress;
 import com.vocabtrainer.domain.GoalUpdate;
+import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.repository.GoalRepository;
 
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 public class GoalService {
     public static final int DEFAULT_REVIEW_GOAL = 20;
@@ -56,7 +58,19 @@ public class GoalService {
         return recordReview(0L, rating, similarity);
     }
 
+    /**
+     * Records a review rated {@code rating} whose answer had {@code similarity}, counted like a log
+     * that recorded no effective rating (see {@link ReviewLog#getEffectiveRating()}).
+     */
     public GoalUpdate recordReview(long deckId, ReviewRating rating, double similarity) {
+        return recordReview(deckId, answered(rating, similarity));
+    }
+
+    /**
+     * Records the review saved as {@code log}: one more review, a correct one if
+     * {@link ReviewLog#isCorrect()}, and its XP.
+     */
+    public GoalUpdate recordReview(long deckId, ReviewLog log) {
         LocalDate today = LocalDate.now(clock);
         try {
             GoalRepository.GoalRow before = goalRepository.ensure(
@@ -66,9 +80,8 @@ public class GoalService {
                 DEFAULT_NEW_WORD_GOAL,
                 DEFAULT_SESSION_GOAL
             );
-            boolean correct = rating != ReviewRating.AGAIN && similarity >= 0.5;
-            int xp = reviewXp(rating, similarity);
-            GoalRepository.GoalRow after = goalRepository.addProgress(deckId, today, 1, correct ? 1 : 0, 0, xp);
+            int xp = reviewXp(log);
+            GoalRepository.GoalRow after = goalRepository.addProgress(deckId, today, 1, log.isCorrect() ? 1 : 0, 0, xp);
             boolean completedNow = !before.completed() && isComplete(after);
             if (completedNow) {
                 goalRepository.markCompleted(deckId, today);
@@ -81,14 +94,15 @@ public class GoalService {
     }
 
     /**
-     * Records the practice of a word that was not due (see {@code ReviewKind.PRACTICE}): it earns half
-     * the XP of a review and does not count towards the review goal, the accuracy or the streak.
+     * Records the practice of a word that was not due (see {@code ReviewKind.PRACTICE}), saved as
+     * {@code log}: it earns half the XP of a review and does not count towards the review goal, the
+     * accuracy or the streak.
      */
-    public GoalUpdate recordPractice(long deckId, ReviewRating rating, double similarity) {
+    public GoalUpdate recordPractice(long deckId, ReviewLog log) {
         LocalDate today = LocalDate.now(clock);
         try {
             goalRepository.ensure(deckId, today, DEFAULT_REVIEW_GOAL, DEFAULT_NEW_WORD_GOAL, DEFAULT_SESSION_GOAL);
-            int xp = practiceXp(rating, similarity);
+            int xp = practiceXp(log);
             GoalRepository.GoalRow after = goalRepository.addProgress(deckId, today, 0, 0, 0, xp);
             return new GoalUpdate(toProgress(after), xp, false);
         } catch (SQLException e) {
@@ -167,14 +181,21 @@ public class GoalService {
         }
     }
 
-    private static int reviewXp(ReviewRating rating, double similarity) {
-        int base = rating == ReviewRating.AGAIN ? 2 : 5;
-        return base + rating.getQuality() + (int) Math.round(Math.max(0.0, Math.min(1.0, similarity)) * 8.0);
+    /** XP for a review: more for a correct one, by the rating it counted as and the answer similarity. */
+    private static int reviewXp(ReviewLog log) {
+        int base = log.isCorrect() ? 5 : 2;
+        double similarity = Math.max(0.0, Math.min(1.0, log.getSimilarity()));
+        return base + log.getEffectiveRating().getQuality() + (int) Math.round(similarity * 8.0);
     }
 
     /** Half the XP the same answer earns in a review. */
-    static int practiceXp(ReviewRating rating, double similarity) {
-        return reviewXp(rating, similarity) / 2;
+    static int practiceXp(ReviewLog log) {
+        return reviewXp(log) / 2;
+    }
+
+    /** A log of a review rated {@code rating} for an answer of {@code similarity}, with no effective rating recorded. */
+    private ReviewLog answered(ReviewRating rating, double similarity) {
+        return new ReviewLog(0, 0, LocalDateTime.now(clock), "", "", similarity, rating, 0);
     }
 
     private static GoalRepository.GoalRow emptyDay(long deckId, LocalDate date) {

@@ -25,10 +25,12 @@ import java.util.logging.Logger;
 /**
  * Schedules reviews with FSRS-5 (see {@link CardScheduler}) and picks the next card to show.
  *
- * <p>The rating the schedule uses is the user's rating, lowered when the typed answer was not
- * similar enough to the correct one: below 55% similarity it counts as Again, below 75% at most
- * Hard and below 90% at most Good. A card that lapses {@value WordCard#LEECH_LAPSES} times is
- * tagged {@value WordCard#LEECH_TAG}.
+ * <p>The rating the schedule uses is the user's rating, lowered when the typed answer did not
+ * count as that good (see {@link AnswerGrader}); {@code ReviewService} works it out and passes it
+ * in. Logs of older versions recorded only the user's rating and the answer similarity: below 55%
+ * similarity it counts as Again, below 75% at most Hard and below 90% at most Good
+ * ({@link #effectiveRating}). A card that lapses {@value WordCard#LEECH_LAPSES} times is tagged
+ * {@value WordCard#LEECH_TAG}.
  */
 public class ReviewScheduler {
     private static final Logger LOGGER = Logger.getLogger(ReviewScheduler.class.getName());
@@ -65,23 +67,27 @@ public class ReviewScheduler {
         return cards.studyDay();
     }
 
-    /** Applies a rating whose answer was fully correct; see {@link #applyRating(WordCard, ReviewRating, double, LocalDateTime)}. */
+    /**
+     * Reschedules {@code word} for a review at {@code reviewedAt} that counts as {@code rating}, the
+     * rating after the answer check. Returns whether this review made the word a leech: it lapsed
+     * for the {@value WordCard#LEECH_LAPSES}th time, so it is now tagged {@value WordCard#LEECH_TAG}.
+     */
     public boolean applyRating(WordCard word, ReviewRating rating, LocalDateTime reviewedAt) {
-        return applyRating(word, rating, 1.0, reviewedAt);
+        return applyRating(cards, word, rating, reviewedAt);
     }
 
     /**
-     * Reschedules {@code word} for a review at {@code reviewedAt}. Returns whether this review made
-     * the word a leech: it lapsed for the {@value WordCard#LEECH_LAPSES}th time, so it is now tagged
-     * {@value WordCard#LEECH_TAG}.
+     * Reschedules {@code word} for a review rated {@code rating} whose answer had {@code similarity},
+     * capped like a log of an older version ({@link #effectiveRating}); see
+     * {@link #applyRating(WordCard, ReviewRating, LocalDateTime)}.
      */
     public boolean applyRating(WordCard word, ReviewRating rating, double similarity, LocalDateTime reviewedAt) {
-        return applyRating(cards, word, rating, similarity, reviewedAt);
+        return applyRating(cards, word, effectiveRating(rating, similarity), reviewedAt);
     }
 
-    private static boolean applyRating(CardScheduler scheduler, WordCard word, ReviewRating rating, double similarity,
+    private static boolean applyRating(CardScheduler scheduler, WordCard word, ReviewRating effectiveRating,
                                        LocalDateTime reviewedAt) {
-        scheduler.apply(word, effectiveRating(rating, similarity), reviewedAt);
+        scheduler.apply(word, effectiveRating, reviewedAt);
         return tagIfLeech(word);
     }
 
@@ -100,26 +106,37 @@ public class ReviewScheduler {
     }
 
     /**
+     * The interval a review of {@code word} at {@code now} would give when it counts as each
+     * rating; nothing is changed.
+     */
+    public Map<ReviewRating, IntervalPreview> intervals(WordCard word, LocalDateTime now) {
+        Map<ReviewRating, CardScheduler.Outcome> outcomes = cards.outcomes(word, now);
+        Map<ReviewRating, IntervalPreview> intervals = new EnumMap<>(ReviewRating.class);
+        for (ReviewRating rating : ReviewRating.values()) {
+            intervals.put(rating, outcomes.get(rating).preview(now));
+        }
+        return intervals;
+    }
+
+    /**
      * The interval each rating would give {@code word} at {@code now} for an answer of
-     * {@code similarity}; nothing is changed.
+     * {@code similarity}, capped as by {@link #effectiveRating}; nothing is changed.
      */
     public Map<ReviewRating, IntervalPreview> preview(WordCard word, double similarity, LocalDateTime now) {
-        Map<ReviewRating, CardScheduler.Outcome> outcomes = cards.outcomes(word, now);
+        Map<ReviewRating, IntervalPreview> intervals = intervals(word, now);
         Map<ReviewRating, IntervalPreview> previews = new EnumMap<>(ReviewRating.class);
         for (ReviewRating rating : ReviewRating.values()) {
-            previews.put(rating, outcomes.get(effectiveRating(rating, similarity)).preview(now));
+            previews.put(rating, intervals.get(effectiveRating(rating, similarity)));
         }
         return previews;
     }
 
     /**
-     * The rating the schedule uses: {@code rating}, but at most Again below 55% answer similarity,
-     * Hard below 75% and Good below 90%.
+     * The rating a log of an older version counts as: {@code rating}, but at most Again below 55%
+     * answer similarity, Hard below 75% and Good below 90% ({@link ReviewRating#maxForSimilarity}).
      */
     public static ReviewRating effectiveRating(ReviewRating rating, double similarity) {
-        double bounded = Double.isFinite(similarity) ? Math.max(0.0, Math.min(1.0, similarity)) : 0.0;
-        int similarityGrade = bounded >= 0.9 ? 4 : bounded >= 0.75 ? 3 : bounded >= 0.55 ? 2 : 1;
-        return ReviewRating.ofGrade(Math.min(rating.getGrade(), similarityGrade));
+        return rating.atMost(ReviewRating.maxForSimilarity(similarity));
     }
 
     /**
@@ -127,9 +144,10 @@ public class ReviewScheduler {
      * card starts new and every log, oldest first, is applied with the rating and answer similarity
      * it recorded. Those versions had no learning steps, so neither does the replay: every review
      * moves the card into review, as it did then, and a failed review is a lapse. FSRS stability and
-     * difficulty do not depend on the steps. Counters (reviews, lapses, current run of correct
-     * answers) are recounted; the text fields stay as they are. Practice logs are skipped: practicing
-     * a card that was not due did not change its schedule.
+     * difficulty do not depend on the steps. Each log counts as its {@link ReviewLog#getEffectiveRating()
+     * effective rating}. Counters (reviews, lapses, current run of correct answers) are recounted; the
+     * text fields stay as they are. Practice logs are skipped: practicing a card that was not due did
+     * not change its schedule.
      */
     public void replay(WordCard word, List<ReviewLog> history) {
         word.setState(CardState.NEW);
@@ -145,7 +163,7 @@ public class ReviewScheduler {
         history.stream()
             .filter(log -> log.getKind() != ReviewKind.PRACTICE)
             .sorted(Comparator.comparing(ReviewLog::getReviewedAt).thenComparingLong(ReviewLog::getId))
-            .forEach(log -> applyRating(withoutSteps, word, log.getRating(), log.getSimilarity(), log.getReviewedAt()));
+            .forEach(log -> applyRating(withoutSteps, word, log.getEffectiveRating(), log.getReviewedAt()));
     }
 
     /**

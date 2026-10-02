@@ -27,6 +27,7 @@ import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
 import javafx.scene.control.TextInputControl;
+import javafx.scene.control.ToggleButton;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
@@ -48,11 +49,14 @@ import java.util.Optional;
  * user's input to it; the review flow itself lives in the presenter.
  *
  * <p>Once an answer is checked, each rating button also shows when that rating would bring the card
- * back, e.g. "Good (3) · 4d".
+ * back, e.g. "Good (3) · 4d", and what it counts as when the answer check caps it, e.g.
+ * "Good (3) → Hard (53%) · 1d". The suggested rating has the focus. When the check capped the
+ * ratings, "I was right" overrides it: the rating the user then chooses counts as it is.
  *
  * <p>Keyboard: Enter in the answer field submits. Once the answer is checked, 1, 2, 3 and 4 rate
- * Again, Hard, Good and Easy and Space rates Good (or presses the focused button, which is Good
- * right after submitting), while the Review tab is shown and the user is not typing in another field.
+ * Again, Hard, Good and Easy and Space presses the focused button, which is the suggested rating
+ * right after submitting (or rates Good when no button has the focus), while the Review tab is shown
+ * and the user is not typing in another field.
  */
 public final class ReviewView {
     private final ViewContext context;
@@ -73,9 +77,11 @@ public final class ReviewView {
     private final VBox completionCard = new VBox(8, completionTitleLabel, completionMetricsLabel);
     private final HBox ratingButtons = new HBox(10);
     private final Map<ReviewRating, Button> ratingButtonsByRating = new EnumMap<>(ReviewRating.class);
+    private final ToggleButton overrideButton = new ToggleButton("I was right");
     private final Tab tab;
     private long renderedCardNumber = -1;
     private boolean renderedCanRate;
+    private ReviewRating renderedSuggestion;
     private boolean swallowTypedKey;
     /** Set while {@link #render} updates the selectors, whose listeners only react to the user. */
     private boolean rendering;
@@ -235,6 +241,12 @@ public final class ReviewView {
         for (ReviewRating rating : ReviewRating.values()) {
             ratingButtons.getChildren().add(ratingButton(rating));
         }
+        overrideButton.setId("overrideButton");
+        overrideButton.setTooltip(new Tooltip("我答对了: the answer check capped your rating."
+            + " Count the rating you choose as it is instead."));
+        overrideButton.setOnAction(event -> presenter.setOverridden(overrideButton.isSelected()));
+        HBox.setMargin(overrideButton, new Insets(0, 0, 0, 16));
+        ratingButtons.getChildren().add(overrideButton);
         ratingButtons.setId("ratingButtons");
         ratingButtons.setDisable(true);
 
@@ -359,15 +371,21 @@ public final class ReviewView {
         };
     }
 
-    /** "Good (3)", and once the answer is checked the interval it gives, as in "Good (3) · 4d". */
-    private static String ratingButtonText(ReviewRating rating, String preview) {
+    /**
+     * "Good (3)", and once the answer is checked what it counts as when that is another rating and
+     * the interval it gives, as in "Good (3) · 4d" or "Good (3) → Hard (53%) · 1d".
+     */
+    static String ratingButtonText(ReviewRating rating, String countsAs, String preview) {
         String text = rating.getLabel() + " (" + shortcutKey(rating) + ")";
+        if (!countsAs.isEmpty()) {
+            text += " → " + countsAs;
+        }
         return preview.isEmpty() ? text : text + " · " + preview;
     }
 
     private Button ratingButton(ReviewRating rating) {
         String key = shortcutKey(rating);
-        Button button = new Button(ratingButtonText(rating, ""));
+        Button button = new Button(ratingButtonText(rating, "", ""));
         button.setId(ratingButtonId(rating));
         button.setMinWidth(90);
         button.setTooltip(new Tooltip(rating == ReviewRating.GOOD ? "Press " + key + " or Space" : "Press " + key));
@@ -407,16 +425,20 @@ public final class ReviewView {
         answerField.setDisable(!presenter.canSubmit());
         submitAnswerButton.setDisable(!presenter.canSubmit());
         ratingButtons.setDisable(!presenter.canRate());
-        ratingButtonsByRating.forEach((rating, button) ->
-            button.setText(ratingButtonText(rating, presenter.ratingPreview(rating))));
+        ratingButtonsByRating.forEach((rating, button) -> button.setText(
+            ratingButtonText(rating, presenter.ratingCountsAs(rating), presenter.ratingPreview(rating))));
+        overrideButton.setDisable(!presenter.canOverride());
+        overrideButton.setSelected(presenter.isOverridden());
         if (presenter.cardNumber() != renderedCardNumber && presenter.canSubmit()) {
             renderedCardNumber = presenter.cardNumber();
             answerField.requestFocus();
         }
-        if (presenter.canRate() && !renderedCanRate) {
-            // The answer field is disabled now; keep the keyboard on the rating buttons.
-            ratingButtonsByRating.get(ReviewRating.GOOD).requestFocus();
+        ReviewRating suggestion = presenter.suggestedRating().orElse(null);
+        if (suggestion != null && (!renderedCanRate || suggestion != renderedSuggestion)) {
+            // The answer field is disabled now; keep the keyboard on the suggested rating.
+            ratingButtonsByRating.get(suggestion).requestFocus();
         }
         renderedCanRate = presenter.canRate();
+        renderedSuggestion = suggestion;
     }
 }

@@ -66,6 +66,11 @@ import java.util.logging.Logger;
  * (production) and logs the direction. Both directions share one schedule. Producing the word is the
  * harder skill, so a failure counts fully in either direction; a recognition success counts at most
  * as Good, so an easy recognition never grows the shared interval more than a normal Good review.
+ *
+ * <p><b>Answers</b> are graded by {@link AnswerGrader}, which caps the rating an answer can count as.
+ * The user may override the cap ("I was right"): the chosen rating then counts as it is. Each log
+ * keeps the chosen rating, the rating the schedule used and whether the user overrode the check;
+ * an answer is correct when it did not count as Again ({@link ReviewLog#isCorrect()}).
  */
 public class ReviewService {
     /** How many weak words the next one is chosen from, besides those the session already showed. */
@@ -79,7 +84,7 @@ public class ReviewService {
 
     private final WordRepository wordRepository;
     private final ReviewLogRepository reviewLogRepository;
-    private final SimilarityService similarityService;
+    private final AnswerGrader grader;
     private final ReviewScheduler scheduler;
     private final GoalService goalService;
     private final AchievementService achievementService;
@@ -139,7 +144,7 @@ public class ReviewService {
                          ReviewSettings settings, Random random) {
         this.wordRepository = wordRepository;
         this.reviewLogRepository = reviewLogRepository;
-        this.similarityService = similarityService;
+        this.grader = new AnswerGrader(similarityService);
         this.scheduler = scheduler;
         this.goalService = goalService;
         this.achievementService = achievementService;
@@ -375,7 +380,8 @@ public class ReviewService {
             ReviewMode askedIn = mode == null ? ReviewMode.EN_TO_ZH : mode;
             ReviewMode direction = askedIn == ReviewMode.MIXED ? currentQuestionMode : questionModeFor(askedIn);
             String correctAnswer = direction == ReviewMode.ZH_TO_EN ? word.getEnglish() : word.getChinese();
-            double similarity = similarityService.calculate(userAnswer, correctAnswer);
+            AnswerGrade grade = grader.grade(word, direction, userAnswer,
+                english -> wordRepository.findByEnglish(word.getDeckId(), english));
             LocalDateTime submittedAt = LocalDateTime.now(clock);
             long responseMillis = shownAt == null ? 0L : Math.max(0L, Duration.between(shownAt, submittedAt).toMillis());
             ReviewAnswer answer = new ReviewAnswer(
@@ -383,7 +389,7 @@ public class ReviewService {
                 word.getEnglish(),
                 userAnswer == null ? "" : userAnswer.trim(),
                 correctAnswer,
-                similarity,
+                grade,
                 submittedAt,
                 responseMillis,
                 direction,
@@ -411,11 +417,23 @@ public class ReviewService {
 
     /**
      * The interval each rating would give the word for the answer submitted with
-     * {@link #submitAnswer}, as the rating buttons show it; nothing is saved. A practice keeps the
-     * due date: every rating shows it, except that a failed answer shows the next day when the card
-     * was due later.
+     * {@link #submitAnswer}, as the rating buttons show it; nothing is saved. See
+     * {@link #previewRatings(long, boolean)}.
      */
     public Map<ReviewRating, IntervalPreview> previewRatings(long wordId) {
+        return previewRatings(wordId, false);
+    }
+
+    /**
+     * The interval each rating would give the word for the answer submitted with
+     * {@link #submitAnswer}, as the rating buttons show it; nothing is saved. Each rating gives the
+     * interval of the rating it counts as ({@link ReviewAnswer#countsAs}), so a capped rating shows
+     * the interval of the cap unless {@code overridden}. A practice keeps the due date: every rating
+     * shows it, except that a failed answer shows the next day when the card was due later.
+     *
+     * @param overridden whether the user overrides the answer check, see {@link #rateCurrent(long, ReviewRating, boolean)}
+     */
+    public Map<ReviewRating, IntervalPreview> previewRatings(long wordId, boolean overridden) {
         ReviewAnswer answer = pendingAnswers.get(wordId);
         if (answer == null) {
             throw new IllegalStateException("No answer was submitted for word " + wordId);
@@ -425,11 +443,12 @@ public class ReviewService {
                 .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
             LocalDateTime now = LocalDateTime.now(clock);
             if (kindOf(word, now) == ReviewKind.PRACTICE) {
-                return practicePreviews(word, answer, now);
+                return practicePreviews(word, answer, overridden, now);
             }
-            Map<ReviewRating, IntervalPreview> previews = scheduler.preview(word, answer.similarity(), now);
-            if (answer.isRecognitionInMixedMode()) {
-                previews.put(ReviewRating.EASY, previews.get(ReviewRating.GOOD));
+            Map<ReviewRating, IntervalPreview> intervals = scheduler.intervals(word, now);
+            Map<ReviewRating, IntervalPreview> previews = new EnumMap<>(ReviewRating.class);
+            for (ReviewRating rating : ReviewRating.values()) {
+                previews.put(rating, intervals.get(answer.countsAs(rating, overridden)));
             }
             return previews;
         } catch (SQLException e) {
@@ -437,10 +456,11 @@ public class ReviewService {
         }
     }
 
-    private Map<ReviewRating, IntervalPreview> practicePreviews(WordCard word, ReviewAnswer answer, LocalDateTime now) {
+    private Map<ReviewRating, IntervalPreview> practicePreviews(WordCard word, ReviewAnswer answer, boolean overridden,
+                                                                LocalDateTime now) {
         Map<ReviewRating, IntervalPreview> previews = new EnumMap<>(ReviewRating.class);
         for (ReviewRating rating : ReviewRating.values()) {
-            LocalDateTime due = practiceDue(word, rating, answer, now);
+            LocalDateTime due = practiceDue(word, answer.countsAs(rating, overridden), now);
             previews.put(rating, IntervalPreview.days((int) Math.max(1L, scheduler.studyDay().daysBetween(now, due))));
         }
         return previews;
@@ -452,18 +472,32 @@ public class ReviewService {
     }
 
     /**
-     * Saves the rating for an answer submitted with {@link #submitAnswer}. The schedule, review log,
-     * goal progress and achievements are written in one transaction. If saving fails nothing is
-     * written and the submitted answer is kept, so calling this again retries with the same answer.
+     * Saves the rating for an answer submitted with {@link #submitAnswer}; see
+     * {@link #rateCurrent(long, ReviewRating, boolean)}.
      */
     public ReviewOutcome rateCurrent(long wordId, ReviewRating rating) {
+        return rateCurrent(wordId, rating, false);
+    }
+
+    /**
+     * Saves the rating for an answer submitted with {@link #submitAnswer}. The rating counts as
+     * {@link ReviewAnswer#countsAs}: capped by the answer check unless {@code overridden}, which the
+     * log records. The schedule, review log, goal progress and achievements are written in one
+     * transaction. If saving fails nothing is written and the submitted answer is kept, so calling
+     * this again retries with the same answer.
+     *
+     * @param overridden the user says the answer was right although the check capped it ("I was
+     *                   right"); ignored for an answer the check did not cap
+     */
+    public ReviewOutcome rateCurrent(long wordId, ReviewRating rating, boolean overridden) {
         ReviewAnswer answer = pendingAnswers.get(wordId);
         if (answer == null) {
             throw new IllegalStateException("No answer was submitted for word " + wordId + "; submit an answer before rating it");
         }
+        boolean override = overridden && answer.canOverride();
         SavedReview saved;
         try {
-            saved = transactions.inTransaction(() -> saveRating(wordId, rating, answer));
+            saved = transactions.inTransaction(() -> saveRating(wordId, rating, override, answer));
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot save review result", e);
         }
@@ -478,7 +512,7 @@ public class ReviewService {
         } else if (saved.reviewCard()) {
             reviewsSinceNewCard++;
         }
-        if (rating != ReviewRating.AGAIN && answer.similarity() >= 0.5) {
+        if (saved.log().isCorrect()) {
             sessionCorrect++;
         }
         sessionXp += saved.earnedXp();
@@ -487,28 +521,30 @@ public class ReviewService {
             sessionSummary(), saved.becameLeech(), saved.kind());
     }
 
-    private SavedReview saveRating(long wordId, ReviewRating rating, ReviewAnswer answer) throws SQLException {
+    private SavedReview saveRating(long wordId, ReviewRating rating, boolean overridden, ReviewAnswer answer)
+        throws SQLException {
         // Read inside the transaction so a retry starts from the stored card, not a half-updated copy.
         WordCard word = wordRepository.findById(wordId)
             .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
         LocalDateTime now = LocalDateTime.now(clock);
         ReviewKind kind = kindOf(word, now);
+        ReviewLog log = log(wordId, answer, rating, overridden, now, kind);
         if (kind == ReviewKind.PRACTICE) {
-            return savePractice(word, rating, answer, now);
+            return savePractice(word, log, now);
         }
         StudyDay studyDay = scheduler.studyDay();
         boolean reviewCard = word.getState() == CardState.REVIEW;
         boolean overdueRescued = word.getState() != CardState.NEW && word.getNextReviewAt() != null
             && studyDay.of(word.getNextReviewAt()).isBefore(studyDay.of(now));
 
-        boolean becameLeech = scheduler.applyRating(word, scheduledRating(rating, answer), answer.similarity(), now);
+        boolean becameLeech = scheduler.applyRating(word, log.getEffectiveRating(), now);
         WordCard updated = wordRepository.save(word);
-        reviewLogRepository.insert(log(wordId, answer, rating, now, kind));
+        reviewLogRepository.insert(log);
 
         long deckId = word.getDeckId();
         GoalUpdate goalUpdate = goalService == null
             ? null
-            : goalService.recordReview(deckId, rating, answer.similarity());
+            : goalService.recordReview(deckId, log);
         DailyGoalProgress progress = goalUpdate == null ? null : goalUpdate.progress();
         List<Achievement> unlocked = achievementService == null || progress == null
             ? List.of()
@@ -518,32 +554,31 @@ public class ReviewService {
         if (goalService != null) {
             progress = goalService.getTodayProgress(deckId);
         }
-        return new SavedReview(updated, progress, earnedXp, unlocked, becameLeech, kind, reviewCard);
+        return new SavedReview(updated, progress, earnedXp, unlocked, becameLeech, kind, reviewCard, log);
     }
 
     /** Logs the practice of a word that is not due; only a failed answer can bring its due date forward. */
-    private SavedReview savePractice(WordCard word, ReviewRating rating, ReviewAnswer answer, LocalDateTime now)
-        throws SQLException {
-        LocalDateTime due = practiceDue(word, rating, answer, now);
+    private SavedReview savePractice(WordCard word, ReviewLog log, LocalDateTime now) throws SQLException {
+        LocalDateTime due = practiceDue(word, log.getEffectiveRating(), now);
         if (!Objects.equals(due, word.getNextReviewAt())) {
             word.setNextReviewAt(due);
             wordRepository.save(word);
         }
-        reviewLogRepository.insert(log(word.getId(), answer, rating, now, ReviewKind.PRACTICE));
+        reviewLogRepository.insert(log);
         GoalUpdate goalUpdate = goalService == null
             ? null
-            : goalService.recordPractice(word.getDeckId(), rating, answer.similarity());
+            : goalService.recordPractice(word.getDeckId(), log);
         return new SavedReview(word, goalUpdate == null ? null : goalUpdate.progress(),
-            goalUpdate == null ? 0 : goalUpdate.xpEarned(), List.of(), false, ReviewKind.PRACTICE, false);
+            goalUpdate == null ? 0 : goalUpdate.xpEarned(), List.of(), false, ReviewKind.PRACTICE, false, log);
     }
 
     /**
-     * When a practiced word is due afterwards: as before, or, after a failed answer, at the start of
-     * the next study day if it was due later.
+     * When a practiced word is due afterwards: as before, or, after a failed answer (one that counts
+     * as Again), at the start of the next study day if it was due later.
      */
-    private LocalDateTime practiceDue(WordCard word, ReviewRating rating, ReviewAnswer answer, LocalDateTime now) {
+    private LocalDateTime practiceDue(WordCard word, ReviewRating effectiveRating, LocalDateTime now) {
         LocalDateTime due = word.getNextReviewAt();
-        if (ReviewScheduler.effectiveRating(rating, answer.similarity()) != ReviewRating.AGAIN) {
+        if (effectiveRating != ReviewRating.AGAIN) {
             return due;
         }
         LocalDateTime tomorrow = scheduler.studyDay().end(now);
@@ -562,13 +597,8 @@ public class ReviewService {
         return notDue ? ReviewKind.PRACTICE : ReviewKind.REVIEW;
     }
 
-    /** The rating the schedule uses: an Easy recognition in Mixed mode counts as Good, see the class comment. */
-    private static ReviewRating scheduledRating(ReviewRating rating, ReviewAnswer answer) {
-        return answer.isRecognitionInMixedMode() && rating == ReviewRating.EASY ? ReviewRating.GOOD : rating;
-    }
-
-    private static ReviewLog log(long wordId, ReviewAnswer answer, ReviewRating rating, LocalDateTime now,
-                                 ReviewKind kind) {
+    private static ReviewLog log(long wordId, ReviewAnswer answer, ReviewRating rating, boolean overridden,
+                                 LocalDateTime now, ReviewKind kind) {
         return new ReviewLog(
             0,
             wordId,
@@ -579,11 +609,16 @@ public class ReviewService {
             rating,
             answer.responseMillis(),
             kind,
-            answer.direction()
+            answer.direction(),
+            answer.countsAs(rating, overridden),
+            overridden
         );
     }
 
-    /** @param reviewCard whether the card was in review before; the interleaving of new cards counts these */
+    /**
+     * @param reviewCard whether the card was in review before; the interleaving of new cards counts these
+     * @param log        the saved review log
+     */
     private record SavedReview(
         WordCard word,
         DailyGoalProgress progress,
@@ -591,7 +626,8 @@ public class ReviewService {
         List<Achievement> unlocked,
         boolean becameLeech,
         ReviewKind kind,
-        boolean reviewCard
+        boolean reviewCard,
+        ReviewLog log
     ) {
     }
 

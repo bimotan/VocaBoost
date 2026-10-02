@@ -27,10 +27,14 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** JSON backups keep what each review was and which way it was asked. */
+/**
+ * JSON backups keep what each review was, which way it was asked, what it counted as and whether
+ * the user overrode the answer check.
+ */
 class ReviewLogBackupTest {
     private static final LocalDateTime FIRST = LocalDateTime.of(2026, 3, 2, 9, 0);
 
@@ -112,6 +116,33 @@ class ReviewLogBackupTest {
         ReviewLog restored = logs.findByDeck(target.getId()).get(0);
         assertEquals(ReviewKind.REVIEW, restored.getKind());
         assertNull(restored.getDirection());
+        assertNull(restored.getRecordedEffectiveRating());
+        assertFalse(restored.isOverridden());
+    }
+
+    @Test
+    void aRestoredBackupKeepsWhatEachReviewCountedAsAndWhetherItWasOverridden() throws SQLException {
+        Deck source = decks.create("Source");
+        WordCard word = words.insert(WordCard.createNew(source.getId(), "lucid", "清晰的"));
+        logs.insert(new ReviewLog(0, word.getId(), FIRST, "清楚", "清晰的", 0.25, ReviewRating.GOOD, 1500,
+            ReviewKind.LEARN, ReviewMode.EN_TO_ZH, ReviewRating.GOOD, true));
+        logs.insert(new ReviewLog(0, word.getId(), FIRST.plusDays(1), "清楚", "清晰的", 0.25, ReviewRating.EASY, 1500,
+            ReviewKind.REVIEW, ReviewMode.EN_TO_ZH, ReviewRating.AGAIN, false));
+        logs.insert(new ReviewLog(0, word.getId(), FIRST.plusDays(2), "清晰的", "清晰的", 1.0, ReviewRating.HARD, 1500));
+        Path file = backups.exportJsonBackup(source.getId(), tempDir.resolve("source.json"));
+        Deck target = decks.create("Target");
+
+        BackupRestoreResult result = backups.importJsonBackup(file, target.getId());
+
+        assertTrue(result.invalidRows().isEmpty(), result.invalidRows().toString());
+        List<ReviewLog> history = logs.findByDeck(target.getId());
+        assertEquals(List.of(ReviewRating.GOOD, ReviewRating.EASY, ReviewRating.HARD),
+            history.stream().map(ReviewLog::getRating).toList());
+        assertEquals(ReviewRating.GOOD, history.get(0).getRecordedEffectiveRating());
+        assertTrue(history.get(0).isOverridden());
+        assertEquals(ReviewRating.AGAIN, history.get(1).getRecordedEffectiveRating());
+        assertFalse(history.get(1).isOverridden());
+        assertNull(history.get(2).getRecordedEffectiveRating(), "a log without one stays without one");
     }
 
     private static ReviewLog log(WordCard word, LocalDateTime at, ReviewKind kind, ReviewMode direction) {

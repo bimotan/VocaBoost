@@ -31,6 +31,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -420,6 +421,82 @@ class ReviewSessionPresenterTest {
         for (ReviewRating rating : ReviewRating.values()) {
             assertEquals("1m", presenter.ratingPreview(rating), rating.name());
         }
+        assertEquals("", presenter.ratingCountsAs(ReviewRating.AGAIN));
+        assertEquals("Again (0%)", presenter.ratingCountsAs(ReviewRating.HARD));
+        assertEquals("Again (0%)", presenter.ratingCountsAs(ReviewRating.GOOD));
+        assertEquals("Again (0%)", presenter.ratingCountsAs(ReviewRating.EASY));
+        assertEquals(Optional.of(ReviewRating.AGAIN), presenter.suggestedRating());
+        assertTrue(presenter.canOverride());
+        assertTrue(presenter.result().contains(nl() + "Does not match: counts as Again. If your answer was right,"
+            + " choose \"I was right\" and rate it yourself."), presenter.result());
+    }
+
+    @Test
+    void aMatchingAnswerCountsAsEveryRatingAndCannotBeOverridden() throws SQLException {
+        presenter.showDeck(deckId);
+        WordCard card = presenter.card().orElseThrow();
+        presenter.setAnswer(firstMeaning(card));
+        presenter.submit();
+        int before = notifications;
+
+        presenter.setOverridden(true);
+
+        assertFalse(presenter.canOverride());
+        assertFalse(presenter.isOverridden());
+        assertEquals(before, notifications);
+        for (ReviewRating rating : ReviewRating.values()) {
+            assertEquals("", presenter.ratingCountsAs(rating), rating.name());
+        }
+        assertEquals(Optional.of(ReviewRating.GOOD), presenter.suggestedRating());
+        presenter.rate(ReviewRating.GOOD);
+        assertFalse(reviewLogs.findByWord(card.getId()).get(0).isOverridden());
+        assertTrue(presenter.result().startsWith("Saved. XP +"), presenter.result());
+    }
+
+    @Test
+    void iWasRightLetsTheChosenRatingCountAndIsLogged() throws SQLException {
+        presenter.showDeck(deckId);
+        WordCard card = presenter.card().orElseThrow();
+        presenter.setAnswer("完全错误");
+        presenter.submit();
+
+        presenter.setOverridden(true);
+
+        assertTrue(presenter.isOverridden());
+        assertEquals(Optional.of(ReviewRating.GOOD), presenter.suggestedRating());
+        for (ReviewRating rating : ReviewRating.values()) {
+            assertEquals("", presenter.ratingCountsAs(rating), rating.name());
+        }
+        assertEquals("10m", presenter.ratingPreview(ReviewRating.GOOD));
+
+        presenter.setOverridden(false);
+        assertEquals("Again (0%)", presenter.ratingCountsAs(ReviewRating.GOOD));
+        assertEquals("1m", presenter.ratingPreview(ReviewRating.GOOD));
+        presenter.setOverridden(true);
+        presenter.rate(ReviewRating.GOOD);
+
+        ReviewLog log = reviewLogs.findByWord(card.getId()).get(0);
+        assertEquals(ReviewRating.GOOD, log.getRating());
+        assertEquals(ReviewRating.GOOD, log.getEffectiveRating());
+        assertTrue(log.isOverridden());
+        assertEquals(CardState.LEARNING, services.wordRepository().findById(card.getId()).orElseThrow().getState());
+        assertTrue(presenter.result().startsWith("Saved as Good: you overrode the answer check. XP +"), presenter.result());
+        assertFalse(presenter.isOverridden(), "the next card starts without an override");
+        assertTrue(presenter.sessionProgress().startsWith("Session 1/20 | Accuracy 100% | XP "), presenter.sessionProgress());
+    }
+
+    @Test
+    void aCappedRatingSaysWhatItWasSavedAs() throws SQLException {
+        presenter.showDeck(deckId);
+        WordCard card = presenter.card().orElseThrow();
+        presenter.setAnswer("完全错误");
+        presenter.submit();
+
+        presenter.rate(ReviewRating.GOOD);
+
+        assertEquals(ReviewRating.AGAIN, reviewLogs.findByWord(card.getId()).get(0).getEffectiveRating());
+        assertTrue(presenter.result().startsWith("Saved as Again. XP +"), presenter.result());
+        assertTrue(presenter.sessionProgress().startsWith("Session 1/20 | Accuracy 0% | XP "), presenter.sessionProgress());
     }
 
     @Test
@@ -695,6 +772,8 @@ class ReviewSessionPresenterTest {
 
         assertEquals("10m", mixed.ratingPreview(ReviewRating.GOOD));
         assertEquals("10m", mixed.ratingPreview(ReviewRating.EASY), "Easy shows Good's interval");
+        assertEquals("Good", mixed.ratingCountsAs(ReviewRating.EASY));
+        assertFalse(mixed.canOverride(), "the answer matched; only Mixed mode's rule applies");
         mixed.rate(ReviewRating.EASY);
 
         WordCard rated = services.wordRepository().findById(card.getId()).orElseThrow();

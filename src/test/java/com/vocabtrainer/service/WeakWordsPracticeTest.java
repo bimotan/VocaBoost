@@ -111,7 +111,9 @@ class WeakWordsPracticeTest {
         ReviewOutcome practice = answer(service.nextWord(deck.getId(), ReviewMode.WEAK_WORDS).orElseThrow(),
             weak.getChinese(), ReviewRating.GOOD);
 
-        assertEquals(GoalService.practiceXp(ReviewRating.GOOD, 1.0), practice.xpEarned());
+        // A Good review of a matching answer earns 5 + 4 + 8 = 17 XP.
+        assertEquals(17 / 2, practice.xpEarned());
+        assertEquals(GoalService.practiceXp(logs.findByWord(weak.getId()).get(0)), practice.xpEarned());
         assertTrue(practice.xpEarned() > 0);
         assertEquals(0, goals.getTodayProgress(deck.getId()).reviewedCount());
         assertEquals(0, goals.totalReviews(deck.getId()));

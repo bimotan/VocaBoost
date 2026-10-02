@@ -14,7 +14,9 @@ import java.util.List;
  *
  * <p>Words also carry their FSRS state ({@code cardState}, {@code stability}, {@code difficulty},
  * {@code learningStep}) next to the SM-2 fields. Backups written before FSRS lack it; restoring
- * them derives it like the schema upgrade does. Older versions of the app ignore the extra fields.
+ * them derives it like the schema upgrade does. Review logs also carry the rating the schedule
+ * used and whether the user overrode the answer check. Older versions of the app ignore the extra
+ * fields.
  */
 record BackupFile(
     String format,
@@ -57,9 +59,12 @@ record BackupFile(
     }
 
     /**
-     * @param kind      {@code LEARN}, {@code REVIEW} or {@code PRACTICE}; absent in backups written before
-     *                  it was logged, which restore as {@code REVIEW}
-     * @param direction {@code EN_TO_ZH} or {@code ZH_TO_EN}; absent when unknown
+     * @param kind            {@code LEARN}, {@code REVIEW} or {@code PRACTICE}; absent in backups written
+     *                        before it was logged, which restore as {@code REVIEW}
+     * @param direction       {@code EN_TO_ZH} or {@code ZH_TO_EN}; absent when unknown
+     * @param effectiveRating the rating the schedule used; absent when the log did not record it,
+     *                        which reads as the rating capped by the similarity
+     * @param overridden      whether the user overrode the answer check; absent reads as false
      */
     record ReviewLogEntry(
         @JsonAlias("wordEnglish") String english,
@@ -70,7 +75,9 @@ record BackupFile(
         String rating,
         Long elapsedMillis,
         String kind,
-        String direction
+        String direction,
+        String effectiveRating,
+        Boolean overridden
     ) {
     }
 

@@ -23,7 +23,7 @@ import java.util.logging.Logger;
  */
 final class SchemaMigrations {
     /** The version a fully migrated database has: the last step's. */
-    static final int CURRENT_VERSION = 6;
+    static final int CURRENT_VERSION = 7;
 
     private static final Logger LOGGER = Logger.getLogger(SchemaMigrations.class.getName());
 
@@ -69,7 +69,8 @@ final class SchemaMigrations {
         new Step(3, "review logs unique per word, time and rating", false, this::uniqueReviewLogs),
         new Step(4, "indexes for statistics", false, this::statisticsIndexes),
         new Step(5, "FSRS card state on words", false, this::fsrsCardState),
-        new Step(6, "review log kind and question direction, review queue index", false, this::reviewQueue)
+        new Step(6, "review log kind and question direction, review queue index", false, this::reviewQueue),
+        new Step(7, "review log effective rating and answer check override", false, this::reviewLogEffectiveRating)
     );
 
     SchemaMigrations(Connection connection) {
@@ -362,6 +363,18 @@ final class SchemaMigrations {
         addColumnIfMissing("review_logs", "direction", "TEXT");
         execute("CREATE INDEX IF NOT EXISTS idx_words_queue ON words(deck_id, card_state, next_review_at)"
             + " WHERE archived = 0");
+    }
+
+    /**
+     * Version 7: review logs record the rating the schedule used ({@code effective_rating}: the
+     * chosen rating, capped by the answer check unless the user overrode it) and whether the user
+     * overrode the check ({@code overridden}). Existing logs keep no effective rating: it reads as
+     * their rating capped by their similarity, which is how the versions that wrote them scheduled
+     * them; older versions insert logs the same way.
+     */
+    private void reviewLogEffectiveRating() throws SQLException {
+        addColumnIfMissing("review_logs", "effective_rating", "TEXT");
+        addColumnIfMissing("review_logs", "overridden", "INTEGER NOT NULL DEFAULT 0");
     }
 
     /**

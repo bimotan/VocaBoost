@@ -240,7 +240,9 @@ public class BackupService {
                 log.getRating().name(),
                 log.getElapsedMillis(),
                 log.getKind().name(),
-                log.getDirection() == null ? null : log.getDirection().name()
+                log.getDirection() == null ? null : log.getDirection().name(),
+                log.getRecordedEffectiveRating() == null ? null : log.getRecordedEffectiveRating().name(),
+                log.isOverridden()
             ));
         }
         List<BackupFile.DailyGoalEntry> goals = new ArrayList<>();
@@ -474,7 +476,9 @@ public class BackupService {
             rating,
             entry.elapsedMillis() == null ? 0L : entry.elapsedMillis(),
             reviewKind(entry.kind()),
-            direction(entry.direction())
+            direction(entry.direction()),
+            entry.effectiveRating() == null || entry.effectiveRating().isBlank() ? null : rating(entry.effectiveRating()),
+            Boolean.TRUE.equals(entry.overridden())
         );
     }
 

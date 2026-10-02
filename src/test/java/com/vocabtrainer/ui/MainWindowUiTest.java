@@ -425,10 +425,7 @@ abstract class MainWindowUiTest {
             .orElseThrow(() -> new AssertionError("The question is not a word of the deck: " + question));
     }
 
-    /**
-     * What a learner types for an English-to-Chinese card: its first meaning. (Typing the whole
-     * multi-meaning gloss scores below 100%; see review finding A3.)
-     */
+    /** What a learner types for an English-to-Chinese card: its first meaning. */
     static String correctAnswer(WordCard word) {
         return word.getChinese().split("[;；,，/、]")[0].trim();
     }

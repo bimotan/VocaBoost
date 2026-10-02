@@ -8,6 +8,7 @@ import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.ReviewSessionSummary;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.service.AiService;
+import com.vocabtrainer.service.AnswerGrade;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ReviewAnswer;
 import com.vocabtrainer.service.ReviewQueueCounts;
@@ -48,6 +49,11 @@ import java.util.logging.Logger;
  *                          |                                                 \--failed--&gt; RATING_FAILED --rate--&gt; SAVING
  *                          \--no card left--&gt; COMPLETE
  * </pre>
+ *
+ * Once an answer is checked, each rating shows the interval it would give and, when the answer
+ * check caps it, what it counts as instead ("Hard (53%)"); the suggested rating is the best the
+ * answer counts as, at most Good. When the check capped the ratings the user may override it ("I was
+ * right"): the rating they choose then counts as it is, and the log says so.
  *
  * Call it on the UI thread only.
  */
@@ -97,6 +103,10 @@ public final class ReviewSessionPresenter {
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
     private final LatestRequest explanations = new LatestRequest();
     private final Map<ReviewRating, IntervalPreview> ratingPreviews = new EnumMap<>(ReviewRating.class);
+    /** The checked answer of the card on screen; null before it is submitted. */
+    private ReviewAnswer checked;
+    /** Whether the user overrides the answer check of the card on screen ("I was right"). */
+    private boolean overridden;
 
     private long deckId;
     private ReviewMode mode;
@@ -272,17 +282,13 @@ public final class ReviewSessionPresenter {
         LocalDateTime effectivelyShownAt = now.minus(timeOnScreen(now));
         // The session's mode, not the card's direction: in Mixed mode the service checks the answer in
         // the direction it chose for the card, and an Easy recognition must count as Mixed mode's.
-        ReviewAnswer checked = reviewService.submitAnswer(answered.getId(), answer, mode, effectivelyShownAt);
-        ratingPreviews.clear();
-        try {
-            ratingPreviews.putAll(reviewService.previewRatings(answered.getId()));
-        } catch (RuntimeException e) {
-            // Only the hints on the buttons are missing; rating still works.
-            LOGGER.log(Level.WARNING, "Cannot preview the intervals of " + answered.getEnglish(), e);
-        }
+        checked = reviewService.submitAnswer(answered.getId(), answer, mode, effectivelyShownAt);
+        overridden = false;
+        previewRatings();
         String checkedText = "Correct answer: " + checked.correctAnswer()
             + System.lineSeparator() + "Your answer: " + checked.userAnswer()
-            + System.lineSeparator() + "Answer similarity: " + Formats.percent(checked.similarity());
+            + System.lineSeparator() + "Answer similarity: " + Formats.percent(checked.similarity())
+            + verdict(checked);
         String separator = System.lineSeparator() + System.lineSeparator();
         result = checkedText + separator + "AI explanation: loading...";
         state = State.ANSWERED;
@@ -297,6 +303,20 @@ public final class ReviewSessionPresenter {
         );
     }
 
+    /**
+     * The user says the checked answer was right after all ("I was right"), or takes that back: while
+     * overridden, the rating they choose counts as it is instead of being capped by the check. Does
+     * nothing unless the check capped the ratings ({@link #canOverride()}).
+     */
+    public void setOverridden(boolean override) {
+        if (!canOverride() || override == overridden) {
+            return;
+        }
+        overridden = override;
+        previewRatings();
+        fireChanged();
+    }
+
     /** Saves the rating of the answered card and shows the next card; does nothing before an answer was submitted. */
     public void rate(ReviewRating rating) {
         if (!canRate()) {
@@ -304,11 +324,13 @@ public final class ReviewSessionPresenter {
         }
         long wordId = card.getId();
         LocalDateTime dueBefore = card.getNextReviewAt();
+        ReviewRating countsAs = checked == null ? rating : checked.countsAs(rating, overridden);
+        boolean override = overridden;
         state = State.SAVING;
         fireChanged();
         ReviewOutcome outcome;
         try {
-            outcome = reviewService.rateCurrent(wordId, rating);
+            outcome = reviewService.rateCurrent(wordId, rating, override);
         } catch (RuntimeException e) {
             // Nothing was saved. The service normally keeps the submitted answer, so the same card
             // and answer stay on screen and rating again retries.
@@ -328,7 +350,7 @@ public final class ReviewSessionPresenter {
         try {
             loadNextCard();
             if (card != null) {
-                result = savedMessage(outcome, dueBefore) + " XP +" + outcome.xpEarned()
+                result = savedMessage(outcome, dueBefore, rating, countsAs, override) + " XP +" + outcome.xpEarned()
                     + Formats.unlockedSuffix(outcome.unlockedAchievements()) + leechNotice(outcome);
             }
         } catch (RuntimeException e) {
@@ -438,6 +460,41 @@ public final class ReviewSessionPresenter {
         return state == State.ANSWERED || state == State.RATING_FAILED;
     }
 
+    /** Whether the answer check capped the ratings, so the user may say "I was right"; see {@link #setOverridden}. */
+    public boolean canOverride() {
+        return canRate() && checked != null && checked.canOverride();
+    }
+
+    /** Whether the user overrides the answer check of the card on screen. */
+    public boolean isOverridden() {
+        return overridden;
+    }
+
+    /**
+     * The rating to suggest once the answer is checked: the best the answer counts as, at most Good
+     * (Good when the user overrides the check); empty while nothing can be rated.
+     */
+    public Optional<ReviewRating> suggestedRating() {
+        return canRate() && checked != null ? Optional.of(checked.suggestedRating(overridden)) : Optional.empty();
+    }
+
+    /**
+     * What choosing {@code rating} counts as when that is not the rating itself, e.g. "Hard (53%)"
+     * when the answer check caps it (with the answer similarity), or "Good" for an Easy recognition
+     * in Mixed mode; empty when it counts as itself or no answer is checked.
+     */
+    public String ratingCountsAs(ReviewRating rating) {
+        if (checked == null || !(canRate() || state == State.SAVING)) {
+            return "";
+        }
+        ReviewRating counted = checked.countsAs(rating, overridden);
+        if (counted == rating) {
+            return "";
+        }
+        boolean cappedByCheck = checked.countsAs(rating, true) != counted;
+        return cappedByCheck ? counted.getLabel() + " (" + Formats.percent(checked.similarity()) + ")" : counted.getLabel();
+    }
+
     /**
      * When {@code rating} would bring the answered card back, e.g. "10m" or "4d"; empty while no
      * answer is checked.
@@ -528,6 +585,8 @@ public final class ReviewSessionPresenter {
         answer = "";
         result = "";
         ratingPreviews.clear();
+        checked = null;
+        overridden = false;
         cardNumber++;
         Optional<WordCard> next;
         try {
@@ -589,12 +648,54 @@ public final class ReviewSessionPresenter {
         };
     }
 
-    /** "Saved.", or for a practice whether it left the due date as it was. */
-    private static String savedMessage(ReviewOutcome outcome, LocalDateTime dueBefore) {
-        if (!outcome.isPractice()) {
-            return "Saved.";
+    /** Asks the service for the interval each rating would give the checked answer. */
+    private void previewRatings() {
+        ratingPreviews.clear();
+        try {
+            ratingPreviews.putAll(reviewService.previewRatings(card.getId(), overridden));
+        } catch (RuntimeException e) {
+            // Only the hints on the buttons are missing; rating still works.
+            LOGGER.log(Level.WARNING, "Cannot preview the intervals of " + card.getEnglish(), e);
         }
-        return Objects.equals(dueBefore, outcome.word().getNextReviewAt()) ? PRACTICE_SAVED : PRACTICE_MISSED;
+    }
+
+    /**
+     * Why the answer counts as less than a match, on a line of its own; nothing for a match. Says
+     * what a synonym, another word or a typo counts as, and that the user may override a cap.
+     */
+    static String verdict(ReviewAnswer checked) {
+        AnswerGrade grade = checked.grade();
+        String cap = grade.maxRating().getLabel();
+        String text = switch (grade.verdict()) {
+            case MATCH -> "";
+            case SYNONYM -> "Accepted as a synonym: \"" + grade.otherWord() + "\" (" + grade.otherGloss()
+                + ") also fits this prompt. Counts as right.";
+            case MISSPELLED -> "Misspelled: counts at most as " + cap + ".";
+            case CONFUSABLE -> "\"" + grade.otherWord() + "\" is a different word"
+                + (grade.otherGloss() == null ? ", easily confused with \"" + checked.english() + "\"" : " (" + grade.otherGloss() + ")")
+                + ": counts as " + cap + ".";
+            case PARTIAL -> "Close, but not a listed meaning: counts at most as " + cap + ".";
+            case WRONG -> "Does not match: counts as " + cap + ".";
+        };
+        if (checked.canOverride()) {
+            text += " If your answer was right, choose \"I was right\" and rate it yourself.";
+        }
+        return text.isEmpty() ? "" : System.lineSeparator() + text;
+    }
+
+    /**
+     * "Saved.", "Saved as Hard." when the answer check lowered the rating, a note when the user
+     * overrode the check, or for a practice whether it left the due date as it was.
+     */
+    private static String savedMessage(ReviewOutcome outcome, LocalDateTime dueBefore, ReviewRating rating,
+                                       ReviewRating countsAs, boolean overridden) {
+        if (outcome.isPractice()) {
+            return Objects.equals(dueBefore, outcome.word().getNextReviewAt()) ? PRACTICE_SAVED : PRACTICE_MISSED;
+        }
+        if (overridden) {
+            return "Saved as " + countsAs.getLabel() + ": you overrode the answer check.";
+        }
+        return countsAs == rating ? "Saved." : "Saved as " + countsAs.getLabel() + ".";
     }
 
     private static String leechNotice(ReviewOutcome outcome) {

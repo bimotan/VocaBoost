@@ -64,8 +64,8 @@ class LearningStepsUiTest extends MainWindowUiTest {
         waitForBackgroundTasks();
 
         assertEquals("Again (1) · 1m", text("rateAgainButton"));
-        assertEquals("Good (3) · 1m", text("rateGoodButton"));
-        assertEquals("Easy (4) · 1m", text("rateEasyButton"));
+        assertEquals("Good (3) → Again (0%) · 1m", text("rateGoodButton"));
+        assertEquals("Easy (4) → Again (0%) · 1m", text("rateEasyButton"));
     }
 
     @Test
