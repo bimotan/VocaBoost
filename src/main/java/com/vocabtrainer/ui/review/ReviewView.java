@@ -212,8 +212,14 @@ public final class ReviewView {
         reviewResultArea.setPrefRowCount(8);
         regenerateExplanationButton.setId("regenerateExplanationButton");
         regenerateExplanationButton.setTooltip(new Tooltip("Ask the AI provider again, ignoring the cached explanation"));
-        regenerateExplanationButton.setOnAction(event ->
-            context.errors().guard("Regenerate explanation failed", presenter::regenerateExplanation));
+        regenerateExplanationButton.setOnAction(event -> {
+            context.errors().guard("Regenerate explanation failed", presenter::regenerateExplanation);
+            // The button is disabled while the provider answers, which would pass the focus on to
+            // Again, where Space would rate Again; keep the keyboard on Good, as after Submit.
+            if (presenter.canRate()) {
+                ratingButtonsByRating.get(ReviewRating.GOOD).requestFocus();
+            }
+        });
 
         completionTitleLabel.setId("completionTitleLabel");
         completionTitleLabel.setStyle("-fx-font-size: 22px; -fx-font-weight: 700;");
