@@ -1,17 +1,20 @@
 package com.vocabtrainer.repository;
 
+import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,9 +31,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class WordPredicateAgreementTest {
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 3, 10, 12, 0);
+    /** The next 4 am rollover after NOW. */
+    private static final LocalDateTime DAY_END = LocalDateTime.of(2026, 3, 11, 4, 0);
 
     @TempDir
     Path tempDir;
+
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
 
     private DatabaseManager databaseManager;
     private WordRepository words;
@@ -40,24 +48,28 @@ class WordPredicateAgreementTest {
 
     @BeforeEach
     void insertEveryCombination() throws SQLException {
-        databaseManager = new DatabaseManager(tempDir.resolve("test.db"));
-        databaseManager.initialize();
+        databaseManager = databases.open(tempDir.resolve("test.db"));
         decks = new DeckRepository(databaseManager);
         words = new WordRepository(databaseManager);
         deck = decks.create("Predicates");
         List<WordCard> cards = new ArrayList<>();
         int index = 0;
-        for (int lapses : new int[] {0, 1, 2}) {
-            for (int consecutive : new int[] {0, 2, 3, 4}) {
-                for (int interval : new int[] {0, 3, 4, 6, 7, 8}) {
-                    for (LocalDateTime next : new LocalDateTime[] {NOW.minusDays(1), NOW, NOW.plusSeconds(1)}) {
-                        WordCard card = WordCard.createNew(deck.getId(), "word" + index++, "词");
-                        card.setLapses(lapses);
-                        card.setConsecutiveCorrect(consecutive);
-                        card.setIntervalDays(interval);
-                        card.setRepetitions(consecutive);
-                        card.setNextReviewAt(next);
-                        cards.add(card);
+        int[][] histories = {{0, 0}, {3, 3}, {3, 2}, {5, 2}, {5, 3}, {4, 0}};
+        LocalDateTime[] dueTimes = {NOW.minusDays(1), NOW, NOW.plusSeconds(1), DAY_END.minusSeconds(1), DAY_END};
+        for (CardState state : CardState.values()) {
+            for (double stability : new double[] {0, 20.9, 21, 30}) {
+                for (double difficulty : new double[] {0, 6.9, 7, 9}) {
+                    for (int[] history : histories) {
+                        for (LocalDateTime next : dueTimes) {
+                            WordCard card = WordCard.createNew(deck.getId(), "word" + index++, "词");
+                            card.setState(state);
+                            card.setStability(stability);
+                            card.setDifficulty(difficulty);
+                            card.setRepetitions(history[0]);
+                            card.setConsecutiveCorrect(history[1]);
+                            card.setNextReviewAt(next);
+                            cards.add(card);
+                        }
                     }
                 }
             }
@@ -92,12 +104,31 @@ class WordPredicateAgreementTest {
 
     @Test
     void dueQueriesMatchWordCard() throws SQLException {
-        Set<Long> java = active.stream().filter(card -> card.isDue(NOW)).map(WordCard::getId).collect(Collectors.toSet());
+        Set<Long> java = active.stream().filter(card -> card.isDue(NOW, DAY_END)).map(WordCard::getId)
+            .collect(Collectors.toSet());
 
-        assertEquals(java.size(), words.countDue(deck.getId(), NOW));
-        assertEquals(java, words.findDue(deck.getId(), NOW, 10_000).stream().map(WordCard::getId)
+        assertEquals(java.size(), words.countDue(deck.getId(), NOW, DAY_END));
+        assertEquals(java, words.findDue(deck.getId(), NOW, DAY_END, 10_000).stream().map(WordCard::getId)
             .collect(Collectors.toSet()));
         assertTrue(java.size() < active.size(), "the cases must include words that are not due");
+        // Later today: due for a review card, not yet for a learning card.
+        assertTrue(active.stream().anyMatch(card -> card.getState() == CardState.REVIEW
+            && card.getNextReviewAt().equals(DAY_END.minusSeconds(1)) && java.contains(card.getId())));
+        assertTrue(active.stream().noneMatch(card -> card.getState().isLearning()
+            && card.getNextReviewAt().isAfter(NOW) && java.contains(card.getId())));
+    }
+
+    @Test
+    void learningCardsDueByATimeAreFoundSoonestFirst() throws SQLException {
+        LocalDateTime until = NOW.plusMinutes(20);
+        List<Long> java = active.stream()
+            .filter(card -> card.getState().isLearning() && !card.getNextReviewAt().isAfter(until))
+            .sorted(Comparator.comparing(WordCard::getNextReviewAt).thenComparingLong(WordCard::getId))
+            .map(WordCard::getId)
+            .toList();
+
+        assertEquals(java, words.findLearningDueBy(deck.getId(), until, 10_000).stream().map(WordCard::getId).toList());
+        assertFalse(java.isEmpty());
     }
 
     @Test
@@ -106,11 +137,11 @@ class WordPredicateAgreementTest {
         words.insert(WordCard.createNew(other.getId(), "lone", "孤独的"));
         Deck empty = decks.create("Empty");
 
-        Map<Long, WordRepository.DeckWordCounts> counts = words.countByDeck(NOW);
+        Map<Long, WordRepository.DeckWordCounts> counts = words.countByDeck(NOW, DAY_END);
 
         for (Deck each : List.of(deck, other)) {
-            assertEquals(new WordRepository.DeckWordCounts(words.countAll(each.getId()), words.countDue(each.getId(), NOW)),
-                counts.get(each.getId()), each.getName());
+            assertEquals(new WordRepository.DeckWordCounts(words.countAll(each.getId()),
+                words.countDue(each.getId(), NOW, DAY_END)), counts.get(each.getId()), each.getName());
         }
         assertFalse(counts.containsKey(empty.getId()));
     }

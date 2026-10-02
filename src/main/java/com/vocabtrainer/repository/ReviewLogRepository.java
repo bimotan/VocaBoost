@@ -104,22 +104,55 @@ public class ReviewLogRepository {
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
             try (ResultSet rs = statement.executeQuery()) {
-                List<ReviewLog> logs = new ArrayList<>();
-                while (rs.next()) {
-                    logs.add(new ReviewLog(
-                        rs.getLong("id"),
-                        rs.getLong("word_id"),
-                        DateTimeUtil.fromDatabase(rs.getString("reviewed_at")),
-                        rs.getString("user_answer"),
-                        rs.getString("correct_answer"),
-                        rs.getDouble("similarity"),
-                        ReviewRating.valueOf(rs.getString("rating")),
-                        rs.getLong("elapsed_millis")
-                    ));
-                }
-                return logs;
+                return mapLogs(rs);
             }
         }
+    }
+
+    /** The word's review logs, oldest first. */
+    public List<ReviewLog> findByWord(long wordId) throws SQLException {
+        String sql = "SELECT * FROM review_logs WHERE word_id = ? ORDER BY reviewed_at, id";
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, wordId);
+            try (ResultSet rs = statement.executeQuery()) {
+                return mapLogs(rs);
+            }
+        }
+    }
+
+    /**
+     * The review logs of the words stored without a card state (see
+     * {@code WordRepository.findWithoutCardState}), by word, each word's oldest first.
+     */
+    public List<ReviewLog> findOfWordsWithoutCardState() throws SQLException {
+        String sql = """
+            SELECT * FROM review_logs
+            WHERE word_id IN (SELECT id FROM words WHERE card_state IS NULL)
+            ORDER BY word_id, reviewed_at, id
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet rs = statement.executeQuery()) {
+            return mapLogs(rs);
+        }
+    }
+
+    private static List<ReviewLog> mapLogs(ResultSet rs) throws SQLException {
+        List<ReviewLog> logs = new ArrayList<>();
+        while (rs.next()) {
+            logs.add(new ReviewLog(
+                rs.getLong("id"),
+                rs.getLong("word_id"),
+                DateTimeUtil.fromDatabase(rs.getString("reviewed_at")),
+                rs.getString("user_answer"),
+                rs.getString("correct_answer"),
+                rs.getDouble("similarity"),
+                ReviewRating.valueOf(rs.getString("rating")),
+                rs.getLong("elapsed_millis")
+            ));
+        }
+        return logs;
     }
 
     /**

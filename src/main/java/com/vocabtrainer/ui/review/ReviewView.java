@@ -29,6 +29,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
+import java.time.Clock;
 import java.util.EnumMap;
 import java.util.Locale;
 import java.util.Map;
@@ -37,6 +38,9 @@ import java.util.Optional;
 /**
  * The Review tab. It only shows the state of a {@link ReviewSessionPresenter} and forwards the
  * user's input to it; the review flow itself lives in the presenter.
+ *
+ * <p>Once an answer is checked, each rating button also shows when that rating would bring the card
+ * back, e.g. "Good (3) · 4d".
  *
  * <p>Keyboard: Enter in the answer field submits. Once the answer is checked, 1, 2, 3 and 4 rate
  * Again, Hard, Good and Easy and Space rates Good (or presses the focused button, which is Good
@@ -65,11 +69,12 @@ public final class ReviewView {
     private boolean renderedCanRate;
     private boolean swallowTypedKey;
 
+    /** {@code clock} times the answers. */
     public ReviewView(ViewContext context, ReviewService reviewService, GoalService goalService,
-                      ConfiguredServices configured) {
+                      ConfiguredServices configured, Clock clock) {
         this.context = context;
         this.presenter = new ReviewSessionPresenter(reviewService, goalService, configured::ai, context.async(),
-            context.changes(), context.errors()::reportFailure);
+            context.changes(), context.errors()::reportFailure, clock);
         this.tab = Widgets.tab("reviewTab", "Review", createContent());
         presenter.addListener(this::render);
         context.decks().onSwitch(deck -> presenter.showDeck(deck.getId()));
@@ -247,9 +252,15 @@ public final class ReviewView {
         };
     }
 
+    /** "Good (3)", and once the answer is checked the interval it gives, as in "Good (3) · 4d". */
+    private static String ratingButtonText(ReviewRating rating, String preview) {
+        String text = rating.getLabel() + " (" + shortcutKey(rating) + ")";
+        return preview.isEmpty() ? text : text + " · " + preview;
+    }
+
     private Button ratingButton(ReviewRating rating) {
         String key = shortcutKey(rating);
-        Button button = new Button(rating.getLabel() + " (" + key + ")");
+        Button button = new Button(ratingButtonText(rating, ""));
         button.setId(ratingButtonId(rating));
         button.setMinWidth(90);
         button.setTooltip(new Tooltip(rating == ReviewRating.GOOD ? "Press " + key + " or Space" : "Press " + key));
@@ -274,6 +285,8 @@ public final class ReviewView {
         answerField.setDisable(!presenter.canSubmit());
         submitAnswerButton.setDisable(!presenter.canSubmit());
         ratingButtons.setDisable(!presenter.canRate());
+        ratingButtonsByRating.forEach((rating, button) ->
+            button.setText(ratingButtonText(rating, presenter.ratingPreview(rating))));
         if (presenter.cardNumber() != renderedCardNumber && presenter.canSubmit()) {
             renderedCardNumber = presenter.cardNumber();
             answerField.requestFocus();

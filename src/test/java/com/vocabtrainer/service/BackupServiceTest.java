@@ -3,6 +3,7 @@ package com.vocabtrainer.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vocabtrainer.domain.Achievement;
+import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
@@ -85,6 +86,11 @@ class BackupServiceTest {
         assertEquals(2, parsed.get("version").asInt());
         assertEquals("GRE [core] {1}", parsed.get("deck").get("name").asText());
         assertEquals(4, parsed.get("words").size());
+        JsonNode aberrant = parsed.get("words").get(0);
+        assertEquals("aberrant", aberrant.get("english").asText());
+        assertEquals("REVIEW", aberrant.get("cardState").asText());
+        assertEquals(30.5, aberrant.get("stability").asDouble());
+        assertEquals(6.25, aberrant.get("difficulty").asDouble());
 
         Db target = new Db(tempDir.resolve("target.db"));
         Deck restoredDeck = target.decks.ensureDefaultDeck();
@@ -356,7 +362,12 @@ class BackupServiceTest {
 
         assertEquals(1, result.wordsInserted());
         assertEquals(1, result.logsInserted());
-        assertEquals(4, db.words.findByEnglish(deck.getId(), "lucid").orElseThrow().getIntervalDays());
+        // The backup has no FSRS state: the word's one valid review log decides it, like the schema upgrade.
+        WordCard lucid = db.words.findByEnglish(deck.getId(), "lucid").orElseThrow();
+        assertEquals(CardState.REVIEW, lucid.getState());
+        assertEquals(3.173, lucid.getStability(), 1e-9);
+        assertEquals(1, lucid.getRepetitions());
+        assertEquals(LocalDateTime.of(2026, 5, 21, 9, 0), lucid.getLastReviewedAt());
         assertEquals(List.of(
             "Word #2: English word cannot be empty.",
             "Word #3 (zeal): invalid nextReviewAt \"tomorrow\"",
@@ -388,6 +399,51 @@ class BackupServiceTest {
         assertEquals(0, db.words.countAllInDatabase());
     }
 
+    @Test
+    void aBackupWrittenBeforeFsrsGetsItsCardStateDerivedLikeTheSchemaUpgrade() throws Exception {
+        Db db = new Db(tempDir.resolve("before-fsrs.db"));
+        Deck deck = db.decks.ensureDefaultDeck();
+        Path json = tempDir.resolve("before-fsrs.json");
+        Files.writeString(json, """
+            {
+              "format": "vocaboost-backup",
+              "version": 2,
+              "words": [
+                {"english": "lucid", "chinese": "清晰的", "addedAt": "2026-04-01T08:00:00",
+                 "lastReviewedAt": "2026-04-02T09:00:00", "nextReviewAt": "2026-04-05T09:00:00",
+                 "easinessFactor": 2.5, "intervalDays": 3, "repetitions": 2, "consecutiveCorrect": 2, "lapses": 0},
+                {"english": "abate", "chinese": "减弱", "addedAt": "2026-03-01T08:00:00",
+                 "lastReviewedAt": "2026-04-20T09:00:00", "nextReviewAt": "2026-05-07T09:00:00",
+                 "easinessFactor": 1.3, "intervalDays": 17, "repetitions": 4, "consecutiveCorrect": 4, "lapses": 2},
+                {"english": "laud", "chinese": "赞美"}
+              ],
+              "reviewLogs": [
+                {"english": "lucid", "reviewedAt": "2026-04-01T09:00:00", "correctAnswer": "清晰的", "similarity": 1.0, "rating": "GOOD"},
+                {"english": "lucid", "reviewedAt": "2026-04-02T09:00:00", "correctAnswer": "清晰的", "similarity": 1.0, "rating": "GOOD"}
+              ]
+            }
+            """, StandardCharsets.UTF_8);
+
+        BackupRestoreResult result = db.backup.importJsonBackup(json, deck.getId());
+
+        assertEquals(3, result.wordsInserted());
+        assertTrue(result.invalidRows().isEmpty(), result.invalidRows().toString());
+        // Replayed from its two logs: learned on the 1st, graduated on the 2nd (py-fsrs 5.1.3 gives S = 5.869142).
+        WordCard lucid = db.words.findByEnglish(deck.getId(), "lucid").orElseThrow();
+        assertEquals(CardState.REVIEW, lucid.getState());
+        assertEquals(5.869142, lucid.getStability(), 1e-5);
+        assertEquals(5.272968, lucid.getDifficulty(), 1e-5);
+        assertEquals(2, lucid.getRepetitions());
+        // No logs: estimated from the SM-2 schedule.
+        WordCard abate = db.words.findByEnglish(deck.getId(), "abate").orElseThrow();
+        assertEquals(CardState.REVIEW, abate.getState());
+        assertEquals(17.0, abate.getStability(), 1e-9);
+        assertEquals(9.0, abate.getDifficulty(), 1e-9);
+        assertEquals(LocalDateTime.of(2026, 5, 7, 9, 0), abate.getNextReviewAt());
+        assertEquals(CardState.NEW, db.words.findByEnglish(deck.getId(), "laud").orElseThrow().getState());
+        assertTrue(db.words.findWithoutCardState().isEmpty());
+    }
+
     /** Four words (one archived) whose text breaks naive JSON handling, with logs, goals and an achievement. */
     private static void seedTrickyDeck(Db db, long deckId) throws SQLException {
         WordCard aberrant = card(deckId, "aberrant", "a. 异常的; [医] 畸变的 {x}");
@@ -404,6 +460,9 @@ class BackupServiceTest {
         aberrant.setRepetitions(5);
         aberrant.setConsecutiveCorrect(3);
         aberrant.setLapses(1);
+        aberrant.setState(CardState.REVIEW);
+        aberrant.setStability(30.5);
+        aberrant.setDifficulty(6.25);
         db.words.insert(aberrant);
 
         WordCard lucid = card(deckId, "lucid", "清晰的");
@@ -417,6 +476,10 @@ class BackupServiceTest {
         zeal.setIntervalDays(7);
         zeal.setRepetitions(9);
         zeal.setLapses(4);
+        zeal.setState(CardState.RELEARNING);
+        zeal.setStability(1.2);
+        zeal.setDifficulty(9.1);
+        zeal.setLearningStep(0);
         zeal.setArchived(true);
         db.words.insert(zeal);
 
@@ -491,6 +554,10 @@ class BackupServiceTest {
         assertEquals(expected.getRepetitions(), actual.getRepetitions());
         assertEquals(expected.getConsecutiveCorrect(), actual.getConsecutiveCorrect());
         assertEquals(expected.getLapses(), actual.getLapses());
+        assertEquals(expected.getState(), actual.getState());
+        assertEquals(expected.getStability(), actual.getStability());
+        assertEquals(expected.getDifficulty(), actual.getDifficulty());
+        assertEquals(expected.getLearningStep(), actual.getLearningStep());
     }
 
     /** One SQLite database with its repositories and a backup service on a fixed clock. */

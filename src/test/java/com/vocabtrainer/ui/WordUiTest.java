@@ -1,5 +1,6 @@
 package com.vocabtrainer.ui;
 
+import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.WordCard;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -100,51 +101,77 @@ class WordUiTest extends MainWindowUiTest {
 
     @Test
     void theWordListFiltersBySearchTextStatusTagAndPartOfSpeech() throws Exception {
-        // Every starter word is due, weak, not mastered and tagged "gre", so one mastered word with
-        // its own tag is needed to tell whether the status and tag filters filter at all.
-        WordCard mastered = WordCard.createNew(currentDeck().getId(), "petrichor", "雨后泥土的气味");
-        mastered.setPartOfSpeech("noun");
-        mastered.setTags("mine");
-        mastered.setConsecutiveCorrect(3);
-        mastered.setRepetitions(3);
-        mastered.setIntervalDays(10);
-        mastered.setNextReviewAt(LocalDateTime.now().plusDays(10));
-        services.wordRepository().insert(mastered);
+        // Every starter word is new: due, not weak and not mastered. Three reviewed words with their
+        // own tag tell whether the status and tag filters filter at all.
+        long deckId = currentDeck().getId();
+        services.wordRepository().insert(reviewed(deckId, "petrichor", "雨后泥土的气味", 30, 5, 3, 3, 0));
+        services.wordRepository().insert(reviewed(deckId, "obstinate", "固执的", 3, 6, 4, 1, 1));
+        WordCard leech = reviewed(deckId, "cavil", "挑剔", 2, 9, 20, 3, 8);
+        leech.setTags("mine; leech");
+        services.wordRepository().insert(leech);
         selectTab("wordListTab");
         click("refreshWordsButton");
         List<WordCard> words = services.wordRepository().findAll(currentDeck().getId());
-        assertEquals(STARTER_WORDS + 1, words.size());
-        assertEquals(STARTER_WORDS + 1, rowCount("wordTable"));
+        assertEquals(STARTER_WORDS + 3, words.size());
+        assertEquals(STARTER_WORDS + 3, rowCount("wordTable"));
+        // English, Chinese, Next review, Interval, Memory, Status.
+        assertEquals("30 days", cell("wordTable", "petrichor", 3));
+        // Reviewed yesterday with a 30-day stability: almost certainly still remembered.
+        assertEquals("100%", cell("wordTable", "petrichor", 4));
+        assertEquals("Mastered", cell("wordTable", "petrichor", 5));
+        assertEquals("-", cell("wordTable", "abate", 3));
+        assertEquals("New", cell("wordTable", "abate", 4));
+        assertEquals("Due", cell("wordTable", "abate", 5));
 
         // Typing is debounced, so wait for the table to catch up.
         type("wordSearchField", "abate");
         waitForWordList("search 'abate'", List.of("abate"));
 
         type("wordSearchField", "");
-        waitForRowCount(STARTER_WORDS + 1);
+        waitForRowCount(STARTER_WORDS + 3);
 
         Fx.run(() -> this.<String>comboBox("wordStatusFilter").getSelectionModel().select("Mastered"));
         assertEquals(List.of("petrichor"), wordListEnglish());
         Fx.run(() -> this.<String>comboBox("wordStatusFilter").getSelectionModel().select("Due"));
         assertEquals(STARTER_WORDS, rowCount("wordTable"));
         assertFalse(wordListEnglish().contains("petrichor"));
+        // Weak: failed within the last three reviews, or hard and not mastered yet.
         Fx.run(() -> this.<String>comboBox("wordStatusFilter").getSelectionModel().select("Weak"));
-        assertEquals(STARTER_WORDS, rowCount("wordTable"));
-        assertFalse(wordListEnglish().contains("petrichor"));
+        assertEquals(List.of("cavil", "obstinate"), wordListEnglish());
+        Fx.run(() -> this.<String>comboBox("wordStatusFilter").getSelectionModel().select("Leech"));
+        assertEquals(List.of("cavil"), wordListEnglish());
         Fx.run(() -> this.<String>comboBox("wordStatusFilter").getSelectionModel().select("All"));
-        assertEquals(STARTER_WORDS + 1, rowCount("wordTable"));
+        assertEquals(STARTER_WORDS + 3, rowCount("wordTable"));
 
         type("wordPosFilterField", "noun");
         waitForWordList("POS filter 'noun'", englishOf(words, word -> contains(word.getPartOfSpeech(), "noun")));
         type("wordPosFilterField", "");
-        waitForRowCount(STARTER_WORDS + 1);
+        waitForRowCount(STARTER_WORDS + 3);
 
         type("wordTagFilterField", "MINE");
-        waitForWordList("tag filter 'MINE'", List.of("petrichor"));
+        waitForWordList("tag filter 'MINE'", List.of("cavil", "obstinate", "petrichor"));
         type("wordTagFilterField", "GRE");
         waitForWordList("tag filter 'GRE'", englishOf(words, word -> contains(word.getTags(), "gre")));
         type("wordTagFilterField", "no-such-tag");
         waitForRowCount(0);
+    }
+
+    /** A word in review: its memory, review counts and lapses, last reviewed when its stability says it is due. */
+    private static WordCard reviewed(long deckId, String english, String chinese, double stability, double difficulty,
+                                     int repetitions, int consecutiveCorrect, int lapses) {
+        WordCard word = WordCard.createNew(deckId, english, chinese);
+        word.setPartOfSpeech("noun");
+        word.setTags("mine");
+        word.setState(CardState.REVIEW);
+        word.setStability(stability);
+        word.setDifficulty(difficulty);
+        word.setIntervalDays((int) Math.round(stability));
+        word.setRepetitions(repetitions);
+        word.setConsecutiveCorrect(consecutiveCorrect);
+        word.setLapses(lapses);
+        word.setLastReviewedAt(LocalDateTime.now().minusDays(1));
+        word.setNextReviewAt(LocalDateTime.now().plusDays(Math.round(stability)));
+        return word;
     }
 
     private List<String> wordListEnglish() {

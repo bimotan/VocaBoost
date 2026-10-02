@@ -9,6 +9,7 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.WordRepository;
+import com.vocabtrainer.service.scheduling.StudyDay;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -21,20 +22,32 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalDouble;
 
 public class StatsService {
+    /** The memory distribution's bucket of words never reviewed. */
+    public static final String NEW_WORDS_BUCKET = "New";
+
     private final WordRepository wordRepository;
     private final ReviewLogRepository reviewLogRepository;
     private final Clock clock;
+    private final StudyDay studyDay;
 
     public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository) {
         this(wordRepository, reviewLogRepository, Clock.systemDefaultZone());
     }
 
     public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository, Clock clock) {
+        this(wordRepository, reviewLogRepository, clock, new StudyDay());
+    }
+
+    /** {@code studyDay} decides which words are due today. */
+    public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository, Clock clock,
+                        StudyDay studyDay) {
         this.wordRepository = wordRepository;
         this.reviewLogRepository = reviewLogRepository;
         this.clock = clock;
+        this.studyDay = studyDay;
     }
 
     /** @deprecated the queries moved into the repositories; use {@link #StatsService(WordRepository, ReviewLogRepository)}. */
@@ -60,7 +73,7 @@ public class StatsService {
             double accuracy = reviewedToday == 0 ? 0.0 : (double) correctToday / reviewedToday;
             return new DashboardStats(
                 wordRepository.countAll(deckId),
-                wordRepository.countDue(deckId, now),
+                wordRepository.countDue(deckId, now, studyDay.end(now)),
                 wordRepository.countMastered(deckId),
                 reviewedToday,
                 accuracy
@@ -99,16 +112,26 @@ public class StatsService {
             .toList();
     }
 
+    /**
+     * How many of the deck's words fall into each range of recall chance at this moment (FSRS
+     * retrievability), with words never reviewed counted under {@value #NEW_WORDS_BUCKET}.
+     */
     public List<MemoryBucketStat> memoryDistribution(long deckId) {
         try {
             Map<String, Integer> buckets = new LinkedHashMap<>();
+            buckets.put(NEW_WORDS_BUCKET, 0);
             buckets.put("0-40%", 0);
             buckets.put("40-70%", 0);
             buckets.put("70-90%", 0);
             buckets.put("90-100%", 0);
             LocalDateTime now = LocalDateTime.now(clock);
             for (WordCard word : wordRepository.findAll(deckId)) {
-                double strength = word.calculateMemoryStrength(now);
+                OptionalDouble recall = ReviewScheduler.retrievability(word, now);
+                if (recall.isEmpty()) {
+                    buckets.merge(NEW_WORDS_BUCKET, 1, Integer::sum);
+                    continue;
+                }
+                double strength = recall.getAsDouble();
                 String bucket = strength < 0.4 ? "0-40%"
                     : strength < 0.7 ? "40-70%"
                     : strength < 0.9 ? "70-90%"
@@ -131,9 +154,11 @@ public class StatsService {
         }
     }
 
+    /** The deck's words due today, see {@link WordCard#isDue}. */
     public int overdueCount(long deckId) {
         try {
-            return wordRepository.countDue(deckId, LocalDateTime.now(clock));
+            LocalDateTime now = LocalDateTime.now(clock);
+            return wordRepository.countDue(deckId, now, studyDay.end(now));
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read overdue count", e);
         }
@@ -154,7 +179,8 @@ public class StatsService {
      */
     public List<DeckOverview> deckOverviews(List<Deck> decks) {
         try {
-            Map<Long, WordRepository.DeckWordCounts> counts = wordRepository.countByDeck(LocalDateTime.now(clock));
+            LocalDateTime now = LocalDateTime.now(clock);
+            Map<Long, WordRepository.DeckWordCounts> counts = wordRepository.countByDeck(now, studyDay.end(now));
             Map<Long, LocalDateTime> latestReviews = reviewLogRepository.latestReviewByDeck();
             WordRepository.DeckWordCounts none = new WordRepository.DeckWordCounts(0, 0);
             return decks.stream()

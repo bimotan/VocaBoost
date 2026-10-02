@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.vocabtrainer.domain.Achievement;
+import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
@@ -60,6 +61,7 @@ public class BackupService {
     private final DatabaseManager databaseManager;
     private final WordValidationService validationService;
     private final Clock clock;
+    private final CardStateBackfill cardStates;
     private final ObjectMapper objectMapper = JsonMapper.builder()
         // Version 1 backups were written by hand and left tabs and other control characters unescaped.
         .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
@@ -79,6 +81,16 @@ public class BackupService {
                          ReviewLogRepository reviewLogRepository, GoalRepository goalRepository,
                          AchievementRepository achievementRepository, DatabaseManager databaseManager,
                          WordValidationService validationService, Clock clock) {
+        this(deckRepository, wordRepository, reviewLogRepository, goalRepository, achievementRepository,
+            databaseManager, validationService, clock,
+            new CardStateBackfill(wordRepository, reviewLogRepository, new ReviewScheduler()));
+    }
+
+    /** @param cardStates derives the FSRS state of words restored from a backup written before FSRS */
+    public BackupService(DeckRepository deckRepository, WordRepository wordRepository,
+                         ReviewLogRepository reviewLogRepository, GoalRepository goalRepository,
+                         AchievementRepository achievementRepository, DatabaseManager databaseManager,
+                         WordValidationService validationService, Clock clock, CardStateBackfill cardStates) {
         this.deckRepository = deckRepository;
         this.wordRepository = wordRepository;
         this.reviewLogRepository = reviewLogRepository;
@@ -87,6 +99,7 @@ public class BackupService {
         this.databaseManager = databaseManager;
         this.validationService = validationService;
         this.clock = clock;
+        this.cardStates = cardStates;
     }
 
     public Path exportWordsCsv(long deckId, Path outputPath) {
@@ -207,7 +220,11 @@ public class BackupService {
                 word.getRepetitions(),
                 word.getConsecutiveCorrect(),
                 word.getLapses(),
-                word.isArchived()
+                word.isArchived(),
+                word.getState().name(),
+                word.getStability(),
+                word.getDifficulty(),
+                word.getLearningStep()
             ));
         }
         List<BackupFile.ReviewLogEntry> logs = new ArrayList<>();
@@ -282,8 +299,9 @@ public class BackupService {
         }
 
         Set<String> restoredWords = new HashSet<>();
+        List<WordCard> withoutCardState = new ArrayList<>();
         restoreRows(root, "words", "Word", tally,
-            row -> restoreWord(row, deckId, policy, deckWords, restoredWords, tally));
+            row -> restoreWord(row, deckId, policy, deckWords, restoredWords, withoutCardState, tally));
 
         List<ReviewLog> logs = new ArrayList<>();
         restoreRows(root, "reviewLogs", "Review log", tally, row -> logs.add(reviewLog(row, deckWords)));
@@ -291,6 +309,10 @@ public class BackupService {
         int logsInserted = reviewLogRepository.insertAllIfAbsent(logs);
         tally.logsInserted += logsInserted;
         tally.duplicateLogsSkipped += logs.size() - logsInserted;
+        // Words from a backup without FSRS state get it from their review history, now complete.
+        for (WordCard word : withoutCardState) {
+            cardStates.deriveAndSave(word);
+        }
         restoreRows(root, "dailyGoals", "Daily goal", tally, row -> restoreDailyGoal(row, deckId, tally));
         restoreRows(root, "achievements", "Achievement", tally, row -> restoreAchievement(row, deckId, tally));
         return tally;
@@ -324,7 +346,7 @@ public class BackupService {
     }
 
     private void restoreWord(JsonNode row, long deckId, ExistingWordPolicy policy, Map<String, WordCard> deckWords,
-                             Set<String> restoredWords, RestoreTally tally)
+                             Set<String> restoredWords, List<WordCard> withoutCardState, RestoreTally tally)
         throws SQLException, JsonProcessingException {
         BackupFile.WordEntry entry = objectMapper.treeToValue(row, BackupFile.WordEntry.class);
         ValidatedWord validated = validationService.validate(entry.english(), entry.chinese(), entry.phonetic(),
@@ -354,11 +376,17 @@ public class BackupService {
             word.setArchived(Boolean.TRUE.equals(entry.archived()));
             wordRepository.insert(word);
             deckWords.put(key, word);
+            if (schedule != null && schedule.state() == null) {
+                withoutCardState.add(word);
+            }
             tally.wordsInserted++;
         } else if (policy == ExistingWordPolicy.OVERWRITE_SCHEDULE && schedule != null
-            && !schedule.equals(Schedule.of(existing))) {
+            && !schedule.sameAs(existing)) {
             schedule.applyTo(existing);
             wordRepository.update(existing);
+            if (schedule.state() == null) {
+                withoutCardState.add(existing);
+            }
             tally.wordsUpdated++;
         } else {
             tally.wordsSkipped++;
@@ -375,6 +403,7 @@ public class BackupService {
         if (!Double.isFinite(easiness) || easiness <= 0) {
             throw new IllegalArgumentException("invalid easinessFactor " + easiness);
         }
+        CardState state = cardState(entry.cardState());
         return new Schedule(
             dateTime(entry.lastReviewedAt(), "lastReviewedAt"),
             nextReviewAt,
@@ -382,8 +411,34 @@ public class BackupService {
             count(entry.intervalDays(), 0, "intervalDays"),
             count(entry.repetitions(), 0, "repetitions"),
             count(entry.consecutiveCorrect(), 0, "consecutiveCorrect"),
-            count(entry.lapses(), 0, "lapses")
+            count(entry.lapses(), 0, "lapses"),
+            state,
+            state == null ? 0 : memory(entry.stability(), "stability"),
+            state == null ? 0 : memory(entry.difficulty(), "difficulty"),
+            state == null ? 0 : count(entry.learningStep(), 0, "learningStep")
         );
+    }
+
+    /** The saved FSRS state, or null for a backup written before FSRS. */
+    private static CardState cardState(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return CardState.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("unknown cardState \"" + value + "\"", e);
+        }
+    }
+
+    private static double memory(Double value, String field) {
+        if (value == null) {
+            return 0;
+        }
+        if (!Double.isFinite(value) || value < 0) {
+            throw new IllegalArgumentException("invalid " + field + " " + value);
+        }
+        return value;
     }
 
     /** The backup row as a log of the deck's word, or IllegalArgumentException if the row is unusable. */
@@ -533,7 +588,10 @@ public class BackupService {
         void restore(JsonNode row) throws SQLException, JsonProcessingException;
     }
 
-    /** The review-schedule columns of a card. */
+    /**
+     * The review-schedule columns of a card. {@code state} is null for a backup written before FSRS;
+     * {@link #applyTo} then estimates the FSRS state from the SM-2 fields until it is derived.
+     */
     private record Schedule(
         LocalDateTime lastReviewedAt,
         LocalDateTime nextReviewAt,
@@ -541,15 +599,29 @@ public class BackupService {
         int intervalDays,
         int repetitions,
         int consecutiveCorrect,
-        int lapses
+        int lapses,
+        CardState state,
+        double stability,
+        double difficulty,
+        int learningStep
     ) {
         static Schedule newCard(LocalDateTime now) {
-            return new Schedule(null, now, WordCard.DEFAULT_EASINESS, 0, 0, 0, 0);
+            return new Schedule(null, now, WordCard.DEFAULT_EASINESS, 0, 0, 0, 0, CardState.NEW, 0, 0, 0);
         }
 
         static Schedule of(WordCard word) {
             return new Schedule(word.getLastReviewedAt(), word.getNextReviewAt(), word.getEasinessFactor(),
-                word.getIntervalDays(), word.getRepetitions(), word.getConsecutiveCorrect(), word.getLapses());
+                word.getIntervalDays(), word.getRepetitions(), word.getConsecutiveCorrect(), word.getLapses(),
+                word.getState(), word.getStability(), word.getDifficulty(), word.getLearningStep());
+        }
+
+        /** Whether the card already has this schedule, as far as the backup records it. */
+        boolean sameAs(WordCard word) {
+            Schedule current = of(word);
+            return state == null
+                ? equals(new Schedule(current.lastReviewedAt, current.nextReviewAt, current.easinessFactor,
+                    current.intervalDays, current.repetitions, current.consecutiveCorrect, current.lapses, null, 0, 0, 0))
+                : equals(current);
         }
 
         void applyTo(WordCard word) {
@@ -560,6 +632,14 @@ public class BackupService {
             word.setRepetitions(repetitions);
             word.setConsecutiveCorrect(consecutiveCorrect);
             word.setLapses(lapses);
+            if (state == null) {
+                word.estimateStateFromLegacySchedule();
+            } else {
+                word.setState(state);
+                word.setStability(stability);
+                word.setDifficulty(difficulty);
+                word.setLearningStep(learningStep);
+            }
         }
     }
 

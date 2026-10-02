@@ -1,5 +1,6 @@
 package com.vocabtrainer.ui.words;
 
+import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.WordCard;
 
 import java.time.LocalDateTime;
@@ -16,10 +17,14 @@ import java.util.Locale;
  * @param partOfSpeech part of the part of speech, ignoring case; blank matches every word
  */
 public record WordListFilter(String status, String tag, String partOfSpeech) {
-    public static final List<String> STATUSES = List.of("All", "Due", "Weak", "Mastered", "Unverified");
+    public static final List<String> STATUSES = List.of("All", "Due", "Weak", "Mastered", "Leech", "Unverified");
 
-    public boolean matches(WordCard word, LocalDateTime now) {
-        if ("Due".equals(status) && !word.isDue(now)) {
+    /** @param dayEnd the end of the current study day, which decides which words are due today */
+    public boolean matches(WordCard word, LocalDateTime now, LocalDateTime dayEnd) {
+        if ("Due".equals(status) && !word.isDue(now, dayEnd)) {
+            return false;
+        }
+        if ("Leech".equals(status) && !word.isLeech()) {
             return false;
         }
         if ("Weak".equals(status) && !word.isWeak()) {
@@ -39,14 +44,14 @@ public record WordListFilter(String status, String tag, String partOfSpeech) {
     }
 
     /** The Status column: Mastered, Due, New or Learning. */
-    public static String statusOf(WordCard word, LocalDateTime now) {
+    public static String statusOf(WordCard word, LocalDateTime now, LocalDateTime dayEnd) {
         if (word.isMastered()) {
             return "Mastered";
         }
-        if (word.isDue(now)) {
+        if (word.isDue(now, dayEnd)) {
             return "Due";
         }
-        if (word.getRepetitions() == 0) {
+        if (word.getState() == CardState.NEW) {
             return "New";
         }
         return "Learning";

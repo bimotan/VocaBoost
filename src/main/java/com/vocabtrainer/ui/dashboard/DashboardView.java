@@ -85,7 +85,7 @@ public final class DashboardView {
         reviewProgress.setId("reviewGoalProgress");
         newWordProgress.setId("newWordGoalProgress");
         addStat(grid, 0, "Total words", totalWordsLabel);
-        addStat(grid, 1, "Due now", dueTodayLabel);
+        addStat(grid, 1, "Due today", dueTodayLabel);
         addStat(grid, 2, "Reviews today", reviewedTodayLabel);
         addStat(grid, 3, "New words today", newWordsTodayLabel);
         addStat(grid, 4, "Accuracy today", accuracyTodayLabel);

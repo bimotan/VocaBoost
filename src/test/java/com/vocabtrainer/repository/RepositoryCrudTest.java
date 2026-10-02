@@ -38,7 +38,8 @@ class RepositoryCrudTest {
         assertTrue(word.getId() > 0);
         assertEquals(1, wordRepository.countAll(deck.getId()));
         assertTrue(wordRepository.findByEnglish(deck.getId(), "QUERULOUS").isPresent());
-        assertEquals(1, wordRepository.countDue(deck.getId(), LocalDateTime.now().plusMinutes(1)));
+        LocalDateTime soon = LocalDateTime.now().plusMinutes(1);
+        assertEquals(1, wordRepository.countDue(deck.getId(), soon, soon.plusDays(1)));
 
         word.setChinese("爱抱怨的");
         wordRepository.save(word);

@@ -1,9 +1,11 @@
 package com.vocabtrainer.service;
 
 import com.vocabtrainer.repository.SettingsRepository;
+import com.vocabtrainer.service.scheduling.SchedulingOptions;
 
 import java.sql.SQLException;
 import java.util.Optional;
+import java.util.logging.Logger;
 
 public class SettingsService {
     public static final String ECDICT_PATH_KEY = "dictionary.ecdict.path";
@@ -100,6 +102,40 @@ public class SettingsService {
 
     public void markStarterImported() {
         save(STARTER_IMPORTED_KEY, "true");
+    }
+
+    // ---- Review scheduling ----
+
+    /** The chance of recall review intervals aim for, from 0.7 to 0.97; 0.9 when not set. */
+    public static final String DESIRED_RETENTION_KEY = "scheduler.desiredRetention";
+    /** The hour (0 to 23) at which a new study day starts; 4 when not set. */
+    public static final String DAY_ROLLOVER_HOUR_KEY = "scheduler.dayRolloverHour";
+
+    /**
+     * How reviews are scheduled: the defaults, with the saved desired retention and day rollover
+     * hour. A saved value that is not a valid number is logged and ignored.
+     */
+    public SchedulingOptions getSchedulingOptions() {
+        SchedulingOptions options = SchedulingOptions.defaults();
+        Optional<String> retention = get(DESIRED_RETENTION_KEY).filter(value -> !value.isBlank());
+        if (retention.isPresent()) {
+            try {
+                options = options.withDesiredRetention(Double.parseDouble(retention.get().trim()));
+            } catch (IllegalArgumentException e) {
+                Logger.getLogger(SettingsService.class.getName()).warning(
+                    "Ignoring setting " + DESIRED_RETENTION_KEY + "=" + retention.get() + ": " + e.getMessage());
+            }
+        }
+        Optional<String> rollover = get(DAY_ROLLOVER_HOUR_KEY).filter(value -> !value.isBlank());
+        if (rollover.isPresent()) {
+            try {
+                options = options.withDayRolloverHour(Integer.parseInt(rollover.get().trim()));
+            } catch (IllegalArgumentException e) {
+                Logger.getLogger(SettingsService.class.getName()).warning(
+                    "Ignoring setting " + DAY_ROLLOVER_HOUR_KEY + "=" + rollover.get() + ": " + e.getMessage());
+            }
+        }
+        return options;
     }
 
     public Optional<String> get(String key) {

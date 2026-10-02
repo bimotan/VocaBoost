@@ -1,6 +1,8 @@
 package com.vocabtrainer.ui.review;
 
+import com.vocabtrainer.TestClock;
 import com.vocabtrainer.app.AppServices;
+import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewMode;
@@ -8,6 +10,7 @@ import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.ReviewLogRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.service.AiService;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.DataChanges;
@@ -15,12 +18,15 @@ import com.vocabtrainer.ui.TaskRunner;
 import com.vocabtrainer.ui.review.ReviewSessionPresenter.State;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -38,6 +44,9 @@ class ReviewSessionPresenterTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     private final ManualTasks tasks = new ManualTasks();
     private final FakeAi ai = new FakeAi();
     private final DataChanges changes = new DataChanges();
@@ -54,6 +63,7 @@ class ReviewSessionPresenterTest {
         services = AppServices.builder(tempDir.resolve("vocab.db"))
             .reviewLogRepository(databaseManager -> reviewLogs = new FailingReviewLogs(databaseManager))
             .open();
+        databases.track(services.databaseManager());
         changes.subscribe(published::add);
         presenter = new ReviewSessionPresenter(services.reviewService(), services.goalService(), () -> ai, tasks,
             changes, (title, error) -> failures.add(title));
@@ -77,7 +87,7 @@ class ReviewSessionPresenterTest {
         WordCard card = presenter.card().orElseThrow();
         assertEquals(deckId, card.getDeckId());
         assertEquals(card.getEnglish(), presenter.question());
-        assertTrue(presenter.details().startsWith("英译中 | Streak 0 | Interval 0 days | EF "), presenter.details());
+        assertEquals("英译中 | New | Lapses 0", presenter.details());
         assertEquals("Enter Chinese meaning", presenter.answerPrompt());
         assertEquals("Session 0/10 | Accuracy 0% | XP 0", presenter.sessionProgress());
         assertEquals("", presenter.result());
@@ -241,7 +251,6 @@ class ReviewSessionPresenterTest {
         Deck single = services.deckService().createDeck("Single");
         services.wordRepository().insert(WordCard.createNew(single.getId(), "lucid", "清晰的"));
         presenter.showDeck(single.getId());
-        presenter.changeMode(ReviewMode.WEAK_WORDS);
         assertEquals("lucid", presenter.question());
         long firstCardNumber = presenter.cardNumber();
         presenter.setAnswer("清晰的");
@@ -249,7 +258,8 @@ class ReviewSessionPresenterTest {
 
         presenter.rate(ReviewRating.GOOD);
 
-        // Still a weak word, so weak-words mode asks it again right away.
+        // Its 10-minute learning step ends within the learn-ahead window and nothing else is due,
+        // so the word is asked again right away.
         assertEquals("lucid", presenter.question());
         assertNotEquals(firstCardNumber, presenter.cardNumber());
         tasks.runAll();
@@ -355,6 +365,105 @@ class ReviewSessionPresenterTest {
         assertEquals("Custom session size must be between 1 and 500.", error.getMessage());
         assertEquals(cardNumber, presenter.cardNumber());
         assertEquals(State.AWAITING_ANSWER, presenter.state());
+    }
+
+    @Test
+    void aFailedWordIsAskedAgainInTheSameSession() throws SQLException {
+        Deck pair = services.deckService().createDeck("Pair");
+        services.wordRepository().insert(WordCard.createNew(pair.getId(), "lucid", "清晰的"));
+        services.wordRepository().insert(WordCard.createNew(pair.getId(), "abate", "减弱"));
+        presenter.showDeck(pair.getId());
+        String failed = presenter.question();
+        presenter.setAnswer("完全错误");
+        presenter.submit();
+        presenter.rate(ReviewRating.AGAIN);
+
+        String other = presenter.question();
+        assertNotEquals(failed, other);
+        presenter.setAnswer(firstMeaning(presenter.card().orElseThrow()));
+        presenter.submit();
+        presenter.rate(ReviewRating.EASY);
+
+        assertEquals(failed, presenter.question(), "the failed word comes back before the session ends");
+        assertEquals(CardState.LEARNING, presenter.card().orElseThrow().getState());
+        assertTrue(presenter.details().startsWith("英译中 | Learning | Recall "), presenter.details());
+        assertTrue(presenter.sessionProgress().startsWith("Session 2/10 | Accuracy 50% | XP "), presenter.sessionProgress());
+    }
+
+    @Test
+    void theRatingButtonsShowTheIntervalEachRatingGives() {
+        presenter.showDeck(deckId);
+        for (ReviewRating rating : ReviewRating.values()) {
+            assertEquals("", presenter.ratingPreview(rating), "nothing before the answer is checked");
+        }
+        presenter.setAnswer(firstMeaning(presenter.card().orElseThrow()));
+        presenter.submit();
+
+        assertEquals("1m", presenter.ratingPreview(ReviewRating.AGAIN));
+        assertEquals("6m", presenter.ratingPreview(ReviewRating.HARD));
+        assertEquals("10m", presenter.ratingPreview(ReviewRating.GOOD));
+        assertTrue(presenter.ratingPreview(ReviewRating.EASY).matches("1[3-9]d"), presenter.ratingPreview(ReviewRating.EASY));
+
+        presenter.rate(ReviewRating.GOOD);
+        assertEquals("", presenter.ratingPreview(ReviewRating.GOOD), "the next card has no answer yet");
+    }
+
+    @Test
+    void aWrongAnswerShowsThatEveryRatingCountsAsAgain() {
+        presenter.showDeck(deckId);
+        presenter.setAnswer("完全错误");
+        presenter.submit();
+
+        for (ReviewRating rating : ReviewRating.values()) {
+            assertEquals("1m", presenter.ratingPreview(rating), rating.name());
+        }
+    }
+
+    @Test
+    void theResponseTimeIsMeasuredFromShowingTheCardToSubmitting() throws SQLException {
+        TestClock clock = new TestClock(LocalDateTime.now().plusSeconds(1));
+        AppServices clocked = AppServices.builder(tempDir.resolve("clocked.db")).clock(clock).open();
+        databases.track(clocked.databaseManager());
+        ReviewSessionPresenter timed = new ReviewSessionPresenter(clocked.reviewService(), clocked.goalService(),
+            () -> ai, tasks, changes, (title, error) -> failures.add(title), clock);
+        timed.showDeck(clocked.startupDeck().getId());
+        WordCard card = timed.card().orElseThrow();
+
+        clock.advance(Duration.ofSeconds(12));
+        timed.setAnswer(firstMeaning(card));
+        timed.submit();
+        // Reading the result and the explanation is not part of answering.
+        clock.advance(Duration.ofSeconds(30));
+        timed.rate(ReviewRating.GOOD);
+
+        List<ReviewLog> logs = clocked.reviewLogRepository().findByWord(card.getId());
+        assertEquals(1, logs.size());
+        assertEquals(12_000, logs.get(0).getElapsedMillis());
+    }
+
+    @Test
+    void theEighthLapseSaysTheWordIsNowALeech() throws SQLException {
+        Deck deck = services.deckService().createDeck("Leech");
+        WordCard card = WordCard.createNew(deck.getId(), "cavil", "挑剔");
+        card.setState(CardState.REVIEW);
+        card.setStability(2);
+        card.setDifficulty(9);
+        card.setRepetitions(20);
+        card.setLapses(WordCard.LEECH_LAPSES - 1);
+        card.setLastReviewedAt(LocalDateTime.now().minusDays(3));
+        card.setNextReviewAt(LocalDateTime.now().minusDays(1));
+        services.wordRepository().insert(card);
+        presenter.showDeck(deck.getId());
+
+        presenter.setAnswer("完全错误");
+        presenter.submit();
+        presenter.rate(ReviewRating.AGAIN);
+
+        assertTrue(presenter.result().contains("\"cavil\" lapsed 8 times and is now tagged as a leech"), presenter.result());
+        assertTrue(services.wordRepository().findById(card.getId()).orElseThrow().isLeech());
+        // Its relearning step comes right back, marked as a leech.
+        assertEquals("cavil", presenter.question());
+        assertTrue(presenter.details().endsWith(" | Lapses 8 | Leech"), presenter.details());
     }
 
     @Test

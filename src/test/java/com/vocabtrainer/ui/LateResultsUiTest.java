@@ -2,7 +2,6 @@ package com.vocabtrainer.ui;
 
 import com.vocabtrainer.app.AppServices;
 import com.vocabtrainer.domain.Deck;
-import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.WordRepository;
@@ -116,7 +115,7 @@ class LateResultsUiTest extends MainWindowUiTest {
         click("newDeckButton");
         services.wordRepository().insert(WordCard.createNew(currentDeck().getId(), "lucid", "清晰的"));
         selectTab("reviewTab");
-        this.<ReviewMode>select("reviewModeSelector", mode -> mode == ReviewMode.WEAK_WORDS);
+        click("resetSessionButton");
         assertEquals("lucid", text("reviewWordLabel"));
         ai.gate.hold();
         type("answerField", "清晰的");
@@ -124,7 +123,8 @@ class LateResultsUiTest extends MainWindowUiTest {
         assertTrue(text("reviewResultArea").endsWith("AI explanation: loading..."), text("reviewResultArea"));
 
         click("rateGoodButton");
-        // Still weak, so weak-words mode asks the same word again at once.
+        // Nothing else is due and its 10-minute learning step ends within 20 minutes, so the same
+        // word is asked again at once.
         assertEquals("lucid", text("reviewWordLabel"));
         String saved = text("reviewResultArea");
         assertTrue(saved.startsWith("Saved. XP +"), saved);

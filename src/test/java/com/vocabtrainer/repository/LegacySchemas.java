@@ -9,27 +9,31 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The schemas earlier releases created, written out by hand, for upgrade tests. None of them set
- * {@code user_version}.
+ * The schemas earlier releases created, written out by hand, for upgrade tests. Only the last one,
+ * from after schema versioning, sets {@code user_version}.
  */
 enum LegacySchemas {
     /** c49a7d7, the first SQLite release: decks, words, review logs, settings, AI cache. */
-    FIRST_RELEASE(false, false, false),
+    FIRST_RELEASE(false, false, false, false),
     /** c09856a: adds goals and achievements (one set for the whole app) and the dictionary cache. */
-    GOALS(true, false, false),
+    GOALS(true, false, false, false),
     /** 9c488f6: decks can be archived. */
-    ARCHIVED_DECKS(true, true, false),
+    ARCHIVED_DECKS(true, true, false, false),
     /** 0426f54 up to phase 1: goals and achievements are kept per deck. */
-    DECK_SCOPED_GOALS(true, true, true);
+    DECK_SCOPED_GOALS(true, true, true, false),
+    /** 51bf259, schema version 4: the last schema before FSRS, words with only the SM-2 schedule. */
+    SM2_VERSION_4(true, true, true, true);
 
     private final boolean goals;
     private final boolean archivedDecks;
     private final boolean deckScopedGoals;
+    private final boolean versioned;
 
-    LegacySchemas(boolean goals, boolean archivedDecks, boolean deckScopedGoals) {
+    LegacySchemas(boolean goals, boolean archivedDecks, boolean deckScopedGoals, boolean versioned) {
         this.goals = goals;
         this.archivedDecks = archivedDecks;
         this.deckScopedGoals = deckScopedGoals;
+        this.versioned = versioned;
     }
 
     /** Creates this schema in a new database file. */
@@ -47,8 +51,8 @@ enum LegacySchemas {
 
     List<String> statements() {
         List<String> sql = new ArrayList<>();
-        sql.add("CREATE TABLE decks (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, "
-            + "created_at TEXT NOT NULL" + (archivedDecks ? ", archived INTEGER NOT NULL DEFAULT 0" : "") + ")");
+        sql.add("CREATE TABLE decks (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL" + (versioned ? "" : " UNIQUE")
+            + ", created_at TEXT NOT NULL" + (archivedDecks ? ", archived INTEGER NOT NULL DEFAULT 0" : "") + ")");
         sql.add("""
             CREATE TABLE words (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,6 +99,12 @@ enum LegacySchemas {
             sql.add(deckScopedGoals ? DECK_SCOPED_ACHIEVEMENTS : APP_WIDE_ACHIEVEMENTS.formatted("achievements"));
             sql.add("CREATE TABLE dictionary_cache (english TEXT PRIMARY KEY COLLATE NOCASE, payload TEXT NOT NULL, "
                 + "source TEXT NOT NULL, created_at TEXT NOT NULL)");
+        }
+        if (versioned) {
+            sql.add("CREATE UNIQUE INDEX idx_decks_active_name ON decks(name) WHERE archived = 0");
+            sql.add("CREATE UNIQUE INDEX idx_review_logs_word_time ON review_logs(word_id, reviewed_at, rating)");
+            sql.add("CREATE INDEX idx_review_logs_time ON review_logs(reviewed_at)");
+            sql.add("PRAGMA user_version = 4");
         }
         return sql;
     }

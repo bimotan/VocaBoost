@@ -1,8 +1,6 @@
 package com.vocabtrainer.ui;
 
 import com.vocabtrainer.domain.WordCard;
-import javafx.scene.control.TableColumn;
-import javafx.scene.control.TableView;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -60,18 +58,5 @@ class LazyRefreshUiTest extends MainWindowUiTest {
 
         assertEquals("TOEFL", cell("deckTable", "TOEFL", 0));
         assertEquals("0", cell("deckTable", "TOEFL", 1));
-    }
-
-    /** The text in column {@code column} of the row whose first column shows {@code firstColumn}. */
-    private String cell(String tableId, String firstColumn, int column) {
-        return Fx.call(() -> {
-            TableView<Object> table = table(tableId);
-            TableColumn<Object, ?> key = table.getColumns().get(0);
-            Object row = table.getItems().stream()
-                .filter(item -> firstColumn.equals(String.valueOf(key.getCellData(item))))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("No row '" + firstColumn + "' in #" + tableId));
-            return String.valueOf(table.getColumns().get(column).getCellData(row));
-        });
     }
 }

@@ -14,6 +14,7 @@ import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.AiService;
 import com.vocabtrainer.service.AiServiceFactory;
 import com.vocabtrainer.service.BackupService;
+import com.vocabtrainer.service.CardStateBackfill;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.DictionaryServiceFactory;
@@ -31,6 +32,7 @@ import com.vocabtrainer.ui.MainWindow;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -46,6 +48,8 @@ import java.util.function.Supplier;
  * @param aiServices         builds the AI service from the saved settings; called again when the
  *                           AI settings change
  * @param startupDeck        the deck the main window opens on
+ * @param reviewScheduler    schedules reviews with the saved scheduling settings
+ * @param clock              the time every service and view works with
  */
 public record AppServices(
     DatabaseManager databaseManager,
@@ -68,7 +72,9 @@ public record AppServices(
     BackupService backupService,
     Supplier<DictionaryService> dictionaryServices,
     Supplier<AiService> aiServices,
-    Deck startupDeck
+    Deck startupDeck,
+    ReviewScheduler reviewScheduler,
+    Clock clock
 ) implements AutoCloseable {
     public static Builder builder(Path databasePath) {
         return new Builder(databasePath);
@@ -96,6 +102,7 @@ public record AppServices(
         private BiFunction<DictionaryCacheRepository, SettingsService, DictionaryService> dictionaryServiceFactory =
             DictionaryServiceFactory::create;
         private BiFunction<AiCacheRepository, SettingsService, AiService> aiServiceFactory = AiServiceFactory::create;
+        private Clock clock = Clock.systemDefaultZone();
 
         private Builder(Path databasePath) {
             this.databasePath = Objects.requireNonNull(databasePath, "databasePath");
@@ -121,9 +128,16 @@ public record AppServices(
             return this;
         }
 
+        /** The clock of the review, goal, statistics and backup services and of the views; the system clock by default. */
+        public Builder clock(Clock clock) {
+            this.clock = Objects.requireNonNull(clock);
+            return this;
+        }
+
         /**
-         * Creates or migrates the database, resolves the startup deck, imports the starter words into
-         * a brand-new database and wires the services.
+         * Creates or migrates the database, derives the FSRS state of words that have none yet,
+         * resolves the startup deck, imports the starter words into a brand-new database and wires
+         * the services.
          */
         public AppServices open() throws SQLException {
             DatabaseManager databaseManager = new DatabaseManager(databasePath);
@@ -142,9 +156,11 @@ public record AppServices(
             Deck startupDeck = deckService.resolveStartupDeck();
 
             SimilarityService similarityService = new SimilarityService();
-            ReviewScheduler reviewScheduler = new ReviewScheduler();
-            GoalService goalService = new GoalService(goalRepository);
-            AchievementService achievementService = new AchievementService(achievementRepository, goalService);
+            ReviewScheduler reviewScheduler = new ReviewScheduler(settingsService.getSchedulingOptions());
+            CardStateBackfill cardStates = new CardStateBackfill(wordRepository, reviewLogRepository, reviewScheduler);
+            cardStates.run();
+            GoalService goalService = new GoalService(goalRepository, clock);
+            AchievementService achievementService = new AchievementService(achievementRepository, goalService, clock);
             WordValidationService validationService = new WordValidationService();
             ImportExportService importExportService = new ImportExportService(wordRepository, validationService);
             StarterImportService starterImportService = new StarterImportService(
@@ -156,11 +172,13 @@ public record AppServices(
                 similarityService,
                 reviewScheduler,
                 goalService,
-                achievementService
+                achievementService,
+                clock
             );
-            StatsService statsService = new StatsService(wordRepository, reviewLogRepository);
+            StatsService statsService = new StatsService(wordRepository, reviewLogRepository, clock,
+                reviewScheduler.studyDay());
             BackupService backupService = new BackupService(deckRepository, wordRepository, reviewLogRepository,
-                goalRepository, achievementRepository, databaseManager, validationService);
+                goalRepository, achievementRepository, databaseManager, validationService, clock, cardStates);
             BiFunction<DictionaryCacheRepository, SettingsService, DictionaryService> dictionaryFactory =
                 dictionaryServiceFactory;
             BiFunction<AiCacheRepository, SettingsService, AiService> aiFactory = aiServiceFactory;
@@ -186,7 +204,9 @@ public record AppServices(
                 backupService,
                 () -> dictionaryFactory.apply(dictionaryCacheRepository, settingsService),
                 () -> aiFactory.apply(aiCacheRepository, settingsService),
-                startupDeck
+                startupDeck,
+                reviewScheduler,
+                clock
             );
         }
     }

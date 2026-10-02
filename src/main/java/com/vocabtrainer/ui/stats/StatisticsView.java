@@ -69,9 +69,10 @@ public final class StatisticsView {
         accuracyChart.setMinHeight(280);
 
         memoryChart.setId("memoryChart");
-        memoryChart.setTitle("Memory strength distribution");
+        memoryChart.setTitle("Memory: chance of recall now");
         memoryChart.setPrefHeight(260);
         memoryChart.setLabelsVisible(false);
+        memoryChart.setAnimated(false);
 
         overdueStatsLabel.setId("overdueStatsLabel");
         overdueStatsLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: 600;");
@@ -153,9 +154,12 @@ public final class StatisticsView {
                 + " | Again " + word.againCount())
             .collect(Collectors.joining(System.lineSeparator()));
         hardestWordsArea.setText(hardest.isBlank() ? "No review logs yet." : hardest);
-        analyticsArea.setText("Spaced repetition: intervals grow when recall is strong and shrink after weak recall."
-            + System.lineSeparator() + "Retrieval practice: every review stores the typed answer and response time."
-            + System.lineSeparator() + "Adaptive scheduling: low similarity increases lapse pressure and future urgency."
-            + System.lineSeparator() + "Learning analytics: charts summarize volume, accuracy, memory strength and hard words.");
+        analyticsArea.setText("Spaced repetition: FSRS-5 models each word's stability and difficulty and schedules"
+            + " the next review when the chance of recall drops to 90%."
+            + System.lineSeparator() + "Retrieval practice: every review stores the typed answer and the time taken to answer;"
+            + " failed and new words come back after short learning steps in the same session."
+            + System.lineSeparator() + "Adaptive scheduling: an answer that is not similar enough counts as Again;"
+            + " words that lapse 8 times are tagged as leeches."
+            + System.lineSeparator() + "Learning analytics: charts summarize volume, accuracy, chance of recall and hard words.");
     }
 }

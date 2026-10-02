@@ -1,5 +1,6 @@
 package com.vocabtrainer.repository;
 
+import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.util.DateTimeUtil;
 
@@ -16,6 +17,31 @@ import java.util.Map;
 import java.util.Optional;
 
 public class WordRepository {
+    /**
+     * The words {@link WordCard#isDue} calls due: due before the end of the study day and, for a
+     * learning or relearning card, due by now. Binds the end of the study day, then now.
+     */
+    private static final String DUE = """
+        next_review_at < ? AND (next_review_at <= ? OR COALESCE(card_state, 'NEW') NOT IN ('LEARNING', 'RELEARNING'))
+        """;
+    /**
+     * The words {@link WordCard#isWeak} calls weak. Binds {@link WordCard#RECENT_REVIEWS},
+     * {@link WordCard#WEAK_DIFFICULTY} and {@link WordCard#MASTERED_STABILITY_DAYS}.
+     */
+    private static final String WEAK = """
+        (card_state = 'RELEARNING'
+         OR (repetitions > consecutive_correct AND consecutive_correct < ?)
+         OR (difficulty >= ? AND NOT (COALESCE(card_state, 'NEW') = 'REVIEW' AND stability >= ?)))
+        """;
+    private static final String COLUMNS = """
+        deck_id, english, chinese, phonetic, part_of_speech, example_sentence, note, tags, added_at,
+        last_reviewed_at, next_review_at, easiness_factor, interval_days, repetitions, consecutive_correct,
+        lapses, archived, card_state, stability, difficulty, learning_step
+        """;
+    private static final String INSERT = "INSERT INTO words(" + COLUMNS + ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+        + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    private static final int BOUND_COLUMNS = 21;
+
     private final DatabaseManager databaseManager;
 
     public WordRepository(DatabaseManager databaseManager) {
@@ -36,14 +62,8 @@ public class WordRepository {
     }
 
     public WordCard insert(WordCard word) throws SQLException {
-        String sql = """
-            INSERT INTO words(deck_id, english, chinese, phonetic, part_of_speech, example_sentence, note, tags,
-                              added_at, last_reviewed_at, next_review_at, easiness_factor, interval_days,
-                              repetitions, consecutive_correct, lapses, archived)
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """;
         try (Connection connection = databaseManager.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+             PreparedStatement statement = connection.prepareStatement(INSERT, Statement.RETURN_GENERATED_KEYS)) {
             bindWord(statement, word);
             statement.executeUpdate();
             try (ResultSet keys = statement.getGeneratedKeys()) {
@@ -59,16 +79,10 @@ public class WordRepository {
         if (words == null || words.isEmpty()) {
             return 0;
         }
-        String sql = """
-            INSERT INTO words(deck_id, english, chinese, phonetic, part_of_speech, example_sentence, note, tags,
-                              added_at, last_reviewed_at, next_review_at, easiness_factor, interval_days,
-                              repetitions, consecutive_correct, lapses, archived)
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """;
         // All rows or none; joins the caller's transaction if there is one.
         return databaseManager.inTransaction(() -> {
             try (Connection connection = databaseManager.getConnection();
-                 PreparedStatement statement = connection.prepareStatement(sql)) {
+                 PreparedStatement statement = connection.prepareStatement(INSERT)) {
                 int inserted = 0;
                 for (WordCard word : words) {
                     bindWord(statement, word);
@@ -85,13 +99,14 @@ public class WordRepository {
             UPDATE words
             SET deck_id = ?, english = ?, chinese = ?, phonetic = ?, part_of_speech = ?, example_sentence = ?,
                 note = ?, tags = ?, added_at = ?, last_reviewed_at = ?, next_review_at = ?, easiness_factor = ?,
-                interval_days = ?, repetitions = ?, consecutive_correct = ?, lapses = ?, archived = ?
+                interval_days = ?, repetitions = ?, consecutive_correct = ?, lapses = ?, archived = ?,
+                card_state = ?, stability = ?, difficulty = ?, learning_step = ?
             WHERE id = ?
             """;
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             bindWord(statement, word);
-            statement.setLong(18, word.getId());
+            statement.setLong(BOUND_COLUMNS + 1, word.getId());
             statement.executeUpdate();
         }
     }
@@ -179,17 +194,46 @@ public class WordRepository {
         }
     }
 
-    public List<WordCard> findDue(long deckId, LocalDateTime now, int limit) throws SQLException {
-        String sql = """
-            SELECT * FROM words
-            WHERE deck_id = ? AND archived = 0 AND next_review_at <= ?
-            ORDER BY lapses DESC, consecutive_correct ASC, interval_days ASC, next_review_at ASC, id ASC
+    /**
+     * The deck's due words (see {@link WordCard#isDue}): learning and relearning cards first, then
+     * review cards, then new ones, each by due time.
+     *
+     * @param dayEnd the end of the current study day, after {@code now}
+     */
+    public List<WordCard> findDue(long deckId, LocalDateTime now, LocalDateTime dayEnd, int limit) throws SQLException {
+        String sql = "SELECT * FROM words WHERE deck_id = ? AND archived = 0 AND " + DUE + """
+            ORDER BY CASE COALESCE(card_state, 'NEW')
+                         WHEN 'LEARNING' THEN 0 WHEN 'RELEARNING' THEN 0 WHEN 'REVIEW' THEN 1 ELSE 2 END,
+                     next_review_at ASC, id ASC
             LIMIT ?
             """;
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
-            statement.setString(2, DateTimeUtil.toDatabase(now));
+            statement.setString(2, DateTimeUtil.toDatabase(dayEnd));
+            statement.setString(3, DateTimeUtil.toDatabase(now));
+            statement.setInt(4, limit);
+            try (ResultSet rs = statement.executeQuery()) {
+                return mapList(rs);
+            }
+        }
+    }
+
+    /**
+     * The deck's learning and relearning cards due by {@code until}, soonest first: with an
+     * {@code until} after now, the cards a session may show a little early when nothing else is due.
+     */
+    public List<WordCard> findLearningDueBy(long deckId, LocalDateTime until, int limit) throws SQLException {
+        String sql = """
+            SELECT * FROM words
+            WHERE deck_id = ? AND archived = 0 AND next_review_at <= ? AND card_state IN ('LEARNING', 'RELEARNING')
+            ORDER BY next_review_at ASC, id ASC
+            LIMIT ?
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            statement.setString(2, DateTimeUtil.toDatabase(until));
             statement.setInt(3, limit);
             try (ResultSet rs = statement.executeQuery()) {
                 return mapList(rs);
@@ -199,25 +243,38 @@ public class WordRepository {
 
     /** The deck's weak words (see {@link WordCard#isWeak()}), most fragile first. */
     public List<WordCard> findWeak(long deckId, int limit) throws SQLException {
-        String sql = """
-            SELECT * FROM words
-            WHERE deck_id = ? AND archived = 0
-              AND (lapses > 0 OR consecutive_correct < 3 OR interval_days <= 3)
-            ORDER BY lapses DESC, consecutive_correct ASC, next_review_at ASC, id ASC
+        String sql = "SELECT * FROM words WHERE deck_id = ? AND archived = 0 AND " + WEAK + """
+            ORDER BY CASE WHEN card_state = 'RELEARNING' THEN 0 ELSE 1 END, consecutive_correct ASC,
+                     difficulty DESC, next_review_at ASC, id ASC
             LIMIT ?
             """;
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
-            statement.setInt(2, limit);
+            bindWeakThresholds(statement, 2);
+            statement.setInt(5, limit);
             try (ResultSet rs = statement.executeQuery()) {
                 return mapList(rs);
             }
         }
     }
 
+    /**
+     * Words stored without an FSRS card state: written before schema version 5, or since by an
+     * older version of the app. Their state is estimated from the SM-2 schedule until it is derived
+     * and saved.
+     */
+    public List<WordCard> findWithoutCardState() throws SQLException {
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT * FROM words WHERE card_state IS NULL ORDER BY id");
+             ResultSet rs = statement.executeQuery()) {
+            return mapList(rs);
+        }
+    }
+
     public int countAll(long deckId) throws SQLException {
-        return count("SELECT COUNT(*) FROM words WHERE deck_id = ? AND archived = 0", deckId, null);
+        return count("SELECT COUNT(*) FROM words WHERE deck_id = ? AND archived = 0", deckId);
     }
 
     /** Every word row in every deck, archived or not. */
@@ -229,30 +286,52 @@ public class WordRepository {
         }
     }
 
-    public int countDue(long deckId, LocalDateTime now) throws SQLException {
-        return count("SELECT COUNT(*) FROM words WHERE deck_id = ? AND archived = 0 AND next_review_at <= ?", deckId, now);
+    /** The deck's due words, see {@link #findDue}. */
+    public int countDue(long deckId, LocalDateTime now, LocalDateTime dayEnd) throws SQLException {
+        String sql = "SELECT COUNT(*) FROM words WHERE deck_id = ? AND archived = 0 AND " + DUE;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            statement.setString(2, DateTimeUtil.toDatabase(dayEnd));
+            statement.setString(3, DateTimeUtil.toDatabase(now));
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        }
     }
 
     /** The deck's mastered words (see {@link WordCard#isMastered()}). */
     public int countMastered(long deckId) throws SQLException {
         String sql = """
             SELECT COUNT(*) FROM words
-            WHERE deck_id = ? AND archived = 0 AND consecutive_correct >= 3 AND interval_days >= 7 AND lapses = 0
+            WHERE deck_id = ? AND archived = 0 AND card_state = 'REVIEW' AND stability >= ?
             """;
-        return count(sql, deckId, null);
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            statement.setDouble(2, WordCard.MASTERED_STABILITY_DAYS);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        }
     }
 
-    /** Active-word and due-word counts of every deck that has words, by deck id, in one query. */
-    public Map<Long, DeckWordCounts> countByDeck(LocalDateTime now) throws SQLException {
-        String sql = """
-            SELECT deck_id, COUNT(*) AS total, COALESCE(SUM(CASE WHEN next_review_at <= ? THEN 1 ELSE 0 END), 0) AS due
+    /**
+     * Active-word and due-word counts of every deck that has words, by deck id, in one query.
+     *
+     * @param dayEnd the end of the current study day, see {@link #findDue}
+     */
+    public Map<Long, DeckWordCounts> countByDeck(LocalDateTime now, LocalDateTime dayEnd) throws SQLException {
+        String sql = "SELECT deck_id, COUNT(*) AS total, COALESCE(SUM(CASE WHEN " + DUE + """
+                THEN 1 ELSE 0 END), 0) AS due
             FROM words
             WHERE archived = 0
             GROUP BY deck_id
             """;
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, DateTimeUtil.toDatabase(now));
+            statement.setString(1, DateTimeUtil.toDatabase(dayEnd));
+            statement.setString(2, DateTimeUtil.toDatabase(now));
             try (ResultSet rs = statement.executeQuery()) {
                 Map<Long, DeckWordCounts> counts = new HashMap<>();
                 while (rs.next()) {
@@ -267,17 +346,20 @@ public class WordRepository {
     public record DeckWordCounts(int total, int due) {
     }
 
-    private int count(String sql, long deckId, LocalDateTime now) throws SQLException {
+    private int count(String sql, long deckId) throws SQLException {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
-            if (now != null) {
-                statement.setString(2, DateTimeUtil.toDatabase(now));
-            }
             try (ResultSet rs = statement.executeQuery()) {
                 return rs.next() ? rs.getInt(1) : 0;
             }
         }
+    }
+
+    private static void bindWeakThresholds(PreparedStatement statement, int firstIndex) throws SQLException {
+        statement.setInt(firstIndex, WordCard.RECENT_REVIEWS);
+        statement.setDouble(firstIndex + 1, WordCard.WEAK_DIFFICULTY);
+        statement.setDouble(firstIndex + 2, WordCard.MASTERED_STABILITY_DAYS);
     }
 
     private void bindWord(PreparedStatement statement, WordCard word) throws SQLException {
@@ -298,6 +380,10 @@ public class WordRepository {
         statement.setInt(15, word.getConsecutiveCorrect());
         statement.setInt(16, word.getLapses());
         statement.setInt(17, word.isArchived() ? 1 : 0);
+        statement.setString(18, word.getState().name());
+        statement.setDouble(19, word.getStability());
+        statement.setDouble(20, word.getDifficulty());
+        statement.setInt(21, word.getLearningStep());
     }
 
     private List<WordCard> mapList(ResultSet rs) throws SQLException {
@@ -328,7 +414,28 @@ public class WordRepository {
         word.setConsecutiveCorrect(rs.getInt("consecutive_correct"));
         word.setLapses(rs.getInt("lapses"));
         word.setArchived(rs.getInt("archived") == 1);
+        word.setStability(rs.getDouble("stability"));
+        word.setDifficulty(rs.getDouble("difficulty"));
+        word.setLearningStep(rs.getInt("learning_step"));
+        CardState state = cardState(rs.getString("card_state"));
+        if (state == null) {
+            word.estimateStateFromLegacySchedule();
+        } else {
+            word.setState(state);
+        }
         return word;
+    }
+
+    /** The stored state, or null when there is none yet (or one this version does not know). */
+    private static CardState cardState(String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return CardState.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private String normalized(String value) {

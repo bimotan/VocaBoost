@@ -59,7 +59,8 @@ class ConnectionPoolTest {
             wordRepository.findAll(deckId);
         }
         for (int i = 0; i < 20; i++) {
-            databaseManager.inTransaction(() -> wordRepository.countDue(deckId, LocalDateTime.now()));
+            databaseManager.inTransaction(() -> wordRepository.countDue(deckId, LocalDateTime.now(),
+                LocalDateTime.now().plusDays(1)));
         }
 
         assertEquals(opened, databaseManager.connectionsOpened());

@@ -11,6 +11,10 @@ import java.util.List;
  * {@code DateTimeUtil}); goal dates are ISO-8601 dates. The entry records also read version 1
  * files, which held only the text fields of each word, wrote every value as a string and keyed
  * review logs by {@code wordEnglish}: absent fields read as {@code null}.
+ *
+ * <p>Words also carry their FSRS state ({@code cardState}, {@code stability}, {@code difficulty},
+ * {@code learningStep}) next to the SM-2 fields. Backups written before FSRS lack it; restoring
+ * them derives it like the schema upgrade does. Older versions of the app ignore the extra fields.
  */
 record BackupFile(
     String format,
@@ -44,7 +48,11 @@ record BackupFile(
         Integer repetitions,
         Integer consecutiveCorrect,
         Integer lapses,
-        Boolean archived
+        Boolean archived,
+        String cardState,
+        Double stability,
+        Double difficulty,
+        Integer learningStep
     ) {
     }
 

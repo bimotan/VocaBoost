@@ -22,6 +22,7 @@ import javafx.scene.control.Labeled;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
+import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextInputControl;
@@ -366,6 +367,19 @@ abstract class MainWindowUiTest {
 
     int rowCount(String tableId) {
         return Fx.call(() -> table(tableId).getItems().size());
+    }
+
+    /** The text in column {@code column} of the row whose first column shows {@code firstColumn}. */
+    String cell(String tableId, String firstColumn, int column) {
+        return Fx.call(() -> {
+            TableView<Object> table = table(tableId);
+            TableColumn<Object, ?> key = table.getColumns().get(0);
+            Object row = table.getItems().stream()
+                .filter(item -> firstColumn.equals(String.valueOf(key.getCellData(item))))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No row '" + firstColumn + "' in #" + tableId));
+            return String.valueOf(table.getColumns().get(column).getCellData(row));
+        });
     }
 
     record ChartPoint(String x, double y) {

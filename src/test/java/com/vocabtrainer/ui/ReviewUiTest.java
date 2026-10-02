@@ -1,6 +1,7 @@
 package com.vocabtrainer.ui;
 
 import com.vocabtrainer.app.AppServices;
+import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
@@ -35,9 +36,7 @@ class ReviewUiTest extends MainWindowUiTest {
 
         WordCard word = questionWord();
         String answer = correctAnswer(word);
-        // The easiness factor is formatted in the default locale, so only the rest is pinned.
-        assertTrue(text("reviewMetaLabel").startsWith("英译中 | Streak 0 | Interval 0 days | EF "), text("reviewMetaLabel"));
-        assertTrue(text("reviewMetaLabel").endsWith(" | Lapses 0"), text("reviewMetaLabel"));
+        assertEquals("英译中 | New | Lapses 0", text("reviewMetaLabel"));
         type("answerField", answer);
         click("submitAnswerButton");
 
@@ -81,7 +80,7 @@ class ReviewUiTest extends MainWindowUiTest {
     }
 
     @Test
-    void pressingEnterSubmitsAndAWrongAnswerRatedAgainIsALapse() throws Exception {
+    void pressingEnterSubmitsAndAWrongAnswerRatedAgainRestartsTheLearningSteps() throws Exception {
         selectTab("reviewTab");
         WordCard word = questionWord();
         type("answerField", "完全错误");
@@ -96,7 +95,12 @@ class ReviewUiTest extends MainWindowUiTest {
         assertEquals(1, logs.size());
         assertEquals(ReviewRating.AGAIN, logs.get(0).getRating());
         assertEquals("完全错误", logs.get(0).getUserAnswer());
-        assertEquals(1, services.wordRepository().findById(word.getId()).orElseThrow().getLapses());
+        WordCard saved = services.wordRepository().findById(word.getId()).orElseThrow();
+        // A new word that is not known yet is learning, not a lapse; it is asked again in a minute.
+        assertEquals(CardState.LEARNING, saved.getState());
+        assertEquals(0, saved.getLearningStep());
+        assertEquals(0, saved.getLapses());
+        assertEquals(saved.getLastReviewedAt().plusMinutes(1), saved.getNextReviewAt());
         selectTab("dashboardTab");
         assertEquals("1 / 20", text("reviewedTodayLabel"));
         assertEquals("0%", text("accuracyTodayLabel"));

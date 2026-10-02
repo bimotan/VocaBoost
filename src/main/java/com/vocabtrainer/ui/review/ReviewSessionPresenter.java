@@ -1,5 +1,6 @@
 package com.vocabtrainer.ui.review;
 
+import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.DailyGoalProgress;
 import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewOutcome;
@@ -9,7 +10,9 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.service.AiService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ReviewAnswer;
+import com.vocabtrainer.service.ReviewScheduler;
 import com.vocabtrainer.service.ReviewService;
+import com.vocabtrainer.service.scheduling.IntervalPreview;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.DataChanges;
 import com.vocabtrainer.ui.Formats;
@@ -17,11 +20,19 @@ import com.vocabtrainer.ui.LatestRequest;
 import com.vocabtrainer.ui.TaskRunner;
 import com.vocabtrainer.util.ErrorMessages;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * The Review tab without JavaFX: which card is shown, what the user can do next and every text the
@@ -59,6 +70,7 @@ public final class ReviewSessionPresenter {
         void report(String title, Throwable error);
     }
 
+    private static final Logger LOGGER = Logger.getLogger(ReviewSessionPresenter.class.getName());
     static final String LOADING = "Loading...";
     static final int DEFAULT_SESSION_SIZE = 20;
     static final int MAX_CUSTOM_SESSION_SIZE = 500;
@@ -69,8 +81,10 @@ public final class ReviewSessionPresenter {
     private final TaskRunner tasks;
     private final DataChanges changes;
     private final FailureReporter failures;
+    private final Clock clock;
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
     private final LatestRequest explanations = new LatestRequest();
+    private final Map<ReviewRating, IntervalPreview> ratingPreviews = new EnumMap<>(ReviewRating.class);
 
     private long deckId;
     private ReviewMode mode = ReviewMode.EN_TO_ZH;
@@ -78,6 +92,8 @@ public final class ReviewSessionPresenter {
     private State state = State.IDLE;
     private WordCard card;
     private long cardNumber;
+    /** When the card on screen was shown; the response time runs from here to the submit. */
+    private LocalDateTime shownAt;
     private String answer = "";
     private String question = LOADING;
     private String details = "";
@@ -96,12 +112,19 @@ public final class ReviewSessionPresenter {
      */
     public ReviewSessionPresenter(ReviewService reviewService, GoalService goalService, Supplier<AiService> aiServices,
                                   TaskRunner tasks, DataChanges changes, FailureReporter failures) {
+        this(reviewService, goalService, aiServices, tasks, changes, failures, Clock.systemDefaultZone());
+    }
+
+    /** @param clock times how long the user takes to answer a card, and dates the card details */
+    public ReviewSessionPresenter(ReviewService reviewService, GoalService goalService, Supplier<AiService> aiServices,
+                                  TaskRunner tasks, DataChanges changes, FailureReporter failures, Clock clock) {
         this.reviewService = reviewService;
         this.goalService = goalService;
         this.aiServices = aiServices;
         this.tasks = tasks;
         this.changes = changes;
         this.failures = failures;
+        this.clock = clock;
     }
 
     /** Called after every change of the state or of a displayed text. */
@@ -153,13 +176,23 @@ public final class ReviewSessionPresenter {
         answer = text == null ? "" : text;
     }
 
-    /** Checks the typed answer, shows the correct one and asks the AI service for an explanation. */
+    /**
+     * Checks the typed answer, shows the correct one and the interval each rating would give, and
+     * asks the AI service for an explanation.
+     */
     public void submit() {
         if (state != State.AWAITING_ANSWER) {
             return;
         }
         WordCard answered = card;
-        ReviewAnswer checked = reviewService.submitAnswer(answered.getId(), answer, questionMode);
+        ReviewAnswer checked = reviewService.submitAnswer(answered.getId(), answer, questionMode, shownAt);
+        ratingPreviews.clear();
+        try {
+            ratingPreviews.putAll(reviewService.previewRatings(answered.getId()));
+        } catch (RuntimeException e) {
+            // Only the hints on the buttons are missing; rating still works.
+            LOGGER.log(Level.WARNING, "Cannot preview the intervals of " + answered.getEnglish(), e);
+        }
         String checkedText = "Correct answer: " + checked.correctAnswer()
             + System.lineSeparator() + "Your answer: " + checked.userAnswer()
             + System.lineSeparator() + "Answer similarity: " + Formats.percent(checked.similarity());
@@ -207,7 +240,8 @@ public final class ReviewSessionPresenter {
         try {
             loadNextCard();
             if (card != null) {
-                result = "Saved. XP +" + outcome.xpEarned() + Formats.unlockedSuffix(outcome.unlockedAchievements());
+                result = "Saved. XP +" + outcome.xpEarned() + Formats.unlockedSuffix(outcome.unlockedAchievements())
+                    + leechNotice(outcome);
             }
         } catch (RuntimeException e) {
             failure = e;
@@ -267,6 +301,15 @@ public final class ReviewSessionPresenter {
 
     public boolean canRate() {
         return state == State.ANSWERED || state == State.RATING_FAILED;
+    }
+
+    /**
+     * When {@code rating} would bring the answered card back, e.g. "10m" or "4d"; empty while no
+     * answer is checked.
+     */
+    public String ratingPreview(ReviewRating rating) {
+        IntervalPreview preview = canRate() || state == State.SAVING ? ratingPreviews.get(rating) : null;
+        return preview == null ? "" : Formats.interval(preview);
     }
 
     public boolean isComplete() {
@@ -335,6 +378,7 @@ public final class ReviewSessionPresenter {
         card = null;
         answer = "";
         result = "";
+        ratingPreviews.clear();
         cardNumber++;
         Optional<WordCard> next;
         try {
@@ -344,11 +388,12 @@ public final class ReviewSessionPresenter {
             throw e;
         }
         card = next.orElse(null);
+        shownAt = LocalDateTime.now(clock);
         questionMode = reviewService.currentQuestionMode();
         answerPrompt = questionMode.getPrompt();
         ReviewSessionSummary session = reviewService.sessionSummary();
         String target = session.sessionGoal() > 0 ? String.valueOf(session.sessionGoal()) : "All Due";
-        sessionProgress = "Session " + session.reviewedCount() + "/" + target
+        sessionProgress = "Session " + session.cardsReviewed() + "/" + target
             + " | Accuracy " + Formats.percent(session.accuracy())
             + " | XP " + session.xpEarned();
         if (card == null) {
@@ -357,21 +402,52 @@ public final class ReviewSessionPresenter {
         }
         state = State.AWAITING_ANSWER;
         question = questionMode == ReviewMode.ZH_TO_EN ? card.getChinese() : card.getEnglish();
-        details = questionMode.getLabel()
-            + " | Streak " + card.getConsecutiveCorrect()
-            + " | Interval " + card.getIntervalDays()
-            + " days | EF " + String.format("%.2f", card.getEasinessFactor())
-            + " | Lapses " + card.getLapses();
+        details = questionMode.getLabel() + " | " + cardDetails(card, shownAt);
+    }
+
+    /**
+     * The card's state and memory: "New", or e.g. "Review | Recall 87% | Stability 12.3d |
+     * Difficulty 5.3 | Lapses 1", with "Leech" for a leech.
+     */
+    static String cardDetails(WordCard card, LocalDateTime now) {
+        StringBuilder text = new StringBuilder(stateName(card.getState()));
+        OptionalDouble recall = ReviewScheduler.retrievability(card, now);
+        if (recall.isPresent()) {
+            text.append(" | Recall ").append(Formats.percent(recall.getAsDouble()))
+                .append(" | Stability ").append(String.format(Locale.ROOT, "%.1fd", card.getStability()))
+                .append(" | Difficulty ").append(String.format(Locale.ROOT, "%.1f", card.getDifficulty()));
+        }
+        text.append(" | Lapses ").append(card.getLapses());
+        if (card.isLeech()) {
+            text.append(" | Leech");
+        }
+        return text.toString();
+    }
+
+    private static String stateName(CardState state) {
+        return switch (state) {
+            case NEW -> "New";
+            case LEARNING -> "Learning";
+            case REVIEW -> "Review";
+            case RELEARNING -> "Relearning";
+        };
+    }
+
+    private static String leechNotice(ReviewOutcome outcome) {
+        return outcome.becameLeech()
+            ? System.lineSeparator() + "\"" + outcome.word().getEnglish() + "\" lapsed " + outcome.word().getLapses()
+                + " times and is now tagged as a leech: try a mnemonic, an example of your own, or edit the card."
+            : "";
     }
 
     private void showCompletion(ReviewSessionSummary session) {
         DailyGoalProgress progress = goalService.getTodayProgress(deckId);
         state = State.COMPLETE;
         question = "Review complete";
-        boolean targetReached = session.sessionGoal() > 0 && session.reviewedCount() >= session.sessionGoal();
+        boolean targetReached = session.sessionGoal() > 0 && session.cardsReviewed() >= session.sessionGoal();
         details = targetReached ? "Session target reached." : "No due words right now.";
         completionTitle = "Session Complete";
-        completionMetrics = "Completed: " + session.reviewedCount()
+        completionMetrics = "Completed: " + session.cardsReviewed()
             + (session.sessionGoal() > 0 ? "/" + session.sessionGoal() : " / All Due")
             + " | Accuracy: " + Formats.percent(session.accuracy())
             + " | XP: " + session.xpEarned()

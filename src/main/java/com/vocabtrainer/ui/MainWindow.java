@@ -12,7 +12,6 @@ import javafx.scene.control.TabPane;
 import javafx.scene.layout.BorderPane;
 
 import java.nio.file.Path;
-import java.time.Clock;
 
 /**
  * The main window: the deck header above one tab per area. Each tab is its own view class; this
@@ -42,14 +41,15 @@ public class MainWindow {
         DashboardView dashboard = new DashboardView(context, services.statsService(), services.goalService(),
             services.achievementService(), databasePath);
         DecksView decksView = new DecksView(context, services.deckService(), services.statsService());
-        ReviewView review = new ReviewView(context, services.reviewService(), services.goalService(), configured);
+        ReviewView review = new ReviewView(context, services.reviewService(), services.goalService(), configured,
+            services.clock());
         AddImportView addImport = new AddImportView(context, services.wordRepository(), services.validationService(),
             services.goalService(), services.achievementService(), services.importExportService(),
             services.settingsService(), configured);
         StatisticsView statistics = new StatisticsView(context, services.statsService(), services.goalService(),
             services.backupService(), databasePath);
         WordListView wordList = new WordListView(context, services.wordRepository(), services.validationService(),
-            Clock.systemDefaultZone());
+            services.clock(), services.reviewScheduler().studyDay());
 
         TabPane tabs = new TabPane();
         tabs.setId("mainTabs");

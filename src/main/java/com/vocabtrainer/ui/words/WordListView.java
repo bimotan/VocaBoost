@@ -2,7 +2,9 @@ package com.vocabtrainer.ui.words;
 
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.WordRepository;
+import com.vocabtrainer.service.ReviewScheduler;
 import com.vocabtrainer.service.WordValidationService;
+import com.vocabtrainer.service.scheduling.StudyDay;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.Formats;
 import com.vocabtrainer.ui.LazyRefresh;
@@ -29,12 +31,14 @@ import java.sql.SQLException;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.OptionalDouble;
 
 /** The Word List tab: search and filter the current deck's words, edit or delete one. */
 public final class WordListView {
     private final ViewContext context;
     private final WordRepository wordRepository;
     private final Clock clock;
+    private final StudyDay studyDay;
     private final WordEditDialog editDialog;
     private final ObservableList<WordCard> wordItems = FXCollections.observableArrayList();
     private final TableView<WordCard> wordTable = new TableView<>(wordItems);
@@ -45,12 +49,13 @@ public final class WordListView {
     private final Tab tab;
     private final LazyRefresh lazy;
 
-    /** {@code clock} decides which words are due and how strong their memory is. */
+    /** {@code clock} and {@code studyDay} decide which words are due today and how strong their memory is. */
     public WordListView(ViewContext context, WordRepository wordRepository, WordValidationService validationService,
-                        Clock clock) {
+                        Clock clock, StudyDay studyDay) {
         this.context = context;
         this.wordRepository = wordRepository;
         this.clock = clock;
+        this.studyDay = studyDay;
         this.editDialog = new WordEditDialog(context, wordRepository, validationService);
         this.tab = Widgets.tab("wordListTab", "Word List", createContent());
         this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh failed", false);
@@ -112,13 +117,18 @@ public final class WordListView {
         TableColumn<WordCard, String> nextCol = new TableColumn<>("Next review");
         nextCol.setCellValueFactory(data -> new SimpleStringProperty(DateTimeUtil.toDisplay(data.getValue().getNextReviewAt())));
         TableColumn<WordCard, String> intervalCol = new TableColumn<>("Interval");
-        intervalCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getIntervalDays() + " days"));
+        intervalCol.setCellValueFactory(data -> new SimpleStringProperty(Formats.cardInterval(data.getValue())));
+        // The chance of recalling the word now (FSRS retrievability); "New" before its first review.
         TableColumn<WordCard, String> strengthCol = new TableColumn<>("Memory");
-        strengthCol.setCellValueFactory(data -> new SimpleStringProperty(
-            Formats.percent(data.getValue().calculateMemoryStrength(LocalDateTime.now(clock)))));
+        strengthCol.setCellValueFactory(data -> {
+            OptionalDouble recall = ReviewScheduler.retrievability(data.getValue(), LocalDateTime.now(clock));
+            return new SimpleStringProperty(recall.isPresent() ? Formats.percent(recall.getAsDouble()) : "New");
+        });
         TableColumn<WordCard, String> statusCol = new TableColumn<>("Status");
-        statusCol.setCellValueFactory(data -> new SimpleStringProperty(
-            WordListFilter.statusOf(data.getValue(), LocalDateTime.now(clock))));
+        statusCol.setCellValueFactory(data -> {
+            LocalDateTime now = LocalDateTime.now(clock);
+            return new SimpleStringProperty(WordListFilter.statusOf(data.getValue(), now, studyDay.end(now)));
+        });
         wordTable.getColumns().addAll(List.of(englishCol, chineseCol, nextCol, intervalCol, strengthCol, statusCol));
 
         VBox content = new VBox(12, controls, wordTable);
@@ -133,7 +143,8 @@ public final class WordListView {
             WordListFilter filter = new WordListFilter(wordStatusFilter.getValue(), tagFilterField.getText(),
                 posFilterField.getText());
             LocalDateTime now = LocalDateTime.now(clock);
-            wordItems.setAll(words.stream().filter(word -> filter.matches(word, now)).toList());
+            LocalDateTime dayEnd = studyDay.end(now);
+            wordItems.setAll(words.stream().filter(word -> filter.matches(word, now, dayEnd)).toList());
         } catch (SQLException e) {
             context.errors().reportFailure("Refresh failed", e);
         }

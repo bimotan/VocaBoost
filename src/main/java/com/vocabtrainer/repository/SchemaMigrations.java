@@ -23,7 +23,7 @@ import java.util.logging.Logger;
  */
 final class SchemaMigrations {
     /** The version a fully migrated database has: the last step's. */
-    static final int CURRENT_VERSION = 4;
+    static final int CURRENT_VERSION = 5;
 
     private static final Logger LOGGER = Logger.getLogger(SchemaMigrations.class.getName());
 
@@ -67,7 +67,8 @@ final class SchemaMigrations {
         new Step(1, "schema of the unversioned releases", false, this::baseline),
         new Step(2, "deck names unique among active decks only", true, this::uniqueActiveDeckNames),
         new Step(3, "review logs unique per word, time and rating", false, this::uniqueReviewLogs),
-        new Step(4, "indexes for statistics", false, this::statisticsIndexes)
+        new Step(4, "indexes for statistics", false, this::statisticsIndexes),
+        new Step(5, "FSRS card state on words", false, this::fsrsCardState)
     );
 
     SchemaMigrations(Connection connection) {
@@ -330,6 +331,21 @@ final class SchemaMigrations {
      */
     private void statisticsIndexes() throws SQLException {
         execute("CREATE INDEX IF NOT EXISTS idx_review_logs_time ON review_logs(reviewed_at)");
+    }
+
+    /**
+     * Version 5: words get the FSRS card state (state, stability, difficulty, learning step); the SM-2
+     * columns stay and are still written, so older versions keep reading the table. Existing rows get
+     * no state ({@code card_state} NULL): the app derives it at startup, by replaying each card's
+     * review logs or from its SM-2 schedule, and a row an older version inserts later is derived the
+     * same way. The partial index keeps finding such rows cheap once there are none.
+     */
+    private void fsrsCardState() throws SQLException {
+        addColumnIfMissing("words", "card_state", "TEXT");
+        addColumnIfMissing("words", "stability", "REAL NOT NULL DEFAULT 0");
+        addColumnIfMissing("words", "difficulty", "REAL NOT NULL DEFAULT 0");
+        addColumnIfMissing("words", "learning_step", "INTEGER NOT NULL DEFAULT 0");
+        execute("CREATE INDEX IF NOT EXISTS idx_words_without_card_state ON words(id) WHERE card_state IS NULL");
     }
 
     /**

@@ -45,8 +45,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class QueryPlanTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-05-28T09:00:00Z"), ZoneId.of("UTC"));
     private static final LocalDateTime NOW = LocalDateTime.now(CLOCK);
-    /** A full scan of a table that grows with use; SEARCH lines use an index. */
-    private static final Pattern FULL_SCAN = Pattern.compile("^SCAN (review_logs|l|daily_goals|words|w)\\b");
+    /**
+     * A full scan of a table that grows with use; SEARCH lines use an index. Scanning the partial
+     * index of words without a card state is fine: it is empty once the startup backfill ran.
+     */
+    private static final Pattern FULL_SCAN = Pattern.compile(
+        "^SCAN (review_logs|l|daily_goals|words|w)\\b(?!.*idx_words_without_card_state)");
 
     @TempDir
     Path tempDir;
@@ -82,7 +86,7 @@ class QueryPlanTest {
         for (Deck each : decks.activeDecks()) {
             stats.latestReviewAt(each.getId());
             wordRepository.countAll(each.getId());
-            wordRepository.countDue(each.getId(), NOW);
+            wordRepository.countDue(each.getId(), NOW, NOW.plusDays(1));
         }
         // Statistics tab and report.
         stats.dailyReviewStats(deck.getId(), 7);
@@ -95,8 +99,19 @@ class QueryPlanTest {
         ReviewService review = new ReviewService(wordRepository, logRepository, new SimilarityService(),
             new ReviewScheduler(), goals, achievements, CLOCK);
         WordCard next = review.nextWord(deck.getId(), ReviewMode.EN_TO_ZH).orElseThrow();
-        review.submitAnswer(next.getId(), "释义", ReviewMode.EN_TO_ZH);
+        review.submitAnswer(next.getId(), "释义", ReviewMode.EN_TO_ZH, NOW.minusSeconds(5));
+        review.previewRatings(next.getId());
         review.rateCurrent(next.getId(), ReviewRating.GOOD);
+        wordRepository.findLearningDueBy(deck.getId(), NOW.plusMinutes(20), 1);
+        review.nextWord(deck.getId(), ReviewMode.WEAK_WORDS);
+        wordRepository.countMastered(deck.getId());
+        // Startup: deriving the card state of words stored without one, as an older version leaves them.
+        try (Connection connection = databaseManager.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.executeUpdate("UPDATE words SET card_state = NULL WHERE id IN (" + words.get(1).getId() + ", "
+                + words.get(2).getId() + ")");
+        }
+        new CardStateBackfill(wordRepository, logRepository, new ReviewScheduler()).run();
         // Restoring the same backup again, and deleting a word with its history.
         backup.importJsonBackup(json, deck.getId());
         wordRepository.deleteById(words.get(0).getId());
