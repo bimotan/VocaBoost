@@ -80,6 +80,20 @@ Run tests:
 mvn test
 ```
 
+`mvn test` skips the JavaFX UI tests (JUnit tag `ui`) because they open real windows. Run them too with the `ui-tests` profile:
+
+```powershell
+mvn test -Pui-tests
+```
+
+On Linux without a display, use a virtual one:
+
+```bash
+xvfb-run -a mvn -B test -Pui-tests
+```
+
+Add `-Dgroups=ui` to run only the UI tests. They save a PNG of the window per tab to `target/ui-snapshots/` for manual inspection.
+
 ## Dictionary Lookup
 
 Lookup uses this order:
@@ -207,7 +221,7 @@ Installer mode may require WiX Toolset on Windows. If WiX is missing, use the de
 
 ```text
 src/main/java/com/vocabtrainer
-|- app          JavaFX application entry point
+|- app          JavaFX application entry point and service wiring (AppServices)
 |- domain       WordCard, Deck, ReviewLog, goals, achievements, dictionary and stats records
 |- repository   SQLite setup and CRUD
 |- service      review scheduling, goals, achievements, validation, dictionary, import, stats, AI interface
@@ -252,6 +266,7 @@ Current tests cover:
 - `StatsService`
 - `BackupService`
 - SQLite repository CRUD and new persistence tables
+- `MainWindow` UI characterization tests (tag `ui`, `src/test/java/com/vocabtrainer/ui`): startup on a fresh database, the review loop including a rating that fails to save and is retried, deck create/switch/rename/archive/restore, adding words, Word List filters, statistics, JSON backup export and restore, CSV import and dictionary settings. Each test opens the real window on its own temporary database, wired by `AppServices` like the app, with scripted dialogs and no network access.
 
 Verified command:
 
@@ -263,4 +278,4 @@ Latest local result: 46 tests, 0 failures.
 
 ## GitHub Actions
 
-The repository includes `.github/workflows/maven-test.yml`, which runs `mvn test` on pushes and pull requests to `main`.
+The repository includes `.github/workflows/maven-test.yml`, which runs on pushes and pull requests to `main`: `mvn test` on Windows, and `xvfb-run -a mvn -B test -Pui-tests` (all tests including the UI tests) on Ubuntu, which uploads the UI snapshots as an artifact.
