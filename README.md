@@ -47,7 +47,7 @@ The app creates a local SQLite database automatically:
 %USERPROFILE%\.vocab-trainer\vocab.db
 ```
 
-Existing databases are migrated with `CREATE TABLE IF NOT EXISTS`; the app does not delete your saved words.
+Databases from earlier versions are upgraded in place at startup by numbered schema steps (tracked in `PRAGMA user_version`), each applied in one transaction; the app does not delete your saved words. The database uses write-ahead logging, so while the app runs you will also see `vocab.db-wal` and `vocab.db-shm` next to it; copy the database only while the app is closed.
 
 Diagnostic logs (rotating, 5 x 1 MB) are written next to the database, in `%USERPROFILE%\.vocab-trainer\logs\vocaboost-0.log`. Use **Statistics -> Open log folder** to find them when reporting a problem.
 

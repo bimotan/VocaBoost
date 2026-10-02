@@ -78,7 +78,7 @@ final class SchemaMigrations {
     void migrate() throws SQLException {
         int version = userVersion();
         if (version > CURRENT_VERSION) {
-            // Written by a newer release: its schema is a superset this version can still use.
+            // Written by a newer release: leave its schema alone rather than guess how to change it.
             LOGGER.warning("Database schema version " + version + " is newer than this app's "
                 + CURRENT_VERSION + "; not migrating");
             return;
