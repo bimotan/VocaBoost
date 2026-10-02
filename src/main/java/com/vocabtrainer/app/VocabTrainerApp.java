@@ -23,6 +23,7 @@ import com.vocabtrainer.service.ReviewScheduler;
 import com.vocabtrainer.service.ReviewService;
 import com.vocabtrainer.service.SettingsService;
 import com.vocabtrainer.service.SimilarityService;
+import com.vocabtrainer.service.StarterImportService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.ui.ErrorDialogs;
@@ -54,9 +55,9 @@ public class VocabTrainerApp extends Application {
             DictionaryCacheRepository dictionaryCacheRepository = new DictionaryCacheRepository(databaseManager);
             SettingsRepository settingsRepository = new SettingsRepository(databaseManager);
             AiCacheRepository aiCacheRepository = new AiCacheRepository(databaseManager);
-            DeckService deckService = new DeckService(deckRepository);
             SettingsService settingsService = new SettingsService(settingsRepository);
-            Deck defaultDeck = deckService.ensureDefaultDeck();
+            DeckService deckService = new DeckService(deckRepository, settingsService);
+            Deck startupDeck = deckService.resolveStartupDeck();
 
             SimilarityService similarityService = new SimilarityService();
             ReviewScheduler reviewScheduler = new ReviewScheduler();
@@ -64,9 +65,9 @@ public class VocabTrainerApp extends Application {
             AchievementService achievementService = new AchievementService(achievementRepository, goalService);
             WordValidationService validationService = new WordValidationService();
             ImportExportService importExportService = new ImportExportService(wordRepository, validationService);
-            if (wordRepository.countAll(defaultDeck.getId()) == 0) {
-                importExportService.importBundledGreStarter(defaultDeck.getId());
-            }
+            StarterImportService starterImportService = new StarterImportService(
+                importExportService, wordRepository, reviewLogRepository, goalRepository, settingsService);
+            starterImportService.importOnce(startupDeck.getId());
             ReviewService reviewService = new ReviewService(
                 wordRepository,
                 reviewLogRepository,
@@ -81,7 +82,7 @@ public class VocabTrainerApp extends Application {
             AiService aiService = AiServiceFactory.create(aiCacheRepository, settingsService);
 
             MainWindow mainWindow = new MainWindow(
-                defaultDeck,
+                startupDeck,
                 deckService,
                 wordRepository,
                 reviewService,

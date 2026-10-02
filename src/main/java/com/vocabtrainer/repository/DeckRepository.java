@@ -22,12 +22,18 @@ public class DeckRepository {
         this.databaseManager = databaseManager;
     }
 
+    /**
+     * Returns the deck named {@link #DEFAULT_DECK_NAME}, restoring it if it was archived. A new
+     * row is inserted only when no deck has that name: decks.name is unique across archived
+     * rows too, so inserting next to an archived deck of the same name would fail.
+     */
     public Deck ensureDefaultDeck() throws SQLException {
-        Optional<Deck> existing = findByName(DEFAULT_DECK_NAME);
-        if (existing.isPresent()) {
-            return existing.get();
+        Optional<Deck> existing = findAnyByName(DEFAULT_DECK_NAME);
+        if (existing.isEmpty()) {
+            return create(DEFAULT_DECK_NAME);
         }
-        return create(DEFAULT_DECK_NAME);
+        Deck deck = existing.get();
+        return deck.isArchived() ? restore(deck.getId()) : deck;
     }
 
     public Deck create(String name) throws SQLException {
@@ -48,7 +54,15 @@ public class DeckRepository {
     }
 
     public Optional<Deck> findByName(String name) throws SQLException {
-        String sql = "SELECT id, name, created_at, archived FROM decks WHERE name = ? AND archived = 0";
+        return findOneByName("SELECT id, name, created_at, archived FROM decks WHERE name = ? AND archived = 0", name);
+    }
+
+    /** Like {@link #findByName(String)}, but also matches archived decks. */
+    public Optional<Deck> findAnyByName(String name) throws SQLException {
+        return findOneByName("SELECT id, name, created_at, archived FROM decks WHERE name = ?", name);
+    }
+
+    private Optional<Deck> findOneByName(String sql, String name) throws SQLException {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, name);

@@ -42,6 +42,15 @@ public class ReviewLogRepository {
         return log;
     }
 
+    /** Every review log in every deck. */
+    public int countAll() throws SQLException {
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement("SELECT COUNT(*) FROM review_logs");
+             ResultSet rs = statement.executeQuery()) {
+            return rs.next() ? rs.getInt(1) : 0;
+        }
+    }
+
     public int countSince(LocalDateTime since) throws SQLException {
         return scalarInt("SELECT COUNT(*) FROM review_logs WHERE reviewed_at >= ?", since);
     }

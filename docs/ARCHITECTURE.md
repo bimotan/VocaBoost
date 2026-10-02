@@ -12,13 +12,13 @@ Business logic stays out of JavaFX controls and does not use `Scanner`, `System.
 
 ## SQLite Schema
 
-- `decks`: active/archived vocabulary collections; archived decks can be restored unless a name conflict exists.
+- `decks`: active/archived vocabulary collections; archived decks can be restored unless a name conflict exists. At least one deck always stays active. Startup opens the last used deck, falling back to the oldest active deck, and never looks a deck up by name, so the default deck can be renamed or archived.
 - `words`: deck-scoped cards, scheduling state, metadata, tags, and archive flag.
 - `review_logs`: typed answers, correct answers, similarity, self-rating, and response time.
 - `daily_goals`: deck-scoped daily review/new-word/session goals, XP, and completion state.
 - `achievements`: deck-scoped unlocked badge records.
 - `dictionary_cache`: cached lookup payloads by English word.
-- `settings`: local configuration such as saved ECDICT CSV path and load metadata.
+- `settings`: local configuration such as saved ECDICT CSV path and load metadata, the last used deck (`ui.lastDeckId`), and whether the bundled starter words were already imported (`starter.imported`).
 - `ai_cache`: cached AI explanations keyed by word/feature.
 
 Schema changes are applied with `CREATE TABLE IF NOT EXISTS` and compatibility migrations. Existing local databases are not deleted.

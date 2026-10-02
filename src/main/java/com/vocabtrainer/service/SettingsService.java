@@ -13,6 +13,8 @@ public class SettingsService {
     public static final String AI_BASE_URL_KEY = "ai.baseUrl";
     public static final String AI_API_KEY_KEY = "ai.apiKey";
     public static final String AI_MODEL_KEY = "ai.model";
+    public static final String LAST_DECK_ID_KEY = "ui.lastDeckId";
+    public static final String STARTER_IMPORTED_KEY = "starter.imported";
 
     private final SettingsRepository settingsRepository;
 
@@ -72,6 +74,32 @@ public class SettingsService {
         delete(AI_BASE_URL_KEY);
         delete(AI_API_KEY_KEY);
         delete(AI_MODEL_KEY);
+    }
+
+    /** The deck the user last worked in; empty if never saved or not a valid id. */
+    public Optional<Long> getLastDeckId() {
+        Optional<String> value = get(LAST_DECK_ID_KEY);
+        if (value.isEmpty()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Long.parseLong(value.get().trim()));
+        } catch (NumberFormatException e) {
+            return Optional.empty();
+        }
+    }
+
+    public void saveLastDeckId(long deckId) {
+        save(LAST_DECK_ID_KEY, String.valueOf(deckId));
+    }
+
+    /** Whether this database has already decided about the bundled starter words (imported or skipped). */
+    public boolean isStarterImported() {
+        return get(STARTER_IMPORTED_KEY).map(value -> value.trim().equalsIgnoreCase("true")).orElse(false);
+    }
+
+    public void markStarterImported() {
+        save(STARTER_IMPORTED_KEY, "true");
     }
 
     public Optional<String> get(String key) {

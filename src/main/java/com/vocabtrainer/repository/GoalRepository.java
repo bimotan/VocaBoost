@@ -120,6 +120,11 @@ public class GoalRepository {
         return scalarInt("SELECT reviewed_count FROM daily_goals WHERE deck_id = ? AND goal_date = ?", deckId, date) > 0;
     }
 
+    /** Daily goal rows in every deck; any row means the app has been used with this database before. */
+    public int countAll() throws SQLException {
+        return scalarInt("SELECT COUNT(*) FROM daily_goals", null);
+    }
+
     public int totalReviews() throws SQLException {
         return scalarInt("SELECT COALESCE(SUM(reviewed_count), 0) FROM daily_goals", null);
     }

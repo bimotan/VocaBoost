@@ -356,12 +356,22 @@ public class MainWindow {
     }
 
     private void onDeckChanged() {
+        rememberCurrentDeck();
         updateHeaderSubtitle();
         currentReviewWord = null;
         reviewService.resetSession(currentDeck.getId());
         refreshAddDeckSelector();
         refreshAll();
         loadNextReviewWord();
+    }
+
+    /** Saves the current deck so the next launch opens it; failing to save must not block the switch. */
+    private void rememberCurrentDeck() {
+        try {
+            settingsService.saveLastDeckId(currentDeck.getId());
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Cannot remember the last used deck", e);
+        }
     }
 
     private Tab createDashboardTab() {

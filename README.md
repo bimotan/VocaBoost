@@ -19,7 +19,7 @@ It is suitable as a learning analytics prototype because each review produces st
 - Manual add validation plus configurable dictionary lookup with ECDICT path setup, online lookup, cache, and offline Mock fallback.
 - Optional OpenAI-compatible AI explanations with `ai_cache` and Mock fallback; no key is required for offline use.
 - Legacy txt import and GRE CSV starter-deck import.
-- Empty database bootstrap: first launch imports the bundled GRE starter sample so Word List and Review are immediately testable.
+- Empty database bootstrap: the first launch of a new database imports the bundled GRE starter sample once, so Word List and Review are immediately testable. Emptying, renaming, or archiving that deck later does not bring the sample back, and the app reopens on the last deck you used.
 
 ## Screenshots
 

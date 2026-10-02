@@ -205,6 +205,15 @@ public class WordRepository {
         return count("SELECT COUNT(*) FROM words WHERE deck_id = ? AND archived = 0", deckId, null);
     }
 
+    /** Every word row in every deck, archived or not. */
+    public int countAllInDatabase() throws SQLException {
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement("SELECT COUNT(*) FROM words");
+             ResultSet rs = statement.executeQuery()) {
+            return rs.next() ? rs.getInt(1) : 0;
+        }
+    }
+
     public int countDue(long deckId, LocalDateTime now) throws SQLException {
         return count("SELECT COUNT(*) FROM words WHERE deck_id = ? AND archived = 0 AND next_review_at <= ?", deckId, now);
     }

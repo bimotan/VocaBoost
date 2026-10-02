@@ -3,6 +3,7 @@ package com.vocabtrainer.service;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
+import com.vocabtrainer.repository.SettingsRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -11,6 +12,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -23,7 +25,7 @@ class DeckServiceTest {
         DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("decks.db"));
         databaseManager.initialize();
         DeckRepository deckRepository = new DeckRepository(databaseManager);
-        DeckService deckService = new DeckService(deckRepository);
+        DeckService deckService = new DeckService(deckRepository, new SettingsService(new SettingsRepository(databaseManager)));
 
         Deck defaultDeck = deckService.ensureDefaultDeck();
         Deck greDeck = deckService.createDeck("GRE 高频");
@@ -51,11 +53,71 @@ class DeckServiceTest {
     void doesNotArchiveLastActiveDeckAndValidatesNames() throws Exception {
         DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("validation.db"));
         databaseManager.initialize();
-        DeckService deckService = new DeckService(new DeckRepository(databaseManager));
+        DeckService deckService = new DeckService(new DeckRepository(databaseManager),
+            new SettingsService(new SettingsRepository(databaseManager)));
 
         Deck defaultDeck = deckService.ensureDefaultDeck();
 
         assertThrows(IllegalArgumentException.class, () -> deckService.createDeck("   "));
         assertThrows(IllegalArgumentException.class, () -> deckService.archiveDeck(defaultDeck.getId()));
+    }
+
+    @Test
+    void keepsOneActiveDeckAfterTheDefaultDeckIsArchived() throws Exception {
+        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("last-active.db"));
+        databaseManager.initialize();
+        DeckService deckService = new DeckService(new DeckRepository(databaseManager),
+            new SettingsService(new SettingsRepository(databaseManager)));
+        Deck defaultDeck = deckService.ensureDefaultDeck();
+        Deck greDeck = deckService.createDeck("GRE");
+
+        assertEquals(greDeck.getId(), deckService.archiveDeck(defaultDeck.getId()).getId());
+
+        IllegalArgumentException lastActive = assertThrows(IllegalArgumentException.class,
+            () -> deckService.archiveDeck(greDeck.getId()));
+        assertTrue(lastActive.getMessage().contains("至少需要保留一个活动词库"), lastActive.getMessage());
+        assertNull(lastActive.getCause(), "shown to the user as a plain validation message");
+        assertThrows(IllegalArgumentException.class, () -> deckService.archiveDeck(defaultDeck.getId()));
+        assertEquals(List.of(greDeck.getId()), deckService.activeDecks().stream().map(Deck::getId).toList());
+    }
+
+    @Test
+    void ensureDefaultDeckRestoresArchivedDefaultDeckInsteadOfInsertingTheNameAgain() throws Exception {
+        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("archived-default.db"));
+        databaseManager.initialize();
+        DeckRepository deckRepository = new DeckRepository(databaseManager);
+        Deck defaultDeck = deckRepository.ensureDefaultDeck();
+        deckRepository.create("GRE");
+        deckRepository.archive(defaultDeck.getId());
+
+        Deck ensured = deckRepository.ensureDefaultDeck();
+
+        assertEquals(defaultDeck.getId(), ensured.getId());
+        assertFalse(ensured.isArchived());
+        assertEquals(2, deckRepository.findAllIncludingArchived().size());
+    }
+
+    @Test
+    void explainsNameConflictsWithArchivedDecks() throws Exception {
+        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("names.db"));
+        databaseManager.initialize();
+        DeckService deckService = new DeckService(new DeckRepository(databaseManager),
+            new SettingsService(new SettingsRepository(databaseManager)));
+        Deck defaultDeck = deckService.ensureDefaultDeck();
+        Deck greDeck = deckService.createDeck("GRE");
+        deckService.archiveDeck(greDeck.getId());
+
+        IllegalArgumentException create = assertThrows(IllegalArgumentException.class, () -> deckService.createDeck("GRE"));
+        assertTrue(create.getMessage().contains("已归档"), create.getMessage());
+        assertNull(create.getCause());
+        IllegalArgumentException rename = assertThrows(IllegalArgumentException.class,
+            () -> deckService.renameDeck(defaultDeck.getId(), "GRE"));
+        assertTrue(rename.getMessage().contains("已归档"), rename.getMessage());
+        IllegalArgumentException active = assertThrows(IllegalArgumentException.class,
+            () -> deckService.createDeck(DeckRepository.DEFAULT_DECK_NAME));
+        assertTrue(active.getMessage().contains("已有同名词库"), active.getMessage());
+
+        assertEquals(DeckRepository.DEFAULT_DECK_NAME,
+            deckService.renameDeck(defaultDeck.getId(), DeckRepository.DEFAULT_DECK_NAME).getName());
     }
 }

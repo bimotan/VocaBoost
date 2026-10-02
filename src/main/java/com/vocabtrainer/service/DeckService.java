@@ -4,15 +4,19 @@ import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.repository.DeckRepository;
 
 import java.sql.SQLException;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 public class DeckService {
     private static final int MAX_DECK_NAME_LENGTH = 60;
 
     private final DeckRepository deckRepository;
+    private final SettingsService settingsService;
 
-    public DeckService(DeckRepository deckRepository) {
+    public DeckService(DeckRepository deckRepository, SettingsService settingsService) {
         this.deckRepository = deckRepository;
+        this.settingsService = settingsService;
     }
 
     public Deck ensureDefaultDeck() {
@@ -23,11 +27,34 @@ public class DeckService {
         }
     }
 
+    /**
+     * The deck the app opens on: the last deck used if it is still active, otherwise the oldest
+     * active deck. If every deck is archived the newest one is restored; a default deck is created
+     * only when the database has no decks at all. Decks are never looked up by name here, so
+     * renaming or archiving the default deck cannot break startup.
+     */
+    public Deck resolveStartupDeck() {
+        try {
+            Optional<Long> lastDeckId = settingsService.getLastDeckId();
+            if (lastDeckId.isPresent()) {
+                Optional<Deck> lastDeck = deckRepository.findById(lastDeckId.get());
+                if (lastDeck.isPresent() && !lastDeck.get().isArchived()) {
+                    return lastDeck.get();
+                }
+            }
+            Deck deck = oldestActiveDeckOrRecover();
+            settingsService.saveLastDeckId(deck.getId());
+            return deck;
+        } catch (SQLException e) {
+            throw new IllegalStateException("无法打开词库", e);
+        }
+    }
+
     public List<Deck> activeDecks() {
         try {
             List<Deck> decks = deckRepository.findAllActive();
             if (decks.isEmpty()) {
-                decks = List.of(deckRepository.ensureDefaultDeck());
+                decks = List.of(oldestActiveDeckOrRecover());
             }
             return decks;
         } catch (SQLException e) {
@@ -46,6 +73,7 @@ public class DeckService {
     public Deck createDeck(String name) {
         String cleanName = validateName(name);
         try {
+            rejectNameInUse(cleanName, null);
             return deckRepository.create(cleanName);
         } catch (SQLException e) {
             throw new IllegalArgumentException("创建失败：词库名可能已存在", e);
@@ -55,21 +83,26 @@ public class DeckService {
     public Deck renameDeck(long id, String name) {
         String cleanName = validateName(name);
         try {
+            rejectNameInUse(cleanName, id);
             return deckRepository.rename(id, cleanName);
         } catch (SQLException e) {
             throw new IllegalArgumentException("重命名失败：词库名可能已存在", e);
         }
     }
 
+    /** Archives an active deck and returns the deck to switch to. The last active deck cannot be archived. */
     public Deck archiveDeck(long id) {
         try {
             List<Deck> decks = deckRepository.findAllActive();
+            if (decks.stream().noneMatch(deck -> deck.getId() == id)) {
+                throw new IllegalArgumentException("词库不存在或已归档");
+            }
             if (decks.size() <= 1) {
-                throw new IllegalArgumentException("至少需要保留一个活动词库");
+                throw new IllegalArgumentException("至少需要保留一个活动词库：请先新建或恢复另一个词库，再归档这个词库");
             }
             deckRepository.archive(id);
             List<Deck> remaining = deckRepository.findAllActive();
-            return remaining.isEmpty() ? deckRepository.ensureDefaultDeck() : remaining.get(0);
+            return remaining.isEmpty() ? oldestActiveDeckOrRecover() : remaining.get(0);
         } catch (SQLException e) {
             throw new IllegalStateException("归档词库失败", e);
         }
@@ -81,6 +114,36 @@ public class DeckService {
         } catch (SQLException e) {
             throw new IllegalArgumentException("恢复词库失败：" + e.getMessage(), e);
         }
+    }
+
+    /**
+     * The active deck with the lowest id. With no active deck, the newest archived deck is
+     * restored, and the default deck is created only in a database without any decks.
+     */
+    private Deck oldestActiveDeckOrRecover() throws SQLException {
+        Optional<Deck> oldestActive = deckRepository.findAllActive().stream()
+            .min(Comparator.comparingLong(Deck::getId));
+        if (oldestActive.isPresent()) {
+            return oldestActive.get();
+        }
+        Optional<Deck> newestArchived = deckRepository.findAllArchived().stream()
+            .max(Comparator.comparingLong(Deck::getId));
+        if (newestArchived.isPresent()) {
+            return deckRepository.restore(newestArchived.get().getId());
+        }
+        return deckRepository.ensureDefaultDeck();
+    }
+
+    /** Deck names are unique across archived decks too, so say which deck already uses the name. */
+    private void rejectNameInUse(String name, Long renamingId) throws SQLException {
+        Optional<Deck> existing = deckRepository.findAnyByName(name);
+        if (existing.isEmpty() || (renamingId != null && existing.get().getId() == renamingId)) {
+            return;
+        }
+        if (existing.get().isArchived()) {
+            throw new IllegalArgumentException("已归档的词库中有同名词库「" + name + "」：请在 Decks 页恢复它，或换一个名称");
+        }
+        throw new IllegalArgumentException("已有同名词库「" + name + "」，请换一个名称");
     }
 
     private String validateName(String name) {
