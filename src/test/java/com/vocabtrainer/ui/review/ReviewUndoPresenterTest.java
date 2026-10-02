@@ -4,6 +4,7 @@ import com.vocabtrainer.app.AppServices;
 import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.ReviewLog;
+import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.TestDatabases;
@@ -118,6 +119,32 @@ class ReviewUndoPresenterTest {
         assertFalse(presenter.canUndo());
         assertEquals("", presenter.undoDescription());
         assertEquals("Session 0/20 | Accuracy 0% | XP 0", presenter.sessionProgress());
+    }
+
+    @Test
+    void anUndoneCardIsAskedAgainTheWayItWasAskedInMixedAndClozeMode() throws SQLException {
+        for (ReviewMode mode : List.of(ReviewMode.MIXED, ReviewMode.CLOZE)) {
+            presenter.showDeck(deckId);
+            presenter.changeMode(mode);
+            List<String> asked = new ArrayList<>();
+            for (int count = 0; count < 6; count++) {
+                WordCard card = presenter.card().orElseThrow();
+                asked.add(card.getId() + " " + presenter.question() + " " + presenter.answerPrompt() + " "
+                    + presenter.hint());
+                answer(presenter.question().equals(card.getEnglish()) ? firstMeaning(card) : card.getEnglish());
+                presenter.rate(ReviewRating.GOOD);
+            }
+
+            for (int index = asked.size() - 1; index >= 0; index--) {
+                presenter.undo();
+                WordCard card = presenter.card().orElseThrow();
+                assertEquals(asked.get(index), card.getId() + " " + presenter.question() + " "
+                    + presenter.answerPrompt() + " " + presenter.hint(), mode + " card " + index);
+                assertEquals(State.ANSWERED, presenter.state());
+            }
+            assertTrue(services.reviewLogRepository().findByDeck(deckId).isEmpty(), mode.name());
+        }
+        assertTrue(failures.isEmpty(), failures.toString());
     }
 
     @Test

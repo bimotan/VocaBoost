@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
+import javafx.collections.ListChangeListener;
 import javafx.scene.control.TableView;
 import javafx.scene.input.KeyCode;
 import org.junit.jupiter.api.Tag;
@@ -175,6 +176,22 @@ class UndoAndSuspendUiTest extends MainWindowUiTest {
         assertFalse(services.wordRepository().findByEnglish(deckId, "lucid").orElseThrow().isSuspended());
         assertTrue(services.wordRepository().findByEnglish(deckId, "abate").orElseThrow().isSuspended());
         assertEquals("Due", cell("wordTable", "lucid", 5));
+    }
+
+    @Test
+    void suspendingEveryWordReselectsThemAllAtOnce() throws SQLException {
+        selectTab("wordListTab");
+        Fx.run(() -> table("wordTable").getSelectionModel().selectAll());
+        int[] changes = {0};
+        Fx.run(() -> this.<WordCard>table("wordTable").getSelectionModel().getSelectedItems()
+            .addListener((ListChangeListener<WordCard>) change -> changes[0]++));
+
+        click("suspendWordsButton");
+
+        assertEquals(STARTER_WORDS, services.wordRepository().countSuspended(currentDeck().getId()));
+        assertEquals(STARTER_WORDS, selectedEnglish().size(), "the selection stays");
+        // One row at a time would be one change per word: seconds with ten thousand selected words.
+        assertTrue(changes[0] <= 3, changes[0] + " selection changes");
     }
 
     @Test

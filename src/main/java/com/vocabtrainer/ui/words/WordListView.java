@@ -41,6 +41,7 @@ import javafx.util.Duration;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
@@ -198,15 +199,21 @@ public final class WordListView {
             wordItems.setAll(words.stream().filter(word -> filter.matches(word, now, dayEnd)).toList());
             // Keep the selected words selected, with their details as they are now (e.g. after an edit);
             // the one whose details were shown is selected last, so they still are.
+            // All at once: selecting thousands of rows one by one (after Ctrl+A) takes seconds.
             wordTable.getSelectionModel().clearSelection();
             int shownIndex = -1;
+            List<Integer> others = new ArrayList<>();
             for (int index = 0; index < wordItems.size(); index++) {
                 long id = wordItems.get(index).getId();
                 if (selected != null && id == selected.getId()) {
                     shownIndex = index;
                 } else if (selectedIds.contains(id)) {
-                    wordTable.getSelectionModel().select(index);
+                    others.add(index);
                 }
+            }
+            if (!others.isEmpty()) {
+                wordTable.getSelectionModel().selectIndices(others.get(0),
+                    others.subList(1, others.size()).stream().mapToInt(Integer::intValue).toArray());
             }
             if (shownIndex >= 0) {
                 wordTable.getSelectionModel().select(shownIndex);
@@ -313,7 +320,7 @@ public final class WordListView {
             ? (one ? "It has no review history yet." : "They have no review history yet.")
             : (one ? "Its review history" : "Their review history") + " (" + reviews
                 + (reviews == 1 ? " review" : " reviews") + ") will be deleted with "
-                + (one ? "it" : "them") + ", and leaves the daily counts and statistics.";
+                + (one ? "it" : "them") + ", and those reviews no longer count in the daily numbers and statistics.";
         String text = history + System.lineSeparator() + System.lineSeparator()
             + "Deleting cannot be undone: only restoring a JSON backup made before brings "
             + (one ? "it" : "them") + " back.";
