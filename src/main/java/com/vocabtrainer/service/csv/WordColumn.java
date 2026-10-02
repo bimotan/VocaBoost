@@ -14,9 +14,9 @@ import java.util.Map;
  */
 public enum WordColumn {
     ENGLISH("english", "word", "words", "term", "headword", "vocabulary", "vocab",
-        "单词", "英文", "英语", "词汇", "词语"),
+        "单词", "英文", "英语", "英文单词", "英语单词", "词汇", "词语"),
     CHINESE("chinese", "translation", "meaning", "meanings", "chinese meaning",
-        "释义", "中文", "中文释义", "中文意思", "意思", "词义", "翻译", "解释", "含义", "definition"),
+        "释义", "中文", "中文释义", "中文意思", "中文翻译", "中文含义", "意思", "词义", "翻译", "解释", "含义", "definition"),
     PHONETIC("phonetic", "phonetics", "pronunciation", "ipa", "音标", "发音"),
     POS("pos", "part of speech", "word class", "词性"),
     EXAMPLE("example", "examples", "example sentence", "sentence", "例句"),

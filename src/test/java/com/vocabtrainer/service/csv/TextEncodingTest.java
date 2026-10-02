@@ -83,6 +83,37 @@ class TextEncodingTest {
     }
 
     @Test
+    void aLongGbkFileIsGb18030() throws IOException {
+        String starter;
+        try (var in = TextEncodingTest.class.getResourceAsStream("/data/gre_starter_sample.csv")) {
+            starter = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        Path file = write("starter-gbk.csv", starter.getBytes(GBK));
+
+        assertEquals(TextEncoding.GB18030, TextEncoding.detect(file).charset());
+        assertEquals(List.of("abate", "减弱; 减少", "verb", "The storm began to abate.", "gre;starter"), readAll(file).get(1));
+    }
+
+    @Test
+    void utf8WithOneDamagedByteAfterMuchChineseIsUtf8AndFailsAtThatLine() throws IOException {
+        String chinese = "清晰的".repeat(TextEncoding.UTF_8_EVIDENCE / 3 + 1);
+        Path file = write("damaged.csv", bytes(
+            ("english,chinese\nlucid," + chinese + "\n").getBytes(StandardCharsets.UTF_8),
+            new byte[] {'c', 'a', 'f', 'e', ',', (byte) 0xE9, 's', '\n'}));
+
+        try (CsvReader reader = CsvReader.open(file)) {
+            assertEquals(TextEncoding.UTF_8, reader.encoding().orElseThrow());
+            reader.read();
+            assertEquals(List.of("lucid", chinese), reader.read().fields());
+
+            CsvFormatException error = assertThrows(CsvFormatException.class, reader::read);
+
+            assertEquals("Line 3: the text is not valid UTF-8 (a character on this line is damaged or in another"
+                + " encoding)", error.getMessage());
+        }
+    }
+
+    @Test
     void textThatIsNeitherUtf8NorGb18030FailsAtTheLineWithTheBadBytes() throws IOException {
         Path file = write("broken.csv", bytes(
             "english,chinese\nlucid,clear\n".getBytes(StandardCharsets.US_ASCII),

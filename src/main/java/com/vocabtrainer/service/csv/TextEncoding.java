@@ -15,11 +15,18 @@ import java.nio.file.Path;
  *
  * <p>{@link #detect(Path)} trusts a UTF-8 or UTF-16 byte order mark. Without one, a file that is
  * valid UTF-8 from start to end is UTF-8; anything else is read as GB18030, a superset of the GBK
- * that Excel and Notepad on Chinese Windows save "CSV" and "ANSI" text in.
+ * that Excel and Notepad on Chinese Windows save "CSV" and "ANSI" text in. The exception is a file
+ * whose first {@value #UTF_8_EVIDENCE} or more non-ASCII characters are valid UTF-8 before a bad
+ * byte: GBK text practically never gets that far as UTF-8, so the file is UTF-8 with a damaged or
+ * pasted-in character, and reading it as UTF-8 reports that line instead of turning every Chinese
+ * meaning into GB18030 mojibake.
  */
 public record TextEncoding(Charset charset, int bomLength) {
     public static final Charset GB18030 = Charset.forName("GB18030");
     public static final TextEncoding UTF_8 = new TextEncoding(StandardCharsets.UTF_8, 0);
+
+    /** Non-ASCII characters that must decode as UTF-8 before a bad byte for the file to count as UTF-8. */
+    static final int UTF_8_EVIDENCE = 16;
 
     private static final int[] UTF_8_BOM = {0xEF, 0xBB, 0xBF};
     private static final int[] UTF_16LE_BOM = {0xFF, 0xFE};
@@ -40,7 +47,7 @@ public record TextEncoding(Charset charset, int bomLength) {
                 return new TextEncoding(StandardCharsets.UTF_16BE, UTF_16BE_BOM.length);
             }
             in.reset();
-            return isValidUtf8(in) ? UTF_8 : new TextEncoding(GB18030, 0);
+            return isUtf8(in) ? UTF_8 : new TextEncoding(GB18030, 0);
         }
     }
 
@@ -67,16 +74,34 @@ public record TextEncoding(Charset charset, int bomLength) {
         return bomLength > 0 ? name + " with BOM" : name;
     }
 
-    private static boolean isValidUtf8(InputStream in) throws IOException {
+    /**
+     * The message for bytes that are not valid in this encoding; the advice differs because a UTF-8
+     * file with a bad byte is damaged, while other files are usually just in an unexpected encoding.
+     */
+    public String undecodableMessage() {
+        String advice = charset.equals(StandardCharsets.UTF_8)
+            ? "a character on this line is damaged or in another encoding"
+            : "save the file as UTF-8 and try again";
+        return "the text is not valid " + displayName() + " (" + advice + ")";
+    }
+
+    /** True when the text is valid UTF-8, or valid long enough to be UTF-8 with a bad byte. */
+    private static boolean isUtf8(InputStream in) throws IOException {
         Reader reader = new StrictDecodingReader(in, StandardCharsets.UTF_8);
         char[] buffer = new char[8192];
+        int nonAscii = 0;
         try {
-            while (reader.read(buffer) >= 0) {
-                // Only checking.
+            int count;
+            while ((count = reader.read(buffer)) >= 0) {
+                for (int i = 0; i < count && nonAscii < UTF_8_EVIDENCE; i++) {
+                    if (buffer[i] > 0x7F) {
+                        nonAscii++;
+                    }
+                }
             }
             return true;
         } catch (CharacterCodingException e) {
-            return false;
+            return nonAscii >= UTF_8_EVIDENCE;
         }
     }
 

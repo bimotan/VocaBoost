@@ -231,6 +231,40 @@ class ImportExportServiceTest {
     }
 
     @Test
+    void aHeaderWithUnknownNamesIsSkippedInsteadOfImportedAsAWord() throws Exception {
+        Path csvFile = tempDir.resolve("own-header.csv");
+        Files.writeString(csvFile, "English,Meaning (中文),词性说明\nlucid,清晰的,adjective\n", StandardCharsets.UTF_8);
+
+        ImportPreview preview = service.previewGreCsv(csvFile, deck.getId());
+        ImportResult result = service.importGreCsv(csvFile, deck.getId());
+
+        assertEquals(1, preview.totalRows());
+        assertEquals("english, chinese, pos, example, tags (by position; header row line 1 skipped)", preview.columns());
+        assertEquals(1, result.importedCount(), result.toSummary());
+        assertTrue(word("english").isEmpty());
+        assertEquals("清晰的", word("lucid").orElseThrow().getChinese());
+        assertEquals("adjective", word("lucid").orElseThrow().getPartOfSpeech());
+    }
+
+    @Test
+    void aUtf8FileWithOneDamagedByteFailsAtThatLineInsteadOfImportingGarbledMeanings() throws Exception {
+        Path csvFile = tempDir.resolve("damaged-utf8.csv");
+        Files.write(csvFile, concat(
+            "english,chinese,example\nabate,减弱,\nlucid,清晰的,\nrote,死记硬背,\ncandid,坦率的,\nacumen,敏锐,\n"
+                .getBytes(StandardCharsets.UTF_8),
+            "cafe,咖啡,caf".getBytes(StandardCharsets.UTF_8),
+            // A Latin-1 "é" pasted into the file; as GB18030 the whole file would decode without error.
+            new byte[] {(byte) 0xE9, 's', '\n'}));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+            () -> service.importGreCsv(csvFile, deck.getId()));
+
+        assertEquals("Cannot read GRE CSV file " + csvFile + ": Line 7: the text is not valid UTF-8"
+            + " (a character on this line is damaged or in another encoding)", error.getMessage());
+        assertEquals(List.of(), wordRepository.findAll(deck.getId()));
+    }
+
+    @Test
     void aHeaderWithoutAChineseColumnIsRejectedWithTheNamesItAccepts() throws Exception {
         Path csvFile = tempDir.resolve("no-chinese.csv");
         Files.writeString(csvFile, "english,pos\nlucid,adjective\n", StandardCharsets.UTF_8);

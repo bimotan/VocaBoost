@@ -241,9 +241,10 @@ public final class CsvReader implements Closeable {
         try {
             count = in.read(buffer, 0, buffer.length);
         } catch (CharacterCodingException e) {
-            String encodingName = encoding == null ? "in the expected encoding" : encoding.displayName();
-            throw new CsvFormatException(line, "the text is not valid " + encodingName
-                + " (save the file as UTF-8 and try again)", e);
+            String problem = encoding == null
+                ? "the text is not valid in the expected encoding (save the file as UTF-8 and try again)"
+                : encoding.undecodableMessage();
+            throw new CsvFormatException(line, problem, e);
         }
         if (count < 0) {
             endOfInput = true;

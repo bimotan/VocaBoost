@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LocalDictionaryServiceTest {
@@ -59,6 +60,17 @@ class LocalDictionaryServiceTest {
         assertEquals("adjective", service.lookup("lucidx").entries().get(0).partOfSpeech());
         assertEquals("减弱", service.lookup("abatex").entries().get(0).chinese());
         assertTrue(service.status().configuredPathLoaded());
+    }
+
+    @Test
+    void aHeaderWithUnknownNamesIsNotLoadedAsAnEntry() throws Exception {
+        Path csv = tempDir.resolve("own-header.csv");
+        Files.writeString(csv, "Word,汉语解释\nlucidx,清晰的\n");
+
+        LocalDictionaryService service = new LocalDictionaryService(csv.toString());
+
+        assertEquals("清晰的", service.lookup("lucidx").entries().get(0).chinese());
+        assertFalse(service.verify("word").found());
     }
 
     @Test

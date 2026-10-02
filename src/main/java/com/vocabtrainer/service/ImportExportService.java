@@ -87,7 +87,7 @@ public class ImportExportService {
                 analysis.messages.stream().limit(10).toList(),
                 reader.encoding().map(TextEncoding::displayName).orElse("decoded text"),
                 reader.delimiterName(),
-                analysis.columns.describe() + (analysis.columns.fromHeader() ? " (header row)" : " (by position, no header row)")
+                analysis.columns
             );
         } catch (IOException e) {
             throw new IllegalStateException(cannotRead("GRE CSV file", path, e), e);
@@ -117,8 +117,7 @@ public class ImportExportService {
             try {
                 line = reader.readLine();
             } catch (CharacterCodingException e) {
-                throw new IOException("Line " + (lineNumber + 1) + ": the text is not valid " + encoding.displayName()
-                    + " (save the file as UTF-8 and try again)", e);
+                throw new IOException("Line " + (lineNumber + 1) + ": " + encoding.undecodableMessage(), e);
             }
             if (line == null) {
                 break;
@@ -177,10 +176,16 @@ public class ImportExportService {
         CsvRecord record = nextNonBlank(reader);
         WordColumns columns = GRE_COLUMNS_BY_POSITION;
         Optional<WordColumns> header = record == null ? Optional.empty() : WordColumns.fromHeader(record);
+        String layout = " (by position, no header row)";
         if (header.isPresent()) {
             columns = header.get();
             requireColumn(columns, WordColumn.ENGLISH, record);
             requireColumn(columns, WordColumn.CHINESE, record);
+            layout = " (header row)";
+            record = reader.read();
+        } else if (record != null && WordColumns.startsWithEnglishColumnName(record)) {
+            // A header such as "english,中文翻译": skip it rather than import "english" as a word.
+            layout = " (by position; header row line " + record.lineNumber() + " skipped)";
             record = reader.read();
         }
         int requiredFields = Math.max(columns.index(WordColumn.ENGLISH), columns.index(WordColumn.CHINESE)) + 1;
@@ -229,7 +234,8 @@ public class ImportExportService {
         if (stoppedAtLimit) {
             messageList.add("GRE import stopped at " + MAX_GRE_IMPORT_WORDS + " imported words.");
         }
-        return new GreCsvAnalysis(totalRows, skipped, duplicates, messageList, pendingWords, columns);
+        return new GreCsvAnalysis(totalRows, skipped, duplicates, messageList, pendingWords,
+            columns.describe() + layout);
     }
 
     private static CsvRecord nextNonBlank(CsvReader reader) throws IOException {
@@ -303,7 +309,7 @@ public class ImportExportService {
         int duplicates,
         List<String> messages,
         List<WordCard> words,
-        WordColumns columns
+        String columns
     ) {
     }
 

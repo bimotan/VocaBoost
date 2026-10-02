@@ -77,6 +77,26 @@ class WordColumnsTest {
     }
 
     @Test
+    void aFirstRowThatStartsWithTheEnglishColumnNameIsAHeaderWithUnknownNames() {
+        assertTrue(WordColumns.fromHeader(record("English", "Meaning (中文)")).isEmpty());
+        assertTrue(WordColumns.startsWithEnglishColumnName(record("English", "Meaning (中文)")));
+        assertTrue(WordColumns.startsWithEnglishColumnName(record("word", "汉语解释", "")));
+        // Data rows: a word with its meaning, including the word "word" itself.
+        assertFalse(WordColumns.startsWithEnglishColumnName(record("word", "单词", "noun")));
+        assertFalse(WordColumns.startsWithEnglishColumnName(record("note", "笔记")));
+        assertFalse(WordColumns.startsWithEnglishColumnName(record("lucid", "清晰的")));
+    }
+
+    @Test
+    void commonChineseHeadersForTheWordAndItsMeaning() {
+        WordColumns columns = header("英文单词", "中文翻译");
+
+        assertEquals(0, columns.index(WordColumn.ENGLISH));
+        assertEquals(1, columns.index(WordColumn.CHINESE));
+        assertEquals(1, header("英语单词", "中文含义").index(WordColumn.CHINESE));
+    }
+
+    @Test
     void positionalColumnsMaySkipAColumn() {
         WordColumns columns = WordColumns.positional(WordColumn.ENGLISH, WordColumn.PHONETIC, null, WordColumn.CHINESE);
         CsvRecord row = record("lucid", "ˈluːsɪd", "clear", "清晰的");

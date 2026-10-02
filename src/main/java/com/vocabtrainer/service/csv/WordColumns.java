@@ -54,6 +54,30 @@ public final class WordColumns {
     }
 
     /**
+     * True when a first row that {@link #fromHeader} does not take as a header is still one: its
+     * first cell names the English column, as in "english,中文翻译" or "Word,Meaning (中文)", so the
+     * row is a header whose other names are unknown. Such a file is read by position after skipping
+     * the row. A row such as "word,单词" names the English column twice, so it is the word "word"
+     * and its meaning, not a header.
+     */
+    public static boolean startsWithEnglishColumnName(CsvRecord record) {
+        if (!namesEnglish(record.get(0))) {
+            return false;
+        }
+        for (int i = 1; i < record.size(); i++) {
+            if (namesEnglish(record.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean namesEnglish(String cell) {
+        WordColumn.Alias alias = WordColumn.match(cell);
+        return alias != null && alias.column() == WordColumn.ENGLISH;
+    }
+
+    /**
      * Columns by position, for a file without a header row: the first column is {@code order[0]},
      * and a null entry is a column that is not read.
      */

@@ -142,6 +142,11 @@ public class LocalDictionaryService implements DictionaryService {
                     columns = header.get();
                     continue;
                 }
+                if (WordColumns.startsWithEnglishColumnName(record)) {
+                    // A header whose other column names are unknown, such as "word,中文翻译".
+                    columns = STARTER_COLUMNS_BY_POSITION;
+                    continue;
+                }
                 columns = looksLikeHeaderlessEcdict(record) ? ECDICT_COLUMNS_BY_POSITION : STARTER_COLUMNS_BY_POSITION;
             }
             String english = columns.get(record, WordColumn.ENGLISH).trim();
