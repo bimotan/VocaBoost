@@ -7,6 +7,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.List;
 import java.util.Optional;
 
 public class DictionaryCacheRepository {
@@ -16,14 +19,22 @@ public class DictionaryCacheRepository {
         this.databaseManager = databaseManager;
     }
 
-    public Optional<String> findPayload(String english) throws SQLException {
-        String sql = "SELECT payload FROM dictionary_cache WHERE english = ? COLLATE NOCASE";
+    /**
+     * A cached lookup: the serialized entries, the dictionary they came from and when they were
+     * saved ({@code null} when the time cannot be read, so the entry counts as expired).
+     */
+    public record CachedLookup(String payload, String source, LocalDateTime createdAt) {
+    }
+
+    public Optional<CachedLookup> find(String english) throws SQLException {
+        String sql = "SELECT payload, source, created_at FROM dictionary_cache WHERE english = ? COLLATE NOCASE";
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, english.trim());
             try (ResultSet rs = statement.executeQuery()) {
                 if (rs.next()) {
-                    return Optional.of(rs.getString("payload"));
+                    return Optional.of(new CachedLookup(rs.getString("payload"), rs.getString("source"),
+                        parseTime(rs.getString("created_at"))));
                 }
             }
         }
@@ -55,5 +66,19 @@ public class DictionaryCacheRepository {
             statement.setString(1, english.trim());
             statement.executeUpdate();
         }
+    }
+
+    private static LocalDateTime parseTime(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        for (DateTimeFormatter format : List.of(DateTimeUtil.ISO_FORMATTER, DateTimeUtil.LEGACY_FORMATTER)) {
+            try {
+                return LocalDateTime.parse(value.trim(), format);
+            } catch (DateTimeParseException e) {
+                // Try the next format.
+            }
+        }
+        return null;
     }
 }

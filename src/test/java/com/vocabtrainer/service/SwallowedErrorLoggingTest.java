@@ -100,14 +100,17 @@ class SwallowedErrorLoggingTest {
             new DictionaryCacheRepository(brokenDatabase));
 
         DictionaryLookupResult result;
+        DictionaryLookupResult refreshed;
         List<LogRecord> warnings;
         try (LogCapture log = LogCapture.of(CachingDictionaryService.class)) {
-            result = service.refresh("lucid");
+            result = service.lookup("lucid");
+            refreshed = service.refresh("lucid");
             warnings = log.warnings();
         }
 
         assertTrue(result.success());
-        assertEquals(3, warnings.size(), "cache delete, read and write failures");
+        assertTrue(refreshed.success());
+        assertEquals(3, warnings.size(), "cache read and write failures, then the refresh's write failure");
         assertTrue(warnings.stream().allMatch(record -> record.getThrown() instanceof SQLException));
     }
 
