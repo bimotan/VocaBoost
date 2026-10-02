@@ -38,15 +38,14 @@ public class GoalService {
         return progressFor(0L, date);
     }
 
+    /**
+     * The deck's progress on {@code date}. Only reads: a day without a stored row has the default
+     * goals and no progress yet, and its row is created by the first review or new word.
+     */
     public DailyGoalProgress progressFor(long deckId, LocalDate date) {
         try {
-            GoalRepository.GoalRow row = goalRepository.ensure(
-                deckId,
-                date,
-                DEFAULT_REVIEW_GOAL,
-                DEFAULT_NEW_WORD_GOAL,
-                DEFAULT_SESSION_GOAL
-            );
+            GoalRepository.GoalRow row = goalRepository.find(deckId, date)
+                .orElseGet(() -> emptyDay(deckId, date));
             return toProgress(row);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read goal progress", e);
@@ -157,6 +156,11 @@ public class GoalService {
         return base + rating.getQuality() + (int) Math.round(Math.max(0.0, Math.min(1.0, similarity)) * 8.0);
     }
 
+    private static GoalRepository.GoalRow emptyDay(long deckId, LocalDate date) {
+        return new GoalRepository.GoalRow(deckId, date, DEFAULT_REVIEW_GOAL, DEFAULT_NEW_WORD_GOAL,
+            DEFAULT_SESSION_GOAL, 0, 0, 0, 0, false);
+    }
+
     private boolean isComplete(GoalRepository.GoalRow row) {
         return row.reviewedCount() >= row.reviewGoal() && row.newWordsCount() >= row.newWordGoal();
     }
@@ -177,17 +181,14 @@ public class GoalService {
         );
     }
 
-    private int calculateStreak(LocalDate date) throws SQLException {
-        return calculateStreak(0L, date);
-    }
-
+    /**
+     * Consecutive days with reviews up to {@code date}. A day still in progress does not break the
+     * streak: until the first review of the day, the streak that ended yesterday still counts.
+     */
     private int calculateStreak(long deckId, LocalDate date) throws SQLException {
-        LocalDate cursor = goalRepository.hasReviewedOn(deckId, date) ? date : date.minusDays(1);
-        int streak = 0;
-        while (goalRepository.hasReviewedOn(deckId, cursor)) {
-            streak++;
-            cursor = cursor.minusDays(1);
-        }
-        return streak;
+        return goalRepository.latestReviewRun(deckId, date)
+            .filter(run -> !run.lastDay().isBefore(date.minusDays(1)))
+            .map(GoalRepository.ReviewRun::days)
+            .orElse(0);
     }
 }

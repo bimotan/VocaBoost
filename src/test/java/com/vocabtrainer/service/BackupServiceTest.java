@@ -307,9 +307,9 @@ class BackupServiceTest {
         Db db = new Db(tempDir.resolve("empty-day.db"));
         Deck deck = db.decks.ensureDefaultDeck();
         db.words.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
-        // Opening the dashboard creates an empty row for today, which the backup then contains.
-        GoalService goals = new GoalService(db.goals, CLOCK);
-        goals.getTodayProgress(deck.getId());
+        // Older versions created an empty row for today whenever the dashboard was shown, so backups contain them.
+        db.goals.ensure(deck.getId(), TODAY, GoalService.DEFAULT_REVIEW_GOAL, GoalService.DEFAULT_NEW_WORD_GOAL,
+            GoalService.DEFAULT_SESSION_GOAL);
         Path json = db.backup.exportJsonBackup(deck.getId(), tempDir.resolve("backup.json"));
         Deck other = db.decks.create("Other");
 
