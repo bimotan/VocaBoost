@@ -61,6 +61,7 @@ public final class ReviewView {
     private final Tab tab;
     private long renderedCardNumber = -1;
     private boolean renderedCanRate;
+    private boolean swallowTypedKey;
 
     public ReviewView(ViewContext context, ReviewService reviewService, GoalService goalService,
                       ConfiguredServices configured) {
@@ -89,6 +90,15 @@ public final class ReviewView {
     /** Lets {@code scene} rate the answered card with the keyboard; see the class comment. */
     public void installShortcuts(Scene scene) {
         scene.addEventFilter(KeyEvent.KEY_PRESSED, this::rateWithKey);
+        // A key press is followed by a key-typed event, delivered to whatever has the focus by then:
+        // after a rating that is the next card's answer field, which must not receive the "3".
+        scene.addEventFilter(KeyEvent.KEY_TYPED, event -> {
+            if (swallowTypedKey) {
+                swallowTypedKey = false;
+                event.consume();
+            }
+        });
+        scene.addEventFilter(KeyEvent.KEY_RELEASED, event -> swallowTypedKey = false);
     }
 
     /** The digit key that gives {@code rating}; {@link #ratingForKey} maps it back. */
@@ -120,6 +130,7 @@ public final class ReviewView {
         Optional<ReviewRating> rating = ratingForKey(event.getCode());
         if (rating.isPresent()) {
             event.consume();
+            swallowTypedKey = true;
             presenter.rate(rating.get());
         }
     }

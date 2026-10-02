@@ -273,19 +273,28 @@ abstract class MainWindowUiTest {
     }
 
     /**
-     * Presses and releases a key the way the keyboard does: the event goes to {@code targetId}, or to
-     * the window's focus owner when it is null, through the scene's event filters.
+     * Types a key the way the keyboard does: pressed, typed (for a character key) and released, each
+     * passing the scene's event filters. The events go to {@code targetId}, or, when it is null, each
+     * to whichever node has the focus at that moment, as the window delivers them.
      */
     void pressKey(String targetId, KeyCode code) {
+        String character = code.isDigitKey() || code == KeyCode.SPACE ? code.getChar() : "";
+        fireKey(targetId, new KeyEvent(KeyEvent.KEY_PRESSED, KeyEvent.CHAR_UNDEFINED, character, code,
+            false, false, false, false));
+        if (!character.isEmpty()) {
+            fireKey(targetId, new KeyEvent(KeyEvent.KEY_TYPED, character, "", KeyCode.UNDEFINED,
+                false, false, false, false));
+        }
+        fireKey(targetId, new KeyEvent(KeyEvent.KEY_RELEASED, KeyEvent.CHAR_UNDEFINED, character, code,
+            false, false, false, false));
+    }
+
+    private void fireKey(String targetId, KeyEvent event) {
         Fx.run(() -> {
             Node target = targetId != null ? find(targetId, Node.class)
                 : stage.getScene().getFocusOwner() != null ? stage.getScene().getFocusOwner()
                 : stage.getScene().getRoot();
-            String text = code.isDigitKey() || code == KeyCode.SPACE ? code.getChar() : "";
-            target.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, KeyEvent.CHAR_UNDEFINED, text, code,
-                false, false, false, false));
-            target.fireEvent(new KeyEvent(KeyEvent.KEY_RELEASED, KeyEvent.CHAR_UNDEFINED, text, code,
-                false, false, false, false));
+            target.fireEvent(event);
         });
     }
 

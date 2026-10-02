@@ -40,6 +40,8 @@ class ReviewShortcutsUiTest extends MainWindowUiTest {
         assertNotEquals(word.getEnglish(), text("reviewWordLabel"));
         assertTrue(text("reviewResultArea").startsWith("Saved. XP +"), text("reviewResultArea"));
         assertEquals("answerField", focusOwnerId());
+        // The key rated the last card; it must not also type into the next one.
+        assertEquals("", text("answerField"));
     }
 
     @Test
@@ -48,6 +50,7 @@ class ReviewShortcutsUiTest extends MainWindowUiTest {
         for (KeyCode key : keys) {
             answerWithEnter(key != KeyCode.DIGIT1);
             pressKey(null, key);
+            assertEquals("", text("answerField"), key + " reached the next card");
         }
 
         assertEquals(List.of(ReviewRating.AGAIN, ReviewRating.HARD, ReviewRating.GOOD, ReviewRating.EASY, ReviewRating.HARD),
@@ -62,6 +65,7 @@ class ReviewShortcutsUiTest extends MainWindowUiTest {
         pressKey("answerField", KeyCode.DIGIT1);
         pressKey("answerField", KeyCode.SPACE);
 
+        assertEquals("1 ", text("answerField"));
         assertTrue(logs().isEmpty());
         assertEquals(word.getEnglish(), text("reviewWordLabel"));
         assertFalse(isDisabled("submitAnswerButton"));
