@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
+import java.util.function.Supplier;
 
 public class StatsService {
     /** The memory distribution's bucket of words never reviewed. */
@@ -32,7 +33,8 @@ public class StatsService {
     private final WordRepository wordRepository;
     private final ReviewLogRepository reviewLogRepository;
     private final Clock clock;
-    private final StudyDay studyDay;
+    /** The scheduler's study day, which the user can change while the app runs. */
+    private final Supplier<StudyDay> studyDays;
     /** The new-cards-per-day limits; null for the default limit in every deck. */
     private final ReviewSettings reviewSettings;
 
@@ -53,10 +55,20 @@ public class StatsService {
     /** @param reviewSettings each deck's new-cards-per-day limit, which caps the new words counted as due today */
     public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository, Clock clock,
                         StudyDay studyDay, ReviewSettings reviewSettings) {
+        this(wordRepository, reviewLogRepository, clock, () -> studyDay, reviewSettings);
+    }
+
+    /**
+     * @param studyDays      when a study day starts, read at every call: the scheduler's, so a changed
+     *                       rollover hour changes what is due today at once
+     * @param reviewSettings each deck's new-cards-per-day limit, which caps the new words counted as due today
+     */
+    public StatsService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository, Clock clock,
+                        Supplier<StudyDay> studyDays, ReviewSettings reviewSettings) {
         this.wordRepository = wordRepository;
         this.reviewLogRepository = reviewLogRepository;
         this.clock = clock;
-        this.studyDay = studyDay;
+        this.studyDays = studyDays;
         this.reviewSettings = reviewSettings;
     }
 
@@ -76,10 +88,11 @@ public class StatsService {
 
     /** The deck's counts now; today's reviews and accuracy are those of the study day, see {@link DailyReviews}. */
     public DashboardStats dashboardStats(long deckId) {
+        StudyDay studyDay = studyDays.get();
         try {
             LocalDateTime now = LocalDateTime.now(clock);
             ReviewLogRepository.DailyCount today = DailyReviews.on(reviewLogRepository, studyDay, deckId, studyDay.of(now));
-            ReviewQueueCounts queue = queueCounts(deckId, now);
+            ReviewQueueCounts queue = queueCounts(studyDay, deckId, now);
             return new DashboardStats(
                 wordRepository.countAll(deckId),
                 queue.dueToday(),
@@ -103,6 +116,7 @@ public class StatsService {
      * covers every deck. Practice is not counted, see {@link DailyReviews}.
      */
     public List<DailyReviewStat> dailyReviewStats(long deckId, int days) {
+        StudyDay studyDay = studyDays.get();
         LocalDate end = studyDay.of(LocalDateTime.now(clock));
         LocalDate start = end.minusDays(Math.max(1, days) - 1L);
         try {
@@ -162,13 +176,13 @@ public class StatsService {
      */
     public int overdueCount(long deckId) {
         try {
-            return queueCounts(deckId, LocalDateTime.now(clock)).dueReviews();
+            return queueCounts(studyDays.get(), deckId, LocalDateTime.now(clock)).dueReviews();
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read overdue count", e);
         }
     }
 
-    private ReviewQueueCounts queueCounts(long deckId, LocalDateTime now) throws SQLException {
+    private ReviewQueueCounts queueCounts(StudyDay studyDay, long deckId, LocalDateTime now) throws SQLException {
         return ReviewQueueCounts.read(wordRepository, reviewLogRepository, studyDay, deckId, now, newCardsPerDay(deckId));
     }
 
@@ -191,6 +205,7 @@ public class StatsService {
      * new words the deck's new-cards-per-day limit still allows today.
      */
     public List<DeckOverview> deckOverviews(List<Deck> decks) {
+        StudyDay studyDay = studyDays.get();
         try {
             LocalDateTime now = LocalDateTime.now(clock);
             Map<Long, WordRepository.DeckWordCounts> counts = wordRepository.countByDeck(now, studyDay.end(now));

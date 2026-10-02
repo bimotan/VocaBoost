@@ -31,13 +31,16 @@ import java.util.logging.Logger;
  * similarity it counts as Again, below 75% at most Hard and below 90% at most Good
  * ({@link #effectiveRating}). A card that lapses {@value WordCard#LEECH_LAPSES} times is tagged
  * {@value WordCard#LEECH_TAG}.
+ *
+ * <p>The options can be changed while the app runs ({@link #setOptions}); every call uses the
+ * options in effect when it starts.
  */
 public class ReviewScheduler {
     private static final Logger LOGGER = Logger.getLogger(ReviewScheduler.class.getName());
 
-    private final CardScheduler cards;
+    private volatile CardScheduler cards;
     /** Replays review logs of older versions, which had no learning steps. */
-    private final CardScheduler withoutSteps;
+    private volatile CardScheduler withoutSteps;
     private final WordSelector wordSelector;
 
     public ReviewScheduler() {
@@ -61,6 +64,17 @@ public class ReviewScheduler {
 
     public SchedulingOptions options() {
         return cards.options();
+    }
+
+    /**
+     * Schedules with {@code options} from now on: the next rating, interval preview and due count
+     * use them. Cards keep the due dates they have.
+     */
+    public void setOptions(SchedulingOptions options) {
+        CardScheduler scheduler = new CardScheduler(options);
+        CardScheduler replay = new CardScheduler(options.withoutSteps());
+        cards = scheduler;
+        withoutSteps = replay;
     }
 
     public StudyDay studyDay() {

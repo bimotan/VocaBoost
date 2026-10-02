@@ -71,6 +71,37 @@ class ReviewSessionSettingsTest {
     }
 
     @Test
+    void theDefaultNewWordsPerDayLimitsEveryDeckWithoutALimitOfItsOwn() {
+        ReviewSettings settings = new ReviewSettings(settingsService);
+        assertEquals(ReviewSettings.DEFAULT_NEW_CARDS_PER_DAY, settings.defaultNewCardsPerDay());
+        service.setNewCardsPerDay(other.getId(), 3);
+
+        settings.saveDefaultNewCardsPerDay(2);
+
+        assertEquals(2, settings.defaultNewCardsPerDay());
+        assertEquals(2, service.newCardsPerDay(deck.getId()), "follows the default");
+        assertEquals(3, service.newCardsPerDay(other.getId()), "keeps its own limit");
+        assertFalse(settings.hasOwnNewCardsPerDay(deck.getId()));
+        assertTrue(settings.hasOwnNewCardsPerDay(other.getId()));
+        assertEquals(2, service.queueCounts(deck.getId()).newAvailableToday(), "2 of the deck's 3 new words");
+        assertEquals(3, service.queueCounts(other.getId()).newAvailableToday());
+        assertEquals(2, newService().newCardsPerDay(deck.getId()), "kept for the next start");
+
+        assertThrows(IllegalArgumentException.class,
+            () -> settings.saveDefaultNewCardsPerDay(ReviewSettings.MAX_NEW_CARDS_PER_DAY + 1));
+        assertThrows(IllegalArgumentException.class, () -> settings.saveDefaultNewCardsPerDay(-1));
+        assertEquals(2, settings.defaultNewCardsPerDay());
+    }
+
+    @Test
+    void anInvalidSavedDefaultIsIgnored() {
+        settingsService.save("review.newCardsPerDay", "many");
+
+        assertEquals(ReviewSettings.DEFAULT_NEW_CARDS_PER_DAY, new ReviewSettings(settingsService).defaultNewCardsPerDay());
+        assertEquals(ReviewSettings.DEFAULT_NEW_CARDS_PER_DAY, service.newCardsPerDay(deck.getId()));
+    }
+
+    @Test
     void theChosenTargetSurvivesAModeChangeAResetAndADeckSwitch() {
         service.startSession(deck.getId(), ReviewMode.EN_TO_ZH, 50);
         assertEquals(50, service.sessionSummary().sessionGoal());
