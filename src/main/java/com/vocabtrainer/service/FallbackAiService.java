@@ -7,6 +7,11 @@ import java.util.logging.Logger;
 
 public class FallbackAiService implements AiService {
     private static final Logger LOGGER = Logger.getLogger(FallbackAiService.class.getName());
+    /**
+     * Appended to the mock text when the provider fails. Older versions cached that text in
+     * {@code ai_cache}; {@code DatabaseManager} deletes such rows at startup.
+     */
+    static final String PROVIDER_FAILED_NOTE = "AI provider failed; mock fallback was used.";
 
     private final AiService primary;
     private final AiService fallback;
@@ -34,8 +39,7 @@ public class FallbackAiService implements AiService {
             return fallback.explain(word);
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "AI provider failed; using the mock explanation instead", e);
-            return fallback.explain(word) + System.lineSeparator()
-                + "AI provider failed; mock fallback was used.";
+            return fallback.explain(word) + System.lineSeparator() + PROVIDER_FAILED_NOTE;
         }
     }
 }

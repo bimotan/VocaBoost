@@ -19,6 +19,12 @@ import java.util.logging.Logger;
 
 public class DatabaseManager implements TransactionRunner {
     private static final Logger LOGGER = Logger.getLogger(DatabaseManager.class.getName());
+    /**
+     * The note FallbackAiService appends to the mock text when the AI provider fails. Versions
+     * that cached the fallback's output stored it in ai_cache; the text must stay exactly what
+     * those versions wrote.
+     */
+    private static final String CACHED_AI_FALLBACK_NOTE = "AI provider failed; mock fallback was used.";
 
     private final Path databasePath;
     private final String jdbcUrl;
@@ -149,6 +155,7 @@ public class DatabaseManager implements TransactionRunner {
         try (Connection connection = getConnection()) {
             migrateDailyGoalsToDeckScope(connection);
             migrateAchievementsToDeckScope(connection);
+            purgeCachedAiFallbackText(connection);
         }
     }
 
@@ -230,6 +237,22 @@ public class DatabaseManager implements TransactionRunner {
         }
         try (Statement statement = connection.createStatement()) {
             statement.executeUpdate("DROP TABLE achievements_old");
+        }
+    }
+
+    /**
+     * Deletes AI explanations that are really the mock fallback text. Older versions cached it
+     * after any provider error, so that word never got a real explanation. The fallback is no
+     * longer cached, so after the first run this matches nothing.
+     */
+    private void purgeCachedAiFallbackText(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "DELETE FROM ai_cache WHERE instr(response, ?) > 0")) {
+            statement.setString(1, CACHED_AI_FALLBACK_NOTE);
+            int deleted = statement.executeUpdate();
+            if (deleted > 0) {
+                LOGGER.info("Deleted " + deleted + " cached AI fallback explanation(s) so they are requested again");
+            }
         }
     }
 

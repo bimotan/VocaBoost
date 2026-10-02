@@ -807,10 +807,27 @@ public class MainWindow {
 
         Button testButton = new Button("Test AI Explanation");
         testButton.setOnAction(event -> {
+            // Ask the saved provider directly: no cache, so a fixed key or model shows up at once,
+            // and no mock fallback, so a failure shows the provider's error instead of mock text.
+            Optional<AiService> provider;
+            try {
+                provider = AiServiceFactory.createUncachedProvider(settingsService);
+            } catch (RuntimeException e) {
+                // Reading the saved settings can fail; report it here instead of on the FX thread.
+                logFailure("AI test failed", e);
+                statusLabel.setText("AI test failed: " + rootMessage(e));
+                return;
+            }
+            if (provider.isEmpty()) {
+                statusLabel.setText("AI test skipped: no AI provider is configured. Save a base URL, API key and"
+                    + " model first; until then the offline mock explanation is used.");
+                return;
+            }
+            AiService uncachedProvider = provider.get();
             WordCard sample = WordCard.createNew(currentDeck.getId(), "lucid", "清晰的; 易懂的");
             runBackground(
-                () -> aiService.explain(sample),
-                text -> statusLabel.setText((aiService.isAvailable() ? "Configured AI: " : "Mock AI: ") + text),
+                () -> uncachedProvider.explain(sample),
+                text -> statusLabel.setText("AI test succeeded. Provider response:" + System.lineSeparator() + text),
                 error -> statusLabel.setText("AI test failed: " + rootMessage(error)),
                 statusLabel,
                 "Testing AI explanation..."

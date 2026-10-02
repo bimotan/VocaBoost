@@ -146,7 +146,7 @@ $env:VOCABOOST_AI_MODEL = 'your-model'
 mvn javafx:run
 ```
 
-The app never commits API keys. UI-saved keys stay in the local ignored SQLite database; environment keys stay outside the project. Responses are cached in the local `ai_cache` table by word, and failures fall back to Mock AI instead of blocking review. Use `Add / Import -> AI Explanation Provider -> Test AI Explanation` to verify configuration.
+The app never commits API keys. UI-saved keys stay in the local ignored SQLite database; environment keys stay outside the project. Successful responses are cached in the local `ai_cache` table per word, endpoint and model; a failed request falls back to Mock AI for that answer instead of blocking review, is not cached, and is retried next time. Use `Add / Import -> AI Explanation Provider -> Test AI Explanation` to verify configuration: it skips the cache and shows the provider's response or error.
 
 ## Import Formats
 

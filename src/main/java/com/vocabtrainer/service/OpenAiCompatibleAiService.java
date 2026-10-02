@@ -14,7 +14,13 @@ import java.util.List;
 import java.util.Map;
 
 public class OpenAiCompatibleAiService implements AiService {
+    /**
+     * Part of every AI cache key. Bump it whenever the system prompt, the user prompt or the
+     * request parameters change, so explanations cached for the old request are not reused.
+     */
+    static final String PROMPT_VERSION = "1";
     private static final Duration TIMEOUT = Duration.ofSeconds(12);
+    private static final int MAX_ERROR_DETAIL_LENGTH = 200;
 
     private final String baseUrl;
     private final String apiKey;
@@ -36,6 +42,14 @@ public class OpenAiCompatibleAiService implements AiService {
     @Override
     public boolean isAvailable() {
         return !baseUrl.isBlank() && !apiKey.isBlank() && !model.isBlank();
+    }
+
+    /**
+     * Identifies what this service would answer: the endpoint, the model and the prompt version,
+     * but not the API key, so changing the key keeps cached explanations.
+     */
+    public String cacheIdentity() {
+        return "openai-compatible|prompt-v" + PROMPT_VERSION + "|" + baseUrl + "|" + model;
     }
 
     @Override
@@ -61,7 +75,9 @@ public class OpenAiCompatibleAiService implements AiService {
                 .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IllegalStateException("AI provider returned HTTP " + response.statusCode() + ".");
+                String detail = errorDetail(response.body());
+                throw new IllegalStateException("AI provider returned HTTP " + response.statusCode()
+                    + (detail.isBlank() ? "." : ": " + detail));
             }
             String content = parseContent(response.body());
             if (content.isBlank()) {
@@ -85,6 +101,37 @@ public class OpenAiCompatibleAiService implements AiService {
         return "Explain this word for GRE study: " + english
             + "\nChinese meaning: " + chinese
             + "\nExisting example: " + example;
+    }
+
+    /**
+     * The provider's own error message from an OpenAI-style error body, or "" if there is none.
+     * It is shown in the UI and logged, so the API key is masked in case the provider echoes it.
+     */
+    private String errorDetail(String body) {
+        if (body == null || body.isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            if (root == null) {
+                return "";
+            }
+            JsonNode error = root.path("error");
+            String message = error.isTextual() ? error.asText() : error.path("message").asText("");
+            if (message.isBlank()) {
+                message = root.path("message").asText("");
+            }
+            message = message.strip();
+            if (!apiKey.isBlank()) {
+                message = message.replace(apiKey, "***");
+            }
+            return message.length() > MAX_ERROR_DETAIL_LENGTH
+                ? message.substring(0, MAX_ERROR_DETAIL_LENGTH) + "..."
+                : message;
+        } catch (IOException e) {
+            // Not JSON (for example an HTML error page): the status code alone has to do.
+            return "";
+        }
     }
 
     private String parseContent(String json) throws IOException {

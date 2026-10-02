@@ -57,7 +57,8 @@ class SwallowedErrorLoggingTest {
     void cachingAiServiceLogsCacheFailuresAndStillAnswers() {
         // Not initialized, so the ai_cache table does not exist and every cache call fails.
         DatabaseManager brokenDatabase = new DatabaseManager(tempDir.resolve("no-tables.db"));
-        CachingAiService service = new CachingAiService(availableAi("explanation"), new AiCacheRepository(brokenDatabase));
+        CachingAiService service = new CachingAiService(availableAi("explanation"), new AiCacheRepository(brokenDatabase),
+            "test-provider");
 
         String response;
         List<LogRecord> warnings;

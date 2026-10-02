@@ -8,9 +8,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CachingAiServiceTest {
@@ -33,12 +37,50 @@ class CachingAiServiceTest {
                 return "response-" + calls.incrementAndGet();
             }
         };
-        CachingAiService service = new CachingAiService(delegate, new AiCacheRepository(databaseManager));
+        CachingAiService service = new CachingAiService(delegate, new AiCacheRepository(databaseManager), "provider-a");
         WordCard word = WordCard.createNew(1, "lucid", "清晰的");
 
         assertEquals("response-1", service.explain(word));
         assertEquals("response-1", service.explain(word));
         assertEquals(1, calls.get());
+    }
+
+    @Test
+    void cacheKeyChangesWithProviderIdentityAndPromptFields() {
+        AiService delegate = new MockAiService();
+        CachingAiService modelA = new CachingAiService(delegate, null, "openai-compatible|prompt-v1|https://a.test|model-a");
+        CachingAiService modelARebuilt = new CachingAiService(delegate, null, "openai-compatible|prompt-v1|https://a.test|model-a");
+        CachingAiService modelB = new CachingAiService(delegate, null, "openai-compatible|prompt-v1|https://a.test|model-b");
+        WordCard word = WordCard.createNew(1, "Lucid", "清晰的");
+        WordCard withExample = WordCard.createNew(1, "lucid", "清晰的");
+        withExample.setExampleSentence("Her lucid explanation helped.");
+
+        String key = modelA.cacheKey(word);
+
+        assertEquals(key, modelARebuilt.cacheKey(word), "same provider and word must hit the same row");
+        assertNotEquals(key, modelB.cacheKey(word), "another model must not reuse this explanation");
+        assertNotEquals(key, modelA.cacheKey(withExample), "the prompt sends the example, so it is part of the key");
+        assertTrue(key.startsWith("explain:v2:lucid:"), key);
+        assertEquals("explain:v2:lucid:".length() + 64, key.length());
+    }
+
+    @Test
+    void startupDeletesCachedFallbackTextAndKeepsRealExplanations() throws Exception {
+        Path databasePath = tempDir.resolve("poisoned-ai-cache.db");
+        DatabaseManager databaseManager = new DatabaseManager(databasePath);
+        databaseManager.initialize();
+        AiCacheRepository repository = new AiCacheRepository(databaseManager);
+        LocalDateTime createdAt = LocalDateTime.of(2026, 5, 1, 9, 0);
+        // What older versions stored after a provider error: the mock text plus the failure note.
+        String poisoned = new MockAiService().explain(WordCard.createNew(1, "lucid", "清晰的"))
+            + System.lineSeparator() + "AI provider failed; mock fallback was used.";
+        repository.save("explain:v1:lucid:清晰的", poisoned, createdAt);
+        repository.save("explain:v1:candid:坦率的", "candid 指坦率的、直言不讳的。", createdAt);
+
+        new DatabaseManager(databasePath).initialize();
+
+        assertTrue(repository.find("explain:v1:lucid:清晰的").isEmpty(), "cached fallback text must be deleted");
+        assertEquals("candid 指坦率的、直言不讳的。", repository.find("explain:v1:candid:坦率的").orElseThrow());
     }
 
     @Test
@@ -59,9 +101,20 @@ class CachingAiServiceTest {
             "local-key",
             "local-model"
         );
+        Map<String, String> environment = Map.of(
+            "VOCABOOST_AI_PROVIDER", "off",
+            "VOCABOOST_AI_BASE_URL", "https://env.test/v1/chat/completions",
+            "VOCABOOST_AI_API_KEY", "env-key",
+            "VOCABOOST_AI_MODEL", "env-model"
+        );
 
-        AiService service = AiServiceFactory.create(null, settingsService, java.util.Map.of());
+        AiService service = AiServiceFactory.create(null, settingsService, environment);
+        AiService provider = AiServiceFactory.createUncachedProvider(settingsService, environment).orElseThrow();
 
-        assertTrue(service.isAvailable());
+        assertTrue(service.isAvailable(), "the saved provider wins over VOCABOOST_AI_PROVIDER=off");
+        String identity = ((OpenAiCompatibleAiService) provider).cacheIdentity();
+        assertTrue(identity.contains("https://example.test/v1/chat/completions"), identity);
+        assertTrue(identity.endsWith("|local-model"), identity);
+        assertFalse(identity.contains("local-key"), "the API key is not part of the cache identity");
     }
 }
