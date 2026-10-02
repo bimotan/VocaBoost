@@ -1,0 +1,70 @@
+name: Release
+
+# Pushing a tag like v1.2.0 (matching <version> in pom.xml) builds, tests and packages the Windows
+# app image and attaches it as a zip, with its SHA-256, to the GitHub release of that tag.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows app image
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # The bundled runtime is trimmed from this JDK.
+          java-version: '21'
+          cache: maven
+
+      - name: Check the tag against the pom version
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content -Raw pom.xml)).project.version
+          if ("v$version" -ne $env:GITHUB_REF_NAME) {
+              throw "The tag $env:GITHUB_REF_NAME does not match the version in pom.xml ($version)."
+          }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build, test and package
+        shell: pwsh
+        run: ./scripts/package-windows.ps1
+
+      - name: Zip the app image
+        shell: pwsh
+        run: |
+          $zip = "target/VocaBoost-$env:VERSION-windows-x64.zip"
+          Compress-Archive -Path target/dist/VocaBoost -DestinationPath $zip
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path -Leaf $zip)" | Out-File -FilePath "$zip.sha256" -Encoding ascii
+          "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          if [[ "$VERSION" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$ZIP" "$ZIP.sha256" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$ZIP" "$ZIP.sha256" --verify-tag \
+              --title "VocaBoost $VERSION" --generate-notes "${flags[@]}"
+          fi
