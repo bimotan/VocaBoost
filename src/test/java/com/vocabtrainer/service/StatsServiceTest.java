@@ -72,19 +72,18 @@ class StatsServiceTest {
         DeckRepository deckRepository = new DeckRepository(databaseManager);
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewLogRepository reviewLogRepository = new ReviewLogRepository(databaseManager);
-        StatsService statsService = new StatsService(wordRepository, reviewLogRepository);
+        StatsService statsService = new StatsService(wordRepository, reviewLogRepository, CLOCK);
         Deck gre = deckRepository.create("GRE");
         Deck sat = deckRepository.create("SAT");
         Deck empty = deckRepository.create("Empty");
-        WordCard due = wordRepository.save(WordCard.createNew(gre.getId(), "abate", "减弱"));
-        WordCard later = WordCard.createNew(gre.getId(), "lucid", "清晰的");
-        later.setNextReviewAt(LocalDateTime.now().plusDays(3));
-        wordRepository.save(later);
-        WordCard archived = WordCard.createNew(gre.getId(), "gone", "消失的");
+        // Due dates are set relative to CLOCK, since WordCard.createNew uses the wall clock.
+        WordCard due = wordRepository.save(wordDueAt(gre, "abate", "减弱", NOW.minusHours(1)));
+        wordRepository.save(wordDueAt(gre, "lucid", "清晰的", NOW.plusDays(3)));
+        WordCard archived = wordDueAt(gre, "gone", "消失的", NOW.minusHours(1));
         archived.setArchived(true);
         wordRepository.save(archived);
-        wordRepository.save(WordCard.createNew(sat.getId(), "laud", "赞扬"));
-        LocalDateTime reviewed = LocalDateTime.now().minusHours(2).withNano(0);
+        wordRepository.save(wordDueAt(sat, "laud", "赞扬", NOW.minusDays(1)));
+        LocalDateTime reviewed = NOW.minusHours(2);
         reviewLogRepository.insert(new ReviewLog(0, due.getId(), reviewed.minusDays(1), "减弱", "减弱", 1,
             ReviewRating.GOOD, 1000));
         reviewLogRepository.insert(new ReviewLog(0, archived.getId(), reviewed, "消失的", "消失的", 1,
@@ -147,6 +146,12 @@ class StatsServiceTest {
             statsService.hardestWords(deck.getId(), 5).stream().map(HardWordStat::english).toList());
         assertEquals(NOW.minusHours(1), statsService.latestReviewAt(deck.getId()));
         assertNull(statsService.latestReviewAt(new DeckRepository(databaseManager).create("Empty").getId()));
+    }
+
+    private static WordCard wordDueAt(Deck deck, String english, String chinese, LocalDateTime dueAt) {
+        WordCard word = WordCard.createNew(deck.getId(), english, chinese);
+        word.setNextReviewAt(dueAt);
+        return word;
     }
 
     private static void log(ReviewLogRepository logs, WordCard word, LocalDateTime at, ReviewRating rating)
