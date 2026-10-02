@@ -83,6 +83,9 @@ public final class ReviewSessionPresenter {
     static final List<Integer> PRESET_SESSION_SIZES = List.of(10, 20, 50);
     /** What the result area says after practicing a weak word that was not due. */
     static final String PRACTICE_SAVED = "Practice saved: the word was not due, so its schedule did not change.";
+    /** What the result area says after a failed practice brought the word's due date forward. */
+    static final String PRACTICE_MISSED =
+        "Practice saved: the word was not due, but after this miss it is due again from the next study day.";
 
     private final ReviewService reviewService;
     private final GoalService goalService;
@@ -267,7 +270,9 @@ public final class ReviewSessionPresenter {
         // The service times the answer from "shown at" to now: count only the time it was on screen.
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDateTime effectivelyShownAt = now.minus(timeOnScreen(now));
-        ReviewAnswer checked = reviewService.submitAnswer(answered.getId(), answer, questionMode, effectivelyShownAt);
+        // The session's mode, not the card's direction: in Mixed mode the service checks the answer in
+        // the direction it chose for the card, and an Easy recognition must count as Mixed mode's.
+        ReviewAnswer checked = reviewService.submitAnswer(answered.getId(), answer, mode, effectivelyShownAt);
         ratingPreviews.clear();
         try {
             ratingPreviews.putAll(reviewService.previewRatings(answered.getId()));
@@ -298,6 +303,7 @@ public final class ReviewSessionPresenter {
             return;
         }
         long wordId = card.getId();
+        LocalDateTime dueBefore = card.getNextReviewAt();
         state = State.SAVING;
         fireChanged();
         ReviewOutcome outcome;
@@ -322,7 +328,7 @@ public final class ReviewSessionPresenter {
         try {
             loadNextCard();
             if (card != null) {
-                result = (outcome.isPractice() ? PRACTICE_SAVED : "Saved.") + " XP +" + outcome.xpEarned()
+                result = savedMessage(outcome, dueBefore) + " XP +" + outcome.xpEarned()
                     + Formats.unlockedSuffix(outcome.unlockedAchievements()) + leechNotice(outcome);
             }
         } catch (RuntimeException e) {
@@ -581,6 +587,14 @@ public final class ReviewSessionPresenter {
             case REVIEW -> "Review";
             case RELEARNING -> "Relearning";
         };
+    }
+
+    /** "Saved.", or for a practice whether it left the due date as it was. */
+    private static String savedMessage(ReviewOutcome outcome, LocalDateTime dueBefore) {
+        if (!outcome.isPractice()) {
+            return "Saved.";
+        }
+        return Objects.equals(dueBefore, outcome.word().getNextReviewAt()) ? PRACTICE_SAVED : PRACTICE_MISSED;
     }
 
     private static String leechNotice(ReviewOutcome outcome) {

@@ -12,6 +12,8 @@ import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.service.AiService;
+import com.vocabtrainer.service.ReviewService;
+import com.vocabtrainer.service.SimilarityService;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.DataChanges;
 import com.vocabtrainer.ui.TaskRunner;
@@ -29,6 +31,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
@@ -595,6 +598,25 @@ class ReviewSessionPresenterTest {
     }
 
     @Test
+    void aMissedPracticeSaysTheWordIsDueAgainFromTheNextStudyDay() throws SQLException {
+        Deck deck = services.deckService().createDeck("Weak");
+        services.wordRepository().insert(weakWord(deck, "abate", "减弱"));
+        services.wordRepository().insert(weakWord(deck, "laud", "赞扬"));
+        presenter.changeMode(ReviewMode.WEAK_WORDS);
+        presenter.showDeck(deck.getId());
+        WordCard first = presenter.card().orElseThrow();
+        presenter.setAnswer("完全错误");
+        presenter.submit();
+        assertEquals("1d", presenter.ratingPreview(ReviewRating.GOOD), "a miss counts as Again");
+
+        presenter.rate(ReviewRating.GOOD);
+
+        assertTrue(presenter.result().startsWith(ReviewSessionPresenter.PRACTICE_MISSED + " XP +"), presenter.result());
+        WordCard practiced = services.wordRepository().findById(first.getId()).orElseThrow();
+        assertTrue(practiced.getNextReviewAt().isBefore(first.getNextReviewAt()));
+    }
+
+    @Test
     void theNewWordLimitEndsTheSessionAndRaisingItLetsTheSessionGoOn() throws SQLException {
         Deck deck = services.deckService().createDeck("New words");
         for (String english : List.of("lucid", "abate", "laud", "cavil")) {
@@ -659,6 +681,59 @@ class ReviewSessionPresenterTest {
         presenter.submit();
         assertTrue(presenter.result().startsWith("Correct answer: " + card.getEnglish()), presenter.result());
         assertTrue(presenter.result().contains("Answer similarity: 100%"), presenter.result());
+    }
+
+    @Test
+    void anEasyRecognitionInMixedModeShowsAndCountsAsGood() throws SQLException {
+        ReviewSessionPresenter mixed = presenterAsking(ReviewMode.EN_TO_ZH);
+        mixed.showDeck(deckId);
+        mixed.changeMode(ReviewMode.MIXED);
+        WordCard card = mixed.card().orElseThrow();
+        assertEquals(card.getEnglish(), mixed.question());
+        mixed.setAnswer(firstMeaning(card));
+        mixed.submit();
+
+        assertEquals("10m", mixed.ratingPreview(ReviewRating.GOOD));
+        assertEquals("10m", mixed.ratingPreview(ReviewRating.EASY), "Easy shows Good's interval");
+        mixed.rate(ReviewRating.EASY);
+
+        WordCard rated = services.wordRepository().findById(card.getId()).orElseThrow();
+        assertEquals(CardState.LEARNING, rated.getState(), "counted as Good, which goes on to the next step");
+        ReviewLog log = reviewLogs.findByWord(card.getId()).get(0);
+        assertEquals(ReviewRating.EASY, log.getRating());
+        assertEquals(ReviewMode.EN_TO_ZH, log.getDirection());
+    }
+
+    @Test
+    void anEasyProductionInMixedModeCountsAsEasy() throws SQLException {
+        ReviewSessionPresenter mixed = presenterAsking(ReviewMode.ZH_TO_EN);
+        mixed.showDeck(deckId);
+        mixed.changeMode(ReviewMode.MIXED);
+        WordCard card = mixed.card().orElseThrow();
+        assertEquals(card.getChinese(), mixed.question());
+        mixed.setAnswer(card.getEnglish());
+        mixed.submit();
+
+        assertTrue(mixed.ratingPreview(ReviewRating.EASY).matches("1[3-9]d"), mixed.ratingPreview(ReviewRating.EASY));
+        mixed.rate(ReviewRating.EASY);
+
+        assertEquals(CardState.REVIEW, services.wordRepository().findById(card.getId()).orElseThrow().getState());
+        assertEquals(ReviewMode.ZH_TO_EN, reviewLogs.findByWord(card.getId()).get(0).getDirection());
+    }
+
+    /** A presenter whose Mixed mode always asks in {@code direction}. */
+    private ReviewSessionPresenter presenterAsking(ReviewMode direction) {
+        Random random = new Random() {
+            @Override
+            public boolean nextBoolean() {
+                return direction == ReviewMode.EN_TO_ZH;
+            }
+        };
+        ReviewService reviews = new ReviewService(services.wordRepository(), services.reviewLogRepository(),
+            new SimilarityService(), services.reviewScheduler(), services.goalService(), services.achievementService(),
+            services.clock(), null, random);
+        return new ReviewSessionPresenter(reviews, services.goalService(), () -> ai, tasks, changes,
+            (title, error) -> failures.add(title));
     }
 
     @Test
