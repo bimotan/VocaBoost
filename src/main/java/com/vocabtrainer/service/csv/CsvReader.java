@@ -27,8 +27,14 @@ import java.util.Optional;
  * </ul>
  */
 public final class CsvReader implements Closeable {
-    /** The delimiters that are sniffed, in order of preference when two fit equally well. */
-    private static final char[] DELIMITERS = {',', '\t', ';'};
+    /**
+     * The delimiters that are sniffed, in order of preference when two fit equally well. Tab comes
+     * first: a tab-separated list whose meanings each hold one comma ("abate\t减弱, 减少") splits
+     * into two fields either way, and a tab inside a CSV field is far rarer than a comma inside a
+     * TSV field.
+     */
+    private static final char[] DELIMITERS = {'\t', ',', ';'};
+    private static final char DEFAULT_DELIMITER = ',';
     /** A longer field almost always means a quote that is never closed. */
     static final int MAX_FIELD_LENGTH = 1 << 20;
     private static final int BUFFER_LENGTH = 64 * 1024;
@@ -279,7 +285,7 @@ public final class CsvReader implements Closeable {
      * fields; comma when none does (for example in a one-column word list).
      */
     static char sniffDelimiter(String sample, boolean wholeText) {
-        char best = DELIMITERS[0];
+        char best = DEFAULT_DELIMITER;
         int bestMatching = 0;
         int bestTotal = 1;
         int bestWidth = 1;

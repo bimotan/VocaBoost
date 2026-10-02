@@ -94,6 +94,9 @@ class CsvReaderTest {
             """));
         // Anki's plain-text export with tab-separated notes.
         assertEquals('\t', delimiterOf("abate\t减弱；减少\nlucid\t清晰的<br>易懂的\ncandid\t坦率的\n"));
+        // Tab-separated meanings with one comma each split into two fields with either delimiter.
+        assertEquals('\t', delimiterOf("abate\t减弱, 减少\nlucid\t清晰的, 易懂的\ncandid\t坦率的, 直率的\n"));
+        assertEquals(',', delimiterOf("abate,减弱;减少\nlucid,清晰的;易懂的\n"));
         // A one-column word list.
         assertEquals(',', delimiterOf("abate\nlucid\n"));
         assertEquals(',', delimiterOf(""));
