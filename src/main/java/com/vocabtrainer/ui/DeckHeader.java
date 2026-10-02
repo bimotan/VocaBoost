@@ -32,6 +32,7 @@ public final class DeckHeader {
     private final CheckBox offlineToggle = new CheckBox("Offline mode / 离线模式");
     private final VBox root;
     private boolean showingDecks;
+    private boolean showingOfflineMode;
 
     public DeckHeader(ViewContext context, DeckService deckService, SettingsService settingsService,
                       ConfiguredServices configured) {
@@ -79,7 +80,11 @@ public final class DeckHeader {
         offlineToggle.setTooltip(new Tooltip("No online dictionary lookups and no AI requests: only the local"
             + " dictionaries, cached lookups and the offline mock explanation are used."));
         offlineToggle.setSelected(settingsService.isOfflineMode());
-        offlineToggle.selectedProperty().addListener((observable, wasOffline, offline) -> switchOfflineMode(offline));
+        offlineToggle.selectedProperty().addListener((observable, wasOffline, offline) -> {
+            if (!showingOfflineMode) {
+                switchOfflineMode(offline);
+            }
+        });
         HBox titleLine = new HBox(18, title, offlineToggle);
         titleLine.setAlignment(Pos.CENTER_LEFT);
 
@@ -112,7 +117,12 @@ public final class DeckHeader {
             settingsService.saveOfflineMode(offline);
         } catch (RuntimeException e) {
             context.errors().reportFailure("Switching offline mode failed", e);
-            offlineToggle.setSelected(settingsService.isOfflineMode());
+            showingOfflineMode = true;
+            try {
+                offlineToggle.setSelected(settingsService.isOfflineMode());
+            } finally {
+                showingOfflineMode = false;
+            }
             return;
         }
         context.changes().publish(DataChange.SETTINGS);

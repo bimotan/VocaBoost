@@ -30,10 +30,14 @@ import java.util.Optional;
  * Replace or Remove change it.
  */
 final class AiSettingsBox {
-    private static final String KEY_STORAGE_NOTE = "The API key is stored unencrypted in vocab.db in the data folder,"
-        + " which only your user account can open where the system allows it. It is only sent to the base URL"
-        + " (https, or http to this computer) and is never shown again, logged, or written to exports and JSON backups."
-        + " To keep it out of the database, set VOCABOOST_AI_API_KEY instead.";
+    private static final String PRIVACY_NOTE = "With a provider configured, each submitted answer sends the word,"
+        + " its meaning, part of speech and example and your typed answer to the base URL (a repeated answer is"
+        + " answered from the cache); offline mode in the header stops all AI requests."
+        + System.lineSeparator()
+        + "The API key is stored unencrypted in vocab.db in the data folder, which only your user account can open"
+        + " where the system allows it. It is only sent to the base URL (https, or http to this computer) and is"
+        + " never shown again, logged, or written to exports and JSON backups. To keep it out of the database,"
+        + " set VOCABOOST_AI_API_KEY instead.";
 
     private final ViewContext context;
     private final SettingsService settingsService;
@@ -153,12 +157,12 @@ final class AiSettingsBox {
         GridPane.setHgrow(keyRow, Priority.ALWAYS);
         GridPane.setHgrow(modelField, Priority.ALWAYS);
         HBox buttons = new HBox(10, saveButton, clearButton, testButton, clearCacheButton);
-        Label keyNote = new Label(KEY_STORAGE_NOTE);
-        keyNote.setId("aiKeyNoteLabel");
-        keyNote.setWrapText(true);
-        keyNote.setStyle("-fx-text-fill: #6b7280;");
+        Label privacyNote = new Label(PRIVACY_NOTE);
+        privacyNote.setId("aiPrivacyNoteLabel");
+        privacyNote.setWrapText(true);
+        privacyNote.setStyle("-fx-text-fill: #6b7280;");
         showKeyState();
-        root = new VBox(10, Widgets.sectionTitle("AI Explanation Provider"), form, keyNote, buttons, statusLabel);
+        root = new VBox(10, Widgets.sectionTitle("AI Explanation Provider"), form, privacyNote, buttons, statusLabel);
     }
 
     Node root() {
