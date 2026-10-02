@@ -47,6 +47,15 @@ class HtmlTextTest {
     }
 
     @Test
+    void clozeDeletionsKeepOnlyTheirTextInEveryMode() {
+        assertEquals("The obdurate official refused.", HtmlText.toText("The {{c1::obdurate}} official refused.", true));
+        assertEquals("A zealot never doubts.", HtmlText.toText("A {{c1::zealot::fanatic}} never doubts.", false));
+        assertEquals("The storm abated and the rain stopped.",
+            HtmlText.toText("The storm {{c1::<b>abated</b>}} and the rain {{c2::stopped::verb}}.", true));
+        assertEquals("{{Front}} and {c1::x}", HtmlText.toText("{{Front}} and {c1::x}", false), "not a cloze deletion");
+    }
+
+    @Test
     void plainTextIsLeftAloneExceptForMediaReferences() {
         assertEquals("salt &amp; <b>pepper</b>", HtmlText.toText(" salt &amp; <b>pepper</b> ", false));
         assertEquals("", HtmlText.toText(null, true));

@@ -47,7 +47,7 @@ class EcdictDeckUiTest extends MainWindowUiTest {
         click("ecdictDeckButton");
 
         ScriptedDialogs.Shown info = dialogs.last(ScriptedDialogs.Kind.INFO);
-        assertTrue(info.content().contains("Import ecdict.csv in the ECDICT box of the Add / Import tab"),
+        assertTrue(info.content().contains("Import ecdict.csv in the ECDICT box of the Settings tab"),
             info.content());
         assertFalse(dialogs.wasShown(ScriptedDialogs.Kind.FORM));
         assertEquals(STARTER_DECK, currentDeck().getName());

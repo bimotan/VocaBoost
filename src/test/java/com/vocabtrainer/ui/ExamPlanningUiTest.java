@@ -12,6 +12,8 @@ import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -106,6 +108,32 @@ class ExamPlanningUiTest extends MainWindowUiTest {
         assertTrue(text("newCardsPerDayHintLabel").endsWith("has its own limit: 22."), text("newCardsPerDayHintLabel"));
         assertTrue(text("examSummaryLabel").endsWith("the limit of 22/day is enough."), text("examSummaryLabel"));
         assertTrue(isVisible("useDefaultNewCardsPerDayButton"), "the plan's limit can be dropped again");
+    }
+
+    @Test
+    void theSettingsTabsExamPlanFollowsReviewsAndImportsMadeOnOtherTabs() throws Exception {
+        selectTab("settingsTab");
+        dialogs.submitForm(form -> datePicker(form).getEditor().setText(today().plusDays(10).toString()));
+        click("settingsEditExamButton");
+        String before = text("examSummaryLabel");
+        assertTrue(before.contains("To finish 215 new words"), before);
+
+        review(true, "rateGoodButton");
+        selectTab("settingsTab");
+        String afterReview = text("examSummaryLabel");
+        assertTrue(afterReview.contains("To finish 214 new words"), afterReview);
+
+        Path list = tempDir.resolve("more.csv");
+        Files.writeString(list, "obfuscate,使模糊\nquixotry,不切实际的行为\n", StandardCharsets.UTF_8);
+        selectTab("addImportTab");
+        type("importPathField", list.toString());
+        click("importCsvButton");
+        waitForBackgroundTasks();
+        selectTab("settingsTab");
+        String afterImport = text("examSummaryLabel");
+        assertTrue(afterImport.contains("To finish 216 new words"), afterImport);
+        selectTab("dashboardTab");
+        assertTrue(afterImport.endsWith(text("newWordPlanLabel")), "the Dashboard shows the same plan");
     }
 
     @Test

@@ -185,7 +185,7 @@ public class EcdictTagDeckService {
     public Result build(Request request, Consumer<Progress> progress, BooleanSupplier cancelled) {
         if (!isAvailable()) {
             throw new IllegalStateException("No ECDICT dictionary is imported. Import ecdict.csv in the ECDICT box"
-                + " of the Add / Import tab first.");
+                + " of the Settings tab first.");
         }
         progress.accept(new Progress(0, -1));
         List<EcdictRow> rows;

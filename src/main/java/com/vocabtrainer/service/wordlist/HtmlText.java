@@ -9,10 +9,15 @@ import java.util.regex.Pattern;
  * export. Line breaks ({@code <br>}, {@code <div>}, {@code <p>}, {@code <li>}) become "; " (a space
  * after a line that ends in punctuation), style sheets and scripts are dropped with their text, other
  * tags are dropped and entities are unescaped. Anki's {@code [sound:...]} references and {@code <img>}
- * tags are dropped from every field, HTML or not, since a card has no use for them here.
+ * tags are dropped from every field, HTML or not, since a card has no use for them here, and Anki's
+ * cloze deletions ({@code {{c1::abate}}}, also with a hint: {@code {{c1::abate::reduce}}}) keep
+ * only their text, so an example sentence reads as a sentence and the Cloze review can blank the word.
  */
 public final class HtmlText {
     private static final Pattern SOUND = Pattern.compile("\\[sound:[^\\]]*\\]");
+    /** An Anki cloze deletion: its text, then an optional "::hint", which is dropped. */
+    private static final Pattern CLOZE_DELETION = Pattern.compile("\\{\\{c\\d+::(.*?)(?:::(?:(?!\\}\\}).)*)?\\}\\}",
+        Pattern.DOTALL);
     private static final Pattern IMAGE = Pattern.compile("<img\\b[^>]*>", Pattern.CASE_INSENSITIVE);
     /** Style sheets and scripts pasted into a field: their text is not part of the field's text. */
     private static final Pattern STYLE_OR_SCRIPT = Pattern.compile("<(style|script)\\b[^>]*>.*?</\\1\\s*>",
@@ -46,7 +51,8 @@ public final class HtmlText {
     }
 
     /**
-     * The text of a field: without sound and image references and, when {@code html} is true, with
+     * The text of a field: without sound and image references, with cloze deletions as their text
+     * and, when {@code html} is true, with
      * line breaks as "; ", without tags and with entities unescaped.
      */
     public static String toText(String value, boolean html) {
@@ -54,6 +60,7 @@ public final class HtmlText {
             return "";
         }
         String text = SOUND.matcher(value).replaceAll("");
+        text = CLOZE_DELETION.matcher(text).replaceAll("$1");
         text = IMAGE.matcher(text).replaceAll("");
         if (!html) {
             return text.strip();

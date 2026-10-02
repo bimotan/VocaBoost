@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The ECDICT box on the Add / Import tab: test, import in the background, cancel, look up, clear, and startup. */
+/** The ECDICT box on the Settings tab: test, import in the background, cancel, look up, clear, and startup. */
 @Tag("ui")
 class EcdictUiTest extends MainWindowUiTest {
     private static final String NEW_LINE = System.lineSeparator();

@@ -85,6 +85,7 @@ public final class SettingsView {
         ScrollPane scrollPane = new ScrollPane(content);
         scrollPane.setFitToWidth(true);
         tab = Widgets.tab("settingsTab", "Settings", scrollPane);
+        study.refreshWhenShown(tab);
     }
 
     public Tab tab() {

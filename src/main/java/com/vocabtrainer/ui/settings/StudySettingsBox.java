@@ -13,6 +13,7 @@ import com.vocabtrainer.service.scheduling.SchedulingOptions;
 import com.vocabtrainer.service.scheduling.StudyDay;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.Formats;
+import com.vocabtrainer.ui.LazyRefresh;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import com.vocabtrainer.ui.dashboard.ExamDialog;
@@ -28,6 +29,7 @@ import javafx.scene.control.ListCell;
 import javafx.scene.control.Slider;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
+import javafx.scene.control.Tab;
 import javafx.scene.control.TextFormatter;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
@@ -74,6 +76,8 @@ final class StudySettingsBox {
     private boolean showingSaved;
     /** The saved default new-words limit, which the spinner goes back to when a change cannot be saved. */
     private int savedNewCardsPerDay;
+    /** Reads the current deck's settings again when the Settings tab is shown; null until {@link #refreshWhenShown}. */
+    private LazyRefresh deckRefresh;
 
     StudySettingsBox(ViewContext context, SchedulingSettings scheduling, ReviewSettings reviewSettings,
                      GoalSettings goalSettings, ExamPlanService examPlans) {
@@ -114,9 +118,11 @@ final class StudySettingsBox {
         showSaved();
         root = new VBox(10, Widgets.sectionTitle("Study"), form);
         context.decks().onSwitch(deck -> refreshDeckSettings());
+        // The exam row's new-word plan counts the deck's new words and today's first reviews.
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.GOALS) || changes.contains(DataChange.REVIEW_SETTINGS)
-                || changes.contains(DataChange.DECKS)) {
+                || changes.contains(DataChange.DECKS) || changes.contains(DataChange.WORDS)
+                || changes.contains(DataChange.REVIEWS)) {
                 refreshDeckSettings();
             }
         });
@@ -124,6 +130,15 @@ final class StudySettingsBox {
 
     Node root() {
         return root;
+    }
+
+    /**
+     * Reads the current deck's settings only while {@code tab} is shown, and at every visit, since the
+     * exam countdown depends on the clock: a rating or an import on another tab marks them stale.
+     */
+    void refreshWhenShown(Tab tab) {
+        deckRefresh = new LazyRefresh(tab, this::showDeckSettings, context.errors(), "Refreshing the settings failed",
+            true);
     }
 
     /**
@@ -320,7 +335,8 @@ final class StudySettingsBox {
     }
 
     private void refreshDeckSettings() {
-        context.errors().guard("Refreshing the settings failed", this::showDeckSettings);
+        context.errors().guard("Refreshing the settings failed",
+            deckRefresh == null ? this::showDeckSettings : deckRefresh::markStale);
     }
 
     /** What the current deck does: its own new-words limit and goals, if it has them. */

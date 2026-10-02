@@ -70,7 +70,7 @@ final class EcdictDeckBox {
     private void askAndBuild() {
         if (!service.isAvailable()) {
             context.errors().showInfo("Creating a deck from an ECDICT tag needs the ECDICT dictionary. Import"
-                + " ecdict.csv in the ECDICT box of the Add / Import tab first; it is imported once and then works"
+                + " ecdict.csv in the ECDICT box of the Settings tab first; it is imported once and then works"
                 + " offline.");
             return;
         }

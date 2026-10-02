@@ -6,6 +6,8 @@ import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.repository.WordRepository;
+import com.vocabtrainer.service.cloze.ClozeMaker;
+import com.vocabtrainer.service.cloze.WordForms;
 import com.vocabtrainer.service.csv.WordColumn;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -128,6 +130,25 @@ class AnkiImportTest {
         assertEquals("减弱; 减少", abate.getChinese());
         assertEquals("The storm began to abate.", abate.getExampleSentence());
         assertEquals("/əˈbeɪt/", abate.getPhonetic());
+    }
+
+    @Test
+    void clozeDeletionsInAnExampleKeepTheirTextSoTheClozeReviewCanBlankTheWord() throws Exception {
+        Path file = write("cloze.txt", String.join("\n",
+            "#separator:tab",
+            "#html:true",
+            "obdurate\t顽固的\tThe {{c1::obdurate}} official refused to budge.",
+            "zealot\t狂热者\tA {{c1::zealot::fanatic}} never doubts.",
+            ""));
+
+        ImportResult result = service.importGreCsv(file, deck.getId());
+
+        assertEquals(2, result.importedCount(), result.toSummary());
+        WordCard obdurate = word("obdurate");
+        assertEquals("The obdurate official refused to budge.", obdurate.getExampleSentence());
+        assertEquals("A zealot never doubts.", word("zealot").getExampleSentence());
+        assertEquals("The _____ official refused to budge.",
+            new ClozeMaker(WordForms.NONE).make(obdurate).orElseThrow().masked());
     }
 
     @Test
