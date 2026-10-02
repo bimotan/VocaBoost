@@ -76,23 +76,7 @@ public record AppServices(
 
     /** The main window on these services; {@code dialogs} shows its modal dialogs and file choosers. */
     public MainWindow createMainWindow(Dialogs dialogs) {
-        return new MainWindow(
-            startupDeck,
-            deckService,
-            wordRepository,
-            reviewService,
-            importExportService,
-            statsService,
-            goalService,
-            achievementService,
-            dictionaryServices,
-            settingsService,
-            validationService,
-            backupService,
-            aiServices,
-            databaseManager.getDatabasePath(),
-            dialogs
-        );
+        return new MainWindow(this, dialogs);
     }
 
     /**

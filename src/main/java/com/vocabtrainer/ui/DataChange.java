@@ -1,0 +1,13 @@
+package com.vocabtrainer.ui;
+
+/** A kind of stored data that a user action changed. Views listen for the kinds they show. */
+public enum DataChange {
+    /** Words were added, edited, deleted, imported or restored, including the new-word goal they count toward. */
+    WORDS,
+    /** A review was saved: card schedules, review logs, daily goals, XP and achievements. */
+    REVIEWS,
+    /** Decks were created, renamed, archived or restored. */
+    DECKS,
+    /** Dictionary or AI settings changed. */
+    SETTINGS
+}
