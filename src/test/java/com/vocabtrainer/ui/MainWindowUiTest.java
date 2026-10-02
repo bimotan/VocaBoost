@@ -75,7 +75,7 @@ abstract class MainWindowUiTest {
     static final Path SNAPSHOT_DIR = Path.of("target", "ui-snapshots");
 
     private static final String BACKGROUND_THREAD_NAME = "vocaboost-background-task";
-    /** Longer than the Word List's 250 ms search debounce. */
+    /** Longer than a debounce of typed input (the Word List's search had one of 250 ms). */
     private static final long INPUT_SETTLE_NANOS = 400_000_000L;
 
     @TempDir

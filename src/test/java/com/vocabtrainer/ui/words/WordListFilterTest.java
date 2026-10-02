@@ -5,9 +5,11 @@ import com.vocabtrainer.domain.WordCard;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WordListFilterTest {
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 3, 10, 12, 0);
@@ -42,6 +44,38 @@ class WordListFilterTest {
         assertEquals(List.of(learning), matching(new WordListFilter("All", "", "adj")));
         assertEquals(List.of(lapsedLater), matching(new WordListFilter("Weak", "gre", "verb")));
         assertEquals(List.of(), matching(new WordListFilter("All", "no-such-tag", "")));
+    }
+
+    @Test
+    void theSearchBoxMatchesPartsOfEnglishChineseOrTagsIgnoringCase() {
+        mastered.setChinese("雨后泥土的气味");
+        assertEquals(words, words.stream().filter(WordListFilter.searching("  ")).toList());
+        assertEquals(words, words.stream().filter(WordListFilter.searching(null)).toList());
+        assertEquals(List.of(fresh), words.stream().filter(WordListFilter.searching(" ABAT ")).toList());
+        assertEquals(List.of(mastered), words.stream().filter(WordListFilter.searching("泥土")).toList());
+        assertEquals(List.of(lapsedLater), words.stream().filter(WordListFilter.searching("unverified")).toList());
+        assertEquals(List.of(), words.stream().filter(WordListFilter.searching("%")).toList(),
+            "no SQL wildcards");
+    }
+
+    @Test
+    void searchingTenThousandWordsIsFast() {
+        List<WordCard> many = new ArrayList<>();
+        for (int index = 0; index < 10_000; index++) {
+            many.add(word(String.format("word%05d", index), "noun", "generated", CardState.NEW, 0, 0, 0, 0, 0, NOW));
+        }
+        WordListFilter filter = new WordListFilter("Due", "gen", "NOUN");
+        long start = System.nanoTime();
+        int matches = 0;
+        // Ten keystrokes' worth of filtering, each over every word.
+        for (String query : List.of("w", "wo", "wor", "word", "word0", "word09", "word099", "word0999", "x", "")) {
+            var search = WordListFilter.searching(query);
+            matches = (int) many.stream().filter(word -> search.test(word) && filter.matches(word, NOW, DAY_END)).count();
+        }
+        long millis = (System.nanoTime() - start) / 1_000_000L;
+        assertEquals(10_000, matches);
+        // Generous: it takes a few milliseconds; a database query per keystroke took far longer.
+        assertTrue(millis < 2_000, "filtering took " + millis + " ms");
     }
 
     @Test

@@ -8,6 +8,7 @@ import java.time.format.DateTimeFormatter;
 public final class DateTimeUtil {
     public static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
     public static final DateTimeFormatter LEGACY_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter DISPLAY_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     private DateTimeUtil() {
     }
@@ -35,7 +36,7 @@ public final class DateTimeUtil {
     }
 
     public static String toDisplay(LocalDateTime value) {
-        return value == null ? "-" : value.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+        return value == null ? "-" : value.format(DISPLAY_FORMATTER);
     }
 
     public static Path defaultDatabasePath() {

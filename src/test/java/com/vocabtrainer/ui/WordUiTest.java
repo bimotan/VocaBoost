@@ -149,7 +149,7 @@ class WordUiTest extends MainWindowUiTest {
         assertEquals("New", cell("wordTable", "abate", 4));
         assertEquals("Due", cell("wordTable", "abate", 5));
 
-        // Typing is debounced, so wait for the table to catch up.
+        // The table filters the words it read as the user types.
         type("wordSearchField", "abate");
         waitForWordList("search 'abate'", List.of("abate"));
 
