@@ -305,34 +305,6 @@ public final class ReviewSessionPresenter {
     }
 
     /**
-     * The review settings changed elsewhere, such as the deck's new-cards-per-day limit set from the
-     * Dashboard's new-word plan or the exam date: the limit is read again, and a session that ran out
-     * of cards goes on when the new limit lets more new cards in today; a checked answer's rating
-     * buttons show the intervals the exam date gives now.
-     */
-    public void reviewSettingsChanged() {
-        int limit = reviewService.newCardsPerDay(deckId);
-        boolean limitChanged = limit != newCardsPerDay;
-        newCardsPerDay = limit;
-        boolean previewsChanged = false;
-        if ((state == State.ANSWERED || state == State.RATING_FAILED) && card != null) {
-            Map<ReviewRating, IntervalPreview> before = new EnumMap<>(ratingPreviews);
-            previewRatings();
-            previewsChanged = !before.equals(ratingPreviews);
-        }
-        if (!limitChanged && !previewsChanged) {
-            return;
-        }
-        try {
-            if (limitChanged && state == State.COMPLETE) {
-                loadNextCard();
-            }
-        } finally {
-            fireChanged();
-        }
-    }
-
-    /**
      * The goals were edited on the Dashboard: the session takes the session goal as its target, as if
      * it had been chosen here, and a completed session shows the new daily goals.
      */
@@ -347,6 +319,26 @@ public final class ReviewSessionPresenter {
                 loadNextCard();
             } else {
                 updateSessionProgress();
+            }
+        } finally {
+            fireChanged();
+        }
+    }
+
+    /**
+     * The review settings changed: on the Settings tab, this deck's limit here, the limit set from the
+     * Dashboard's new-word plan, or the exam date. The deck's new-words limit is read again, a checked
+     * answer's rating buttons show the intervals the scheduler settings and the exam date give now,
+     * and a session that ran out of cards goes on when more are due now.
+     */
+    public void reviewSettingsChanged() {
+        try {
+            newCardsPerDay = reviewService.newCardsPerDay(deckId);
+            if (canRate()) {
+                previewRatings();
+            }
+            if (state == State.COMPLETE) {
+                loadNextCard();
             }
         } finally {
             fireChanged();

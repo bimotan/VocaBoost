@@ -1,4 +1,4 @@
-package com.vocabtrainer.ui.importing;
+package com.vocabtrainer.ui.settings;
 
 import com.vocabtrainer.domain.EcdictMetadata;
 import com.vocabtrainer.service.LocalDictionaryService;
@@ -63,6 +63,7 @@ final class EcdictSettingsBox {
         pathField.setText(settingsService.getEcdictPath().orElse(""));
         pathField.setId("ecdictPathField");
         pathField.setPromptText("Choose local ECDICT CSV");
+        pathField.setAccessibleText("ECDICT CSV file");
         statusLabel.setId("ecdictStatusLabel");
         statusLabel.setWrapText(true);
         progressBar.setId("ecdictProgressBar");

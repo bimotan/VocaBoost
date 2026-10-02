@@ -39,8 +39,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Runs what the dashboard, the deck table, the statistics tab, a rating and its undo, a backup
- * restore and a word delete do, records every SQL statement the repositories prepare, and checks
- * with EXPLAIN QUERY PLAN that none of them reads the whole review log, goal or word table.
+ * restore, a word delete and adding a word do, records every SQL statement the repositories prepare,
+ * and checks with EXPLAIN QUERY PLAN that none of them reads the whole review log, goal or word table.
  */
 class QueryPlanTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-05-28T09:00:00Z"), ZoneId.of("UTC"));
@@ -132,6 +132,8 @@ class QueryPlanTest {
         backup.importJsonBackup(json, deck.getId());
         wordRepository.deleteById(words.get(0).getId());
         wordRepository.deleteByIds(List.of(words.get(5).getId(), words.get(6).getId()));
+        // Adding a word: is it in another deck already?
+        wordRepository.findInOtherDecks(words.get(1).getEnglish(), other.getId());
 
         List<String> problems = new ArrayList<>();
         for (String sql : databaseManager.statements) {

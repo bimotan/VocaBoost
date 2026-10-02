@@ -4,7 +4,9 @@ import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.GoalTargets;
 import com.vocabtrainer.service.GoalSettings;
 import com.vocabtrainer.service.ReviewSettings;
+import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.ViewContext;
+import com.vocabtrainer.ui.Widgets;
 import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
 import javafx.scene.control.Spinner;
@@ -13,24 +15,36 @@ import javafx.scene.control.TextFormatter;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Region;
 
 /**
  * Edits the goals in a modal form: the daily review and new-word goals, either the defaults of
  * every deck or the current deck's own, and the session goal, which is the review session size of
- * every deck (the Review tab's "Session size").
+ * every deck (the Review tab's "Session size"). The Dashboard and the Settings tab open it.
  */
-final class GoalsDialog {
+public final class GoalsDialog {
     private final ViewContext context;
     private final GoalSettings settings;
 
-    GoalsDialog(ViewContext context, GoalSettings settings) {
+    private GoalsDialog(ViewContext context, GoalSettings settings) {
         this.context = context;
         this.settings = settings;
     }
 
+    /**
+     * Shows the form for the current deck; once the goals are saved, publishes {@link DataChange#GOALS}.
+     * Failures, also reading the goals for the form, are reported.
+     */
+    public static void open(ViewContext context, GoalSettings settings) {
+        context.errors().guard("Goals not saved", () -> {
+            if (new GoalsDialog(context, settings).edit(context.decks().current())) {
+                context.errors().guard("Goals saved, but refreshing the views failed",
+                    () -> context.changes().publish(DataChange.GOALS));
+            }
+        });
+    }
+
     /** Shows the form for {@code deck} and saves it on OK; true when the goals were saved. */
-    boolean edit(Deck deck) {
+    private boolean edit(Deck deck) {
         GoalTargets defaults = settings.defaults();
         boolean ownGoals = settings.deckGoals(deck.getId()).isPresent();
         GoalTargets shown = settings.goalsFor(deck.getId());
@@ -57,21 +71,22 @@ final class GoalsDialog {
 
         Label newWordsHint = hint("A word counts as a new word on the day of its first review. "
             + deck.getName() + " introduces at most " + settings.newCardsPerDay(deck.getId())
-            + " new words per study day (Review tab).");
+            + " new words per study day: the limit of every deck is on the Settings tab, this deck's own on"
+            + " the Review tab.");
         Label sessionHint = hint("Cards per review session, in every deck, as on the Review tab; 0 means All Due.");
 
         GridPane form = new GridPane();
         form.setId("goalsForm");
         form.setHgap(10);
         form.setVgap(10);
-        form.add(new Label("Daily goals for"), 0, 0);
+        form.add(Widgets.formLabel("Daily goals _for", everyDeck), 0, 0);
         form.add(new HBox(16, everyDeck, thisDeck), 1, 0);
-        form.add(new Label("Reviews per day"), 0, 1);
+        form.add(Widgets.formLabel("_Reviews per day", reviewGoal), 0, 1);
         form.add(reviewGoal, 1, 1);
-        form.add(new Label("New words per day"), 0, 2);
+        form.add(Widgets.formLabel("_New words per day", newWordGoal), 0, 2);
         form.add(newWordGoal, 1, 2);
         form.add(newWordsHint, 1, 3);
-        form.add(new Label("Session size"), 0, 4);
+        form.add(Widgets.formLabel("_Session size", sessionGoal), 0, 4);
         form.add(sessionGoal, 1, 4);
         form.add(sessionHint, 1, 5);
 
@@ -125,12 +140,9 @@ final class GoalsDialog {
     }
 
     private static Label hint(String text) {
-        Label label = new Label(text);
-        label.setWrapText(true);
+        Label label = Widgets.hint(text);
         // A fixed width lets the grid give the wrapped lines their height.
         label.setPrefWidth(380);
-        label.setMinHeight(Region.USE_PREF_SIZE);
-        label.setStyle("-fx-text-fill: #6b7280; -fx-font-size: 12px;");
         return label;
     }
 }

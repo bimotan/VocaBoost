@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Daily goals, XP and the study streak.
@@ -40,7 +41,8 @@ public class GoalService {
     private final GoalRepository goalRepository;
     private final ReviewLogRepository reviewLogRepository;
     private final GoalSettings settings;
-    private final StudyDay studyDay;
+    /** The scheduler's study day, which the user can change while the app runs. */
+    private final Supplier<StudyDay> studyDays;
     private final Clock clock;
 
     /** Goals kept in memory, starting with the defaults, and study days starting at 4 am. */
@@ -50,14 +52,24 @@ public class GoalService {
 
     /**
      * @param settings the goals the user set
-     * @param studyDay when a study day starts; the scheduler's, so "today" is the same day everywhere
+     * @param studyDay when a study day starts
      */
     public GoalService(GoalRepository goalRepository, ReviewLogRepository reviewLogRepository, GoalSettings settings,
                        StudyDay studyDay, Clock clock) {
+        this(goalRepository, reviewLogRepository, settings, () -> studyDay, clock);
+    }
+
+    /**
+     * @param settings  the goals the user set
+     * @param studyDays when a study day starts, read at every call: the scheduler's, so "today" is the
+     *                  same day everywhere, also after the user changed the rollover hour
+     */
+    public GoalService(GoalRepository goalRepository, ReviewLogRepository reviewLogRepository, GoalSettings settings,
+                       Supplier<StudyDay> studyDays, Clock clock) {
         this.goalRepository = goalRepository;
         this.reviewLogRepository = reviewLogRepository;
         this.settings = settings;
-        this.studyDay = studyDay;
+        this.studyDays = studyDays;
         this.clock = clock;
     }
 
@@ -68,7 +80,7 @@ public class GoalService {
 
     /** The study day it is now. */
     public LocalDate today() {
-        return studyDay.of(LocalDateTime.now(clock));
+        return studyDays.get().of(LocalDateTime.now(clock));
     }
 
     public DailyGoalProgress getTodayProgress(long deckId) {
@@ -77,6 +89,7 @@ public class GoalService {
 
     /** The deck's progress on the study day {@code day}. Only reads: a day without reviews has no row yet. */
     public DailyGoalProgress progressFor(long deckId, LocalDate day) {
+        StudyDay studyDay = studyDays.get();
         try {
             Optional<GoalRepository.GoalRow> row = goalRepository.find(deckId, day);
             DailyCount reviews = DailyReviews.on(reviewLogRepository, studyDay, deckId, day);
@@ -91,7 +104,8 @@ public class GoalService {
      * transaction): its XP, and the daily goal if this review completed it.
      */
     public GoalUpdate recordReview(long deckId, ReviewLog log) {
-        LocalDate day = studyDay.of(log.getReviewedAt());
+        StudyDay studyDay = studyDays.get();
+        LocalDate day = studyDays.get().of(log.getReviewedAt());
         try {
             int xp = reviewXp(log);
             GoalTargets goals = settings.goalsFor(deckId);
@@ -116,7 +130,8 @@ public class GoalService {
      * accuracy or the streak.
      */
     public GoalUpdate recordPractice(long deckId, ReviewLog log) {
-        LocalDate day = studyDay.of(log.getReviewedAt());
+        StudyDay studyDay = studyDays.get();
+        LocalDate day = studyDays.get().of(log.getReviewedAt());
         try {
             int xp = practiceXp(log);
             GoalRepository.GoalRow row = addProgress(deckId, day, settings.goalsFor(deckId), 0, 0, 0, xp);
@@ -134,7 +149,7 @@ public class GoalService {
      * completion. A day left without progress has no row, as if the review had never been saved.
      */
     public void revertReview(long deckId, ReviewLog log, int xp, boolean completedDailyGoal) {
-        LocalDate day = studyDay.of(log.getReviewedAt());
+        LocalDate day = studyDays.get().of(log.getReviewedAt());
         boolean review = log.getKind() == ReviewKind.LEARN || log.getKind() == ReviewKind.REVIEW;
         try {
             goalRepository.subtractProgress(deckId, day, review ? 1 : 0, review && log.isCorrect() ? 1 : 0,
@@ -218,6 +233,7 @@ public class GoalService {
      * the day before counts. Steps back with one indexed lookup per day of the streak.
      */
     private int streak(LocalDate day) throws SQLException {
+        StudyDay studyDay = studyDays.get();
         int days = 0;
         LocalDate expected = day;
         LocalDateTime before = studyDay.start(day.plusDays(1));

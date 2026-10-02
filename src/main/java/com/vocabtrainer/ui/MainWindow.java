@@ -1,22 +1,29 @@
 package com.vocabtrainer.ui;
 
 import com.vocabtrainer.app.AppServices;
+import com.vocabtrainer.service.DisplaySettings;
+import com.vocabtrainer.service.ReviewSettings;
+import com.vocabtrainer.service.SchedulingSettings;
 import com.vocabtrainer.ui.dashboard.DashboardView;
 import com.vocabtrainer.ui.decks.DecksView;
 import com.vocabtrainer.ui.importing.AddImportView;
 import com.vocabtrainer.ui.review.ReviewView;
+import com.vocabtrainer.ui.settings.SettingsView;
 import com.vocabtrainer.ui.stats.StatisticsView;
 import com.vocabtrainer.ui.words.WordListView;
+import javafx.geometry.Dimension2D;
 import javafx.scene.Scene;
 import javafx.scene.control.TabPane;
 import javafx.scene.layout.BorderPane;
+import javafx.stage.Screen;
 
 import java.nio.file.Path;
 
 /**
  * The main window: the deck header above one tab per area. Each tab is its own view class; this
  * shell only builds them on the shared {@link ViewContext} (current deck, change notifications,
- * background work, dialogs and error reporting).
+ * background work, dialogs and error reporting). It sizes the window to the screen
+ * ({@link WindowSize}), styles it with app.css and shows its text at the saved text size.
  */
 public class MainWindow {
     private final AppServices services;
@@ -36,8 +43,12 @@ public class MainWindow {
         ViewContext context = new ViewContext(dialogs, errors, new UiAsync(errors), new DataChanges(), decks,
             () -> root.getScene().getWindow());
         Path databasePath = services.databaseManager().getDatabasePath();
+        OfflineMode offlineMode = new OfflineMode(context, services.settingsService());
+        DisplaySettings display = new DisplaySettings(services.settingsService());
+        AppStyle.applyTextSize(root, display.textSizePercent());
 
-        DeckHeader header = new DeckHeader(context, services.deckService(), services.settingsService(), configured);
+        DeckHeader header = new DeckHeader(context, services.deckService(), services.settingsService(), configured,
+            offlineMode);
         DashboardView dashboard = new DashboardView(context, services.statsService(), services.goalService(),
             services.achievementService(), services.examPlanService(), databasePath);
         DecksView decksView = new DecksView(context, services.deckService(), services.statsService(),
@@ -45,19 +56,23 @@ public class MainWindow {
         ReviewView review = new ReviewView(context, services.reviewService(), services.goalService(), configured,
             services.clock());
         AddImportView addImport = new AddImportView(context, services.wordRepository(), services.validationService(),
-            services.importExportService(),
-            services.settingsService(), services.aiCacheRepository(), services.ecdictImportService(),
-            services.localDictionary(), configured);
+            services.importExportService(), services.settingsService(), configured);
         StatisticsView statistics = new StatisticsView(context, services.statsService(), services.goalService(),
-            services.backupService(), services.examPlanService(), databasePath);
+            services.backupService(), services.examPlanService(),
+            () -> services.reviewScheduler().options().desiredRetention());
         WordListView wordList = new WordListView(context, services.wordRepository(), services.reviewLogRepository(),
-            services.validationService(), services.clock(), services.reviewScheduler().studyDay(),
+            services.validationService(), services.clock(), services.reviewScheduler()::studyDay,
             services.clozeMaker());
+        SettingsView settings = new SettingsView(context, services.settingsService(),
+            new SchedulingSettings(services.settingsService(), services.reviewScheduler()),
+            new ReviewSettings(services.settingsService()), services.goalService().settings(),
+            services.aiCacheRepository(), services.ecdictImportService(), services.localDictionary(), configured,
+            offlineMode, databasePath, display, percent -> AppStyle.applyTextSize(root, percent));
 
         TabPane tabs = new TabPane();
         tabs.setId("mainTabs");
         tabs.getTabs().addAll(dashboard.tab(), decksView.tab(), review.tab(), addImport.tab(), statistics.tab(),
-            wordList.tab());
+            wordList.tab(), settings.tab());
         root.setTop(header.root());
         root.setCenter(tabs);
 
@@ -67,7 +82,9 @@ public class MainWindow {
         decksView.refreshNow();
         wordList.refreshNow();
         review.start();
-        Scene scene = new Scene(root, 1120, 780);
+        Dimension2D size = WindowSize.initialSceneSize(Screen.getPrimary().getVisualBounds());
+        Scene scene = new Scene(root, size.getWidth(), size.getHeight());
+        AppStyle.install(scene);
         review.installShortcuts(scene);
         return scene;
     }

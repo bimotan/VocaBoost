@@ -11,16 +11,17 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
-import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
- * The window header: app title, deck and service status, the offline mode switch, and the deck
- * selector with create, rename and archive.
+ * The window header: app title, deck and service status, the offline mode switch (the same one as on
+ * the Settings tab), and the deck selector with create, rename and archive.
  */
 public final class DeckHeader {
     private final ViewContext context;
@@ -29,21 +30,19 @@ public final class DeckHeader {
     private final ConfiguredServices configured;
     private final Label subtitleLabel = new Label();
     private final ComboBox<Deck> deckSelector = Widgets.deckComboBox("deckSelector", 220);
-    private final CheckBox offlineToggle = new CheckBox("Offline mode / 离线模式");
     private final VBox root;
     private boolean showingDecks;
-    private boolean showingOfflineMode;
 
+    /** {@code offlineMode} is the switch the header shows next to the title. */
     public DeckHeader(ViewContext context, DeckService deckService, SettingsService settingsService,
-                      ConfiguredServices configured) {
+                      ConfiguredServices configured, OfflineMode offlineMode) {
         this.context = context;
         this.deckService = deckService;
         this.settingsService = settingsService;
         this.configured = configured;
 
-        Label title = new Label("VocaBoost");
-        title.setStyle("-fx-font-size: 24px; -fx-font-weight: 700;");
-        subtitleLabel.setStyle("-fx-text-fill: #4b5563;");
+        Label title = Widgets.styled(new Label("VocaBoost"), "app-title");
+        subtitleLabel.getStyleClass().add("secondary-text");
         subtitleLabel.setId("headerSubtitleLabel");
 
         DeckContext decks = context.decks();
@@ -74,17 +73,16 @@ public final class DeckHeader {
         archiveDeckButton.setId("archiveDeckButton");
         archiveDeckButton.setOnAction(event -> archiveCurrentDeck());
 
-        HBox deckControls = new HBox(8, new Label("Deck"), deckSelector, newDeckButton, renameDeckButton, archiveDeckButton);
+        Label deckLabel = Widgets.formLabel("_Deck", deckSelector);
+        HBox deckControls = new HBox(8, deckLabel, deckSelector, newDeckButton, renameDeckButton, archiveDeckButton);
         deckControls.setAlignment(Pos.CENTER_LEFT);
-        offlineToggle.setId("offlineModeToggle");
-        offlineToggle.setTooltip(new Tooltip("No online dictionary lookups and no AI requests: only the local"
-            + " dictionaries, cached lookups and the offline mock explanation are used."));
-        offlineToggle.setSelected(settingsService.isOfflineMode());
-        offlineToggle.selectedProperty().addListener((observable, wasOffline, offline) -> {
-            if (!showingOfflineMode) {
-                switchOfflineMode(offline);
-            }
-        });
+        CheckBox offlineToggle = offlineMode.checkBox("offlineModeToggle", "Offline mode / 离线模式");
+        // In a narrow window the status line is cut short first, then the deck selector, never the
+        // title or the buttons.
+        for (Region region : List.of(title, deckLabel, newDeckButton, renameDeckButton, archiveDeckButton)) {
+            region.setMinWidth(Region.USE_PREF_SIZE);
+        }
+        deckSelector.setMinWidth(120);
         HBox titleLine = new HBox(18, title, offlineToggle);
         titleLine.setAlignment(Pos.CENTER_LEFT);
 
@@ -95,7 +93,7 @@ public final class DeckHeader {
         updateSubtitle();
         root = new VBox(4, headerLine);
         root.setPadding(new Insets(18, 24, 12, 24));
-        root.setStyle("-fx-background-color: #f8fafc; -fx-border-color: #e5e7eb; -fx-border-width: 0 0 1 0;");
+        root.getStyleClass().add("app-header");
     }
 
     public Node root() {
@@ -109,23 +107,6 @@ public final class DeckHeader {
         } finally {
             showingDecks = false;
         }
-    }
-
-    /** Saves offline mode; the services read it at every request, so it applies at once. */
-    private void switchOfflineMode(boolean offline) {
-        try {
-            settingsService.saveOfflineMode(offline);
-        } catch (RuntimeException e) {
-            context.errors().reportFailure("Switching offline mode failed", e);
-            showingOfflineMode = true;
-            try {
-                offlineToggle.setSelected(settingsService.isOfflineMode());
-            } finally {
-                showingOfflineMode = false;
-            }
-            return;
-        }
-        context.changes().publish(DataChange.SETTINGS);
     }
 
     private void updateSubtitle() {

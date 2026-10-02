@@ -37,6 +37,9 @@ import java.util.logging.Logger;
  * <p>When the word's deck has an exam date ({@link ExamDates}), a review that would fall on or after
  * it is brought forward into the last days before it ({@link com.vocabtrainer.service.scheduling.ExamClamp});
  * the rating previews show the shortened interval. Replaying old review logs ignores the exam.
+ *
+ * <p>The options can be changed while the app runs ({@link #setOptions}); every call uses the
+ * options in effect when it starts.
  */
 public class ReviewScheduler {
     /**
@@ -56,9 +59,9 @@ public class ReviewScheduler {
         Optional<LocalDate> examDate(long deckId);
     }
 
-    private final CardScheduler cards;
+    private volatile CardScheduler cards;
     /** Replays review logs of older versions, which had no learning steps. */
-    private final CardScheduler withoutSteps;
+    private volatile CardScheduler withoutSteps;
     private final WordSelector wordSelector;
     private final ExamDates examDates;
 
@@ -92,6 +95,17 @@ public class ReviewScheduler {
 
     public SchedulingOptions options() {
         return cards.options();
+    }
+
+    /**
+     * Schedules with {@code options} from now on: the next rating, interval preview and due count
+     * use them. Cards keep the due dates they have.
+     */
+    public void setOptions(SchedulingOptions options) {
+        CardScheduler scheduler = new CardScheduler(options);
+        CardScheduler replay = new CardScheduler(options.withoutSteps());
+        cards = scheduler;
+        withoutSteps = replay;
     }
 
     public StudyDay studyDay() {
@@ -221,14 +235,15 @@ public class ReviewScheduler {
         word.setLapses(0);
         word.setLastReviewedAt(null);
         word.setEasinessFactor(WordCard.DEFAULT_EASINESS);
+        CardScheduler replay = withoutSteps;
         history.stream()
             .filter(log -> log.getKind() != ReviewKind.PRACTICE)
             .sorted(Comparator.comparing(ReviewLog::getReviewedAt).thenComparingLong(ReviewLog::getId))
             .forEach(log -> {
                 if (log.getKind() == ReviewKind.KNOWN) {
-                    withoutSteps.markKnown(word, KNOWN_STABILITY_DAYS, log.getReviewedAt());
+                    replay.markKnown(word, KNOWN_STABILITY_DAYS, log.getReviewedAt());
                 } else {
-                    applyRating(withoutSteps, word, log.getEffectiveRating(), log.getReviewedAt(), null);
+                    applyRating(replay, word, log.getEffectiveRating(), log.getReviewedAt(), null);
                 }
             });
     }

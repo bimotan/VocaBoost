@@ -63,7 +63,9 @@ import java.util.logging.Logger;
  * @param aiServices         builds the AI service from the saved settings; called again when the
  *                           AI settings change
  * @param startupDeck        the deck the main window opens on
- * @param reviewScheduler    schedules reviews with the saved scheduling settings and exam dates
+ * @param reviewScheduler    schedules reviews with the saved scheduling settings and exam dates; the
+ *                           Settings tab changes them while the app runs, and the services read its
+ *                           study day at every call
  * @param clock              the time every service and view works with
  * @param examPlanService    the exam dates, the countdown and the new-word plan
  * @param ecdictTagDecks     builds decks from the words ECDICT tags with an exam
@@ -203,7 +205,7 @@ public record AppServices(
             cardStates.run();
             ReviewSettings reviewSettings = new ReviewSettings(settingsService);
             GoalService goalService = new GoalService(goalRepository, reviewLogRepository,
-                new GoalSettings(settingsService, reviewSettings), reviewScheduler.studyDay(), clock);
+                new GoalSettings(settingsService, reviewSettings), reviewScheduler::studyDay, clock);
             AchievementService achievementService = new AchievementService(achievementRepository, goalService, clock);
             WordValidationService validationService = new WordValidationService();
             // Only opened by the first lookup; the ECDICT CSV itself is never read here.
@@ -235,7 +237,7 @@ public record AppServices(
                 clozeMaker
             );
             StatsService statsService = new StatsService(wordRepository, reviewLogRepository, clock,
-                reviewScheduler.studyDay(), reviewSettings);
+                reviewScheduler::studyDay, reviewSettings);
             ExamPlanService examPlanService = new ExamPlanService(examSettings, wordRepository, reviewLogRepository,
                 reviewSettings, reviewScheduler, clock);
             bringReviewsBeforeExams(examPlanService);

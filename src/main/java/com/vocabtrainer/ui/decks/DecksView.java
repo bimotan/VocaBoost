@@ -4,11 +4,13 @@ import com.vocabtrainer.service.DeckOverview;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.service.ecdict.EcdictTagDeckService;
+import com.vocabtrainer.ui.CellValue;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.LazyRefresh;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import com.vocabtrainer.util.DateTimeUtil;
+import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -21,6 +23,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -67,10 +70,12 @@ public final class DecksView {
 
     private VBox createContent() {
         deckTable.setId("deckTable");
+        deckTable.setAccessibleText("Active decks");
         deckTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         configureDeckTable(deckTable);
 
         archivedDeckTable.setId("archivedDeckTable");
+        archivedDeckTable.setAccessibleText("Archived decks");
         archivedDeckTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         configureDeckTable(archivedDeckTable);
         archivedDeckTable.setPrefHeight(180);
@@ -107,13 +112,16 @@ public final class DecksView {
     private static void configureDeckTable(TableView<DeckOverview> table) {
         TableColumn<DeckOverview, String> nameCol = new TableColumn<>("Deck");
         nameCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().deck().getName()));
-        TableColumn<DeckOverview, String> wordsCol = new TableColumn<>("Words");
-        wordsCol.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().words())));
-        TableColumn<DeckOverview, String> dueCol = new TableColumn<>("Due");
-        dueCol.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().due())));
-        TableColumn<DeckOverview, String> latestCol = new TableColumn<>("Latest review");
-        latestCol.setCellValueFactory(data ->
-            new SimpleStringProperty(DateTimeUtil.toDisplay(data.getValue().latestReviewAt())));
+        // Counts and dates sort by value, not as text.
+        TableColumn<DeckOverview, Integer> wordsCol = new TableColumn<>("Words");
+        wordsCol.setCellValueFactory(data -> new ReadOnlyObjectWrapper<>(data.getValue().words()));
+        TableColumn<DeckOverview, Integer> dueCol = new TableColumn<>("Due");
+        dueCol.setCellValueFactory(data -> new ReadOnlyObjectWrapper<>(data.getValue().due()));
+        TableColumn<DeckOverview, CellValue<LocalDateTime>> latestCol = new TableColumn<>("Latest review");
+        latestCol.setCellValueFactory(data -> {
+            LocalDateTime latest = data.getValue().latestReviewAt();
+            return new ReadOnlyObjectWrapper<>(new CellValue<>(latest, DateTimeUtil.toDisplay(latest)));
+        });
         table.getColumns().addAll(List.of(nameCol, wordsCol, dueCol, latestCol));
     }
 

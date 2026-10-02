@@ -131,7 +131,7 @@ class ImportAndSettingsUiTest extends MainWindowUiTest {
 
     @Test
     void savingIncompleteAiSettingsExplainsWhatIsMissing() {
-        selectTab("addImportTab");
+        selectTab("settingsTab");
         type("aiBaseUrlField", "https://example.invalid/v1/chat/completions");
         click("saveAiButton");
 

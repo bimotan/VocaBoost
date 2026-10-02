@@ -1,12 +1,9 @@
 package com.vocabtrainer.ui.importing;
 
-import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.ImportExportService;
-import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.SettingsService;
 import com.vocabtrainer.service.WordValidationService;
-import com.vocabtrainer.service.ecdict.EcdictImportService;
 import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
@@ -16,23 +13,20 @@ import javafx.scene.control.Tab;
 import javafx.scene.layout.VBox;
 
 /**
- * The Add / Import tab: manual add with dictionary lookup, dictionary and AI settings, file imports and
- * exports for other apps.
+ * The Add / Import tab: manual add with dictionary lookup, file imports and exports for other apps.
+ * The dictionary and AI settings are on the Settings tab.
  */
 public final class AddImportView {
     private final Tab tab;
 
     public AddImportView(ViewContext context, WordRepository wordRepository, WordValidationService validationService,
                          ImportExportService importExportService, SettingsService settingsService,
-                         AiCacheRepository aiCacheRepository, EcdictImportService ecdictImportService, LocalDictionaryService localDictionary,
                          ConfiguredServices configured) {
         AddWordBox addWord = new AddWordBox(context, wordRepository, validationService, configured);
-        EcdictSettingsBox ecdict = new EcdictSettingsBox(context, settingsService, ecdictImportService, localDictionary);
-        AiSettingsBox ai = new AiSettingsBox(context, settingsService, aiCacheRepository, configured);
         ImportBox imports = new ImportBox(context, importExportService, settingsService);
         WordListExportBox exports = new WordListExportBox(context, importExportService);
 
-        VBox content = new VBox(24, addWord.root(), ecdict.root(), ai.root(), imports.root(), exports.root());
+        VBox content = new VBox(24, addWord.root(), imports.root(), exports.root());
         content.setPadding(new Insets(24));
         ScrollPane scrollPane = new ScrollPane(content);
         scrollPane.setFitToWidth(true);

@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -53,6 +54,10 @@ final class ScriptedDialogs implements Dialogs {
         return expect(Kind.CHOOSE, buttonText);
     }
 
+    /**
+     * Fills in the next form and presses OK. When the form does not accept the input, it stays open
+     * and the next {@code submitForm} or {@code cancelForm} answers it again.
+     */
     ScriptedDialogs submitForm(Consumer<Node> fill) {
         return expect(Kind.FORM, Optional.of(fill));
     }
@@ -156,11 +161,23 @@ final class ScriptedDialogs implements Dialogs {
         return (Optional<String>) answer(new Shown(Kind.ASK_TEXT, title, header, content, initialValue));
     }
 
+    /** Answers with the scripted fill-ins and OK presses until the form accepts one or a cancel comes. */
     @Override
     @SuppressWarnings("unchecked")
-    public boolean showForm(String title, Node form) {
+    public boolean showForm(String title, Node form, BooleanSupplier onOk) {
         Optional<Consumer<Node>> fill = (Optional<Consumer<Node>>) answer(new Shown(Kind.FORM, title, null, null, null));
-        fill.ifPresent(edit -> edit.accept(form));
+        while (fill.isPresent()) {
+            fill.get().accept(form);
+            if (onOk.getAsBoolean()) {
+                break;
+            }
+            Answer next = script.pollFirst();
+            if (next == null || next.kind() != Kind.FORM) {
+                throw new AssertionError("The form '" + title + "' stayed open after OK, but the test scripted no"
+                    + " further answer for it" + (next == null ? "" : "; next answer: " + next));
+            }
+            fill = (Optional<Consumer<Node>>) next.value();
+        }
         return fill.isPresent();
     }
 

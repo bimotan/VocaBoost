@@ -11,6 +11,7 @@ import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import com.vocabtrainer.ui.WordDetails;
 import com.vocabtrainer.ui.WordDetailsCard;
+import javafx.css.PseudoClass;
 import javafx.event.ActionEvent;
 import javafx.event.EventTarget;
 import javafx.geometry.Insets;
@@ -36,6 +37,7 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -69,11 +71,13 @@ import java.util.Optional;
  * <p>Next to the answer, "Already known" marks a new card as known, "Suspend" suspends the card and
  * "Undo" takes back the last of these or the last rating. After a rating made a card a leech, a
  * notice under the result offers to suspend it and, with an AI provider, a memory aid.
+ *
+ * <p>The rating buttons stay at the bottom of the tab, always in view; what is above them scrolls
+ * when the window is too short for it, e.g. on a 1366 x 768 laptop.
  */
 public final class ReviewView {
-    private static final String WORD_QUESTION_STYLE = "-fx-font-size: 34px; -fx-font-weight: 700;";
-    /** A cloze's sentence is longer than a word: smaller, so it fits on a line or two. */
-    private static final String SENTENCE_QUESTION_STYLE = "-fx-font-size: 24px; -fx-font-weight: 600;";
+    /** A cloze's sentence is longer than a word, so app.css shows it smaller. */
+    private static final PseudoClass SENTENCE = PseudoClass.getPseudoClass("sentence");
     /** Undoes the last rating, Already known or suspension. */
     static final KeyCombination UNDO_KEY = new KeyCodeCombination(KeyCode.Z, KeyCombination.SHORTCUT_DOWN);
 
@@ -139,7 +143,7 @@ public final class ReviewView {
                 presenter.wordsChanged();
             }
             if (changes.contains(DataChange.REVIEW_SETTINGS)) {
-                // The Dashboard may have applied a new-words-per-day plan.
+                // The Dashboard may have applied a new-words-per-day plan, or the Settings tab a limit.
                 presenter.reviewSettingsChanged();
             }
             if (changes.contains(DataChange.SETTINGS)) {
@@ -242,7 +246,7 @@ public final class ReviewView {
             || (target instanceof Spinner<?> spinner && spinner.isEditable() && !spinner.isDisabled());
     }
 
-    private VBox createContent() {
+    private BorderPane createContent() {
         reviewModeSelector.setId("reviewModeSelector");
         reviewModeSelector.getItems().setAll(ReviewMode.values());
         reviewModeSelector.setCellFactory(list -> reviewModeCell());
@@ -263,25 +267,28 @@ public final class ReviewView {
         resetSessionButton.setId("resetSessionButton");
         resetSessionButton.setOnAction(event -> context.errors().guard("Reset session failed", presenter::resetSession));
         sessionProgressLabel.setId("sessionProgressLabel");
-        sessionProgressLabel.setStyle("-fx-text-fill: #4b5563;");
-        HBox modeBox = new HBox(10, new Label("Mode"), reviewModeSelector, sessionProgressLabel);
+        sessionProgressLabel.getStyleClass().add("secondary-text");
+        HBox modeBox = new HBox(10, Widgets.formLabel("_Mode", reviewModeSelector), reviewModeSelector,
+            sessionProgressLabel);
         modeBox.setAlignment(Pos.CENTER_LEFT);
-        HBox sessionBox = new HBox(10, new Label("Session size"), sessionSizeSelector, customSessionSizeField,
-            startSessionButton, resetSessionButton, new Label("New words/day"), newCardsPerDaySpinner);
+        HBox sessionBox = new HBox(10, Widgets.formLabel("_Session size", sessionSizeSelector), sessionSizeSelector,
+            customSessionSizeField, startSessionButton, resetSessionButton,
+            Widgets.formLabel("_New words/day", newCardsPerDaySpinner), newCardsPerDaySpinner);
         sessionBox.setAlignment(Pos.CENTER_LEFT);
 
         reviewWordLabel.setId("reviewWordLabel");
         reviewWordLabel.setWrapText(true);
         // A cloze's sentence may take a few lines: never cut it off, the blank may be at its end.
         reviewWordLabel.setMinHeight(Region.USE_PREF_SIZE);
-        reviewWordLabel.setStyle(WORD_QUESTION_STYLE);
+        reviewWordLabel.getStyleClass().add("review-question");
         reviewHintLabel.setId("reviewHintLabel");
         reviewHintLabel.setWrapText(true);
         reviewHintLabel.setMinHeight(Region.USE_PREF_SIZE);
-        reviewHintLabel.setStyle("-fx-font-size: 15px; -fx-text-fill: #374151;");
+        reviewHintLabel.getStyleClass().add("review-hint");
         reviewMetaLabel.setId("reviewMetaLabel");
-        reviewMetaLabel.setStyle("-fx-text-fill: #4b5563;");
+        reviewMetaLabel.getStyleClass().add("secondary-text");
         answerField.setId("answerField");
+        answerField.setAccessibleText("Your answer");
         answerField.setPromptText("Enter Chinese meaning");
         answerField.setPrefWidth(420);
         answerField.textProperty().addListener((observable, oldText, newText) -> presenter.setAnswer(newText));
@@ -294,6 +301,9 @@ public final class ReviewView {
         reviewResultArea.setEditable(false);
         reviewResultArea.setWrapText(true);
         reviewResultArea.setPrefRowCount(8);
+        // On a short window the result shrinks to a few lines before the tab has to scroll.
+        reviewResultArea.setMinHeight(70);
+        reviewResultArea.setAccessibleText("Answer check and explanation");
         regenerateExplanationButton.setId("regenerateExplanationButton");
         regenerateExplanationButton.setTooltip(new Tooltip("Ask the AI provider again, ignoring the cached explanation"));
         regenerateExplanationButton.setOnAction(event -> {
@@ -304,12 +314,12 @@ public final class ReviewView {
         });
 
         completionTitleLabel.setId("completionTitleLabel");
-        completionTitleLabel.setStyle("-fx-font-size: 22px; -fx-font-weight: 700;");
+        completionTitleLabel.getStyleClass().add("completion-title");
         completionMetricsLabel.setId("completionMetricsLabel");
         completionMetricsLabel.setWrapText(true);
         completionCard.setId("completionCard");
         completionCard.setPadding(new Insets(16));
-        completionCard.setStyle("-fx-background-color: #ecfdf5; -fx-border-color: #10b981; -fx-border-radius: 6; -fx-background-radius: 6;");
+        completionCard.getStyleClass().add("completion-card");
         completionCard.setVisible(false);
         completionCard.setManaged(false);
 
@@ -338,10 +348,22 @@ public final class ReviewView {
         showIf(detailsCard.root(), false);
         VBox question = new VBox(6, reviewWordLabel, reviewHintLabel);
         VBox content = new VBox(16, modeBox, sessionBox, question, reviewMetaLabel, answerBox,
-            completionCard, reviewResultArea, leechBox, detailsCard.root(), explanationActions, ratingButtons);
-        content.setPadding(new Insets(28));
+            completionCard, reviewResultArea, leechBox, detailsCard.root(), explanationActions);
+        content.setPadding(new Insets(28, 28, 0, 28));
         VBox.setVgrow(reviewResultArea, Priority.ALWAYS);
-        return content;
+        // When the window is short, the result area gives up its height first; the rest keeps its own.
+        for (Node child : content.getChildren()) {
+            if (child != reviewResultArea && child instanceof Region region) {
+                region.setMinHeight(Region.USE_PREF_SIZE);
+            }
+        }
+        // The rating buttons stay in view below the content, which scrolls when the window is short.
+        ratingButtons.setPadding(new Insets(16, 28, 28, 28));
+        ratingButtons.setAlignment(Pos.CENTER_LEFT);
+        BorderPane pane = new BorderPane();
+        pane.setCenter(Widgets.tabScroll(content, true));
+        pane.setBottom(ratingButtons);
+        return pane;
     }
 
     /** Already known, Suspend and Undo, next to the answer field. */
@@ -397,6 +419,7 @@ public final class ReviewView {
         sessionSizeSelector.getSelectionModel().select(presenter.sessionSizeChoice());
         customSessionSizeField.setId("customSessionSizeField");
         customSessionSizeField.setPromptText("1-" + ReviewSessionPresenter.MAX_CUSTOM_SESSION_SIZE);
+        customSessionSizeField.setAccessibleText("Custom session size");
         customSessionSizeField.setPrefWidth(90);
         customSessionSizeField.setTextFormatter(new TextFormatter<String>(change ->
             change.getControlNewText().matches("\\d{0,3}") ? change : null));
@@ -543,7 +566,7 @@ public final class ReviewView {
             rendering = false;
         }
         reviewWordLabel.setText(presenter.question());
-        reviewWordLabel.setStyle(presenter.isSentenceQuestion() ? SENTENCE_QUESTION_STYLE : WORD_QUESTION_STYLE);
+        reviewWordLabel.pseudoClassStateChanged(SENTENCE, presenter.isSentenceQuestion());
         reviewHintLabel.setText(presenter.hint());
         showIf(reviewHintLabel, !presenter.hint().isEmpty());
         Optional<WordDetails> revealed = presenter.revealedDetails().filter(details -> !details.isEmpty());

@@ -1,0 +1,153 @@
+/*
+ * VocaBoost's look, on top of JavaFX's Modena theme. Font sizes are in em of the window's text
+ * size, so the Settings tab's text size (the text-size-* classes on the root) scales all of them;
+ * 1em is the system's text size (13px on Linux and macOS, 12px on Windows at 100%).
+ *
+ * Every text colour keeps a contrast of at least 4.5:1 (WCAG AA) on the window background (#f4f4f4),
+ * the cards (#f8fafc, #ecfdf5) and white fields; AppStyleContrastTest checks it.
+ */
+.root {
+    -vb-text-secondary: #4b5563;
+    -vb-text-muted: #5f6673;
+    -vb-text-hint: #374151;
+    -vb-accent: #1d4ed8;
+    -vb-error: #b91c1c;
+    -vb-surface: #f8fafc;
+    -vb-surface-border: #cbd5e1;
+    -vb-header-border: #e5e7eb;
+    -vb-success-surface: #ecfdf5;
+    -vb-success-border: #10b981;
+}
+
+.root.text-size-115 {
+    -fx-font-size: 1.15em;
+}
+
+.root.text-size-130 {
+    -fx-font-size: 1.3em;
+}
+
+/* Prompt texts stand in for labels in the Word List's filters, so they must be readable too. */
+.text-input {
+    -fx-prompt-text-fill: -vb-text-muted;
+}
+
+/* The window header above the tabs. */
+.app-header {
+    -fx-background-color: -vb-surface;
+    -fx-border-color: -vb-header-border;
+    -fx-border-width: 0 0 1 0;
+}
+
+.app-title {
+    -fx-font-size: 1.846em;
+    -fx-font-weight: bold;
+}
+
+.section-title {
+    -fx-font-size: 1.231em;
+    -fx-font-weight: 600;
+}
+
+.secondary-text {
+    -fx-text-fill: -vb-text-secondary;
+}
+
+.muted-text {
+    -fx-text-fill: -vb-text-muted;
+}
+
+/* Small notes under a setting or a form field. */
+.hint-text {
+    -fx-text-fill: -vb-text-muted;
+    -fx-font-size: 0.923em;
+}
+
+.form-error {
+    -fx-text-fill: -vb-error;
+}
+
+.strong-text {
+    -fx-font-weight: 600;
+}
+
+/* A tab's content that scrolls when the window is small, without a frame of its own. */
+.tab-scroll {
+    -fx-background-color: -fx-background;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
+/* Dashboard numbers. */
+.stat-name {
+    -fx-font-size: 1.077em;
+    -fx-text-fill: -vb-text-secondary;
+}
+
+.stat-value {
+    -fx-font-size: 1.692em;
+    -fx-font-weight: bold;
+}
+
+.sub-stat-name {
+    -fx-font-size: 1em;
+    -fx-text-fill: -vb-text-muted;
+    -fx-padding: 0 0 0 1.231em;
+}
+
+.sub-stat-value {
+    -fx-font-size: 1.231em;
+    -fx-font-weight: 600;
+}
+
+/* The Review tab. */
+.review-question {
+    -fx-font-size: 2.615em;
+    -fx-font-weight: bold;
+}
+
+/* A cloze's sentence is longer than a word: smaller, so it fits on a line or two. */
+.review-question:sentence {
+    -fx-font-size: 1.846em;
+    -fx-font-weight: 600;
+}
+
+.review-hint {
+    -fx-font-size: 1.154em;
+    -fx-text-fill: -vb-text-hint;
+}
+
+.completion-card {
+    -fx-background-color: -vb-success-surface;
+    -fx-border-color: -vb-success-border;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.completion-title {
+    -fx-font-size: 1.692em;
+    -fx-font-weight: bold;
+}
+
+/* The word details card on the Review tab and under the Word List. */
+.details-card {
+    -fx-background-color: -vb-surface;
+    -fx-border-color: -vb-surface-border;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.details-title {
+    -fx-font-size: 1.154em;
+    -fx-font-weight: bold;
+}
+
+.details-name {
+    -fx-text-fill: -vb-text-secondary;
+    -fx-font-weight: 600;
+}
+
+.example-target {
+    -fx-font-weight: bold;
+    -fx-fill: -vb-accent;
+}

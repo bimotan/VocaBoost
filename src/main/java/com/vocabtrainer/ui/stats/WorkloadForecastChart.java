@@ -65,6 +65,7 @@ final class WorkloadForecastChart {
         chart.setMinHeight(300);
 
         rangeSelector.setId("forecastRangeSelector");
+        rangeSelector.setAccessibleText("Forecast range");
         rangeSelector.setConverter(new StringConverter<>() {
             @Override
             public String toString(Integer days) {

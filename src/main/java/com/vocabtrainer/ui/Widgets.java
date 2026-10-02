@@ -5,7 +5,9 @@ import javafx.scene.Node;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
+import javafx.scene.layout.Region;
 
 import java.util.List;
 
@@ -15,9 +17,55 @@ public final class Widgets {
     }
 
     public static Label sectionTitle(String text) {
+        return styled(new Label(text), "section-title");
+    }
+
+    /**
+     * A form field's label, never cut short. Screen readers read it as {@code field}'s name, and the
+     * letter after "_" in {@code text} is a mnemonic: Alt with that letter moves the focus to {@code field}.
+     */
+    public static Label formLabel(String text, Node field) {
         Label label = new Label(text);
-        label.setStyle("-fx-font-size: 16px; -fx-font-weight: 600;");
+        label.setMnemonicParsing(true);
+        label.setLabelFor(field);
+        label.setMinWidth(Region.USE_PREF_SIZE);
         return label;
+    }
+
+    /** A wrapping note under a setting or a form field, in smaller, muted text. */
+    public static Label hint(String text) {
+        Label label = styled(new Label(text), "hint-text");
+        label.setWrapText(true);
+        label.setMinHeight(Region.USE_PREF_SIZE);
+        return label;
+    }
+
+    /** Adds the app.css style classes to {@code node}; returns it. */
+    public static <T extends Node> T styled(T node, String... styleClasses) {
+        node.getStyleClass().addAll(styleClasses);
+        return node;
+    }
+
+    /**
+     * Wraps a tab's content so that it scrolls when the window is shorter than the content, or
+     * narrower than the content can shrink to. The content is as wide as the tab; with
+     * {@code fillHeight} it also fills the tab's height, shrinking towards its minimum height before it
+     * scrolls, so its parts that should give up height first need a small minimum and the others one
+     * of {@code USE_PREF_SIZE}.
+     */
+    public static ScrollPane tabScroll(Node content, boolean fillHeight) {
+        ScrollPane scrollPane = styled(new ScrollPane(content), "tab-scroll");
+        scrollPane.setFitToWidth(true);
+        scrollPane.setFitToHeight(fillHeight);
+        // The viewport caches its content as a bitmap, which would draw the text without subpixel
+        // smoothing; the text looks as it does outside a scroll pane without it.
+        scrollPane.skinProperty().addListener((observable, oldSkin, skin) -> {
+            Node viewport = scrollPane.lookup(".viewport");
+            if (viewport != null) {
+                viewport.setCache(false);
+            }
+        });
+        return scrollPane;
     }
 
     /** A tab that cannot be closed. */

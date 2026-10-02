@@ -96,6 +96,7 @@ final class ColumnMappingPane {
         chineseHint.setId("importMeaningHint");
         chineseHint.setWrapText(true);
         table.setId("importPreviewTable");
+        table.setAccessibleText("The first rows as they would be imported");
         table.setPrefHeight(250);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         table.setPlaceholder(new Label("No rows to import."));

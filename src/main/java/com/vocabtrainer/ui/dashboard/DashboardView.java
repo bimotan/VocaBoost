@@ -68,7 +68,8 @@ public final class DashboardView {
         this.achievementService = achievementService;
         this.databasePath = databasePath;
         this.examBox = new ExamPlanBox(context, examPlanService);
-        this.tab = Widgets.tab("dashboardTab", "Dashboard", createContent());
+        // The numbers and goals are taller than a small laptop's window: they scroll.
+        this.tab = Widgets.tab("dashboardTab", "Dashboard", Widgets.tabScroll(createContent(), false));
         this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh failed", false);
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
@@ -129,9 +130,8 @@ public final class DashboardView {
 
         Button editGoalsButton = new Button("Edit goals");
         editGoalsButton.setId("editGoalsButton");
-        // Reading the goals for the form can fail too (the database); that is reported, not thrown at JavaFX.
-        editGoalsButton.setOnAction(event -> context.errors().guard("Goals not saved", this::editGoals));
-        goalScopeLabel.setStyle("-fx-text-fill: #6b7280;");
+        editGoalsButton.setOnAction(event -> GoalsDialog.open(context, goalService.settings()));
+        goalScopeLabel.getStyleClass().add("muted-text");
         HBox goalsTitle = new HBox(12, Widgets.sectionTitle("Daily Goals"), editGoalsButton, goalScopeLabel);
         goalsTitle.setAlignment(Pos.CENTER_LEFT);
 
@@ -155,27 +155,18 @@ public final class DashboardView {
     }
 
     private static void addStat(GridPane grid, int row, String name, Label valueLabel) {
-        Label nameLabel = new Label(name);
-        nameLabel.setStyle("-fx-font-size: 14px; -fx-text-fill: #4b5563;");
-        valueLabel.setStyle("-fx-font-size: 22px; -fx-font-weight: 700;");
+        Label nameLabel = Widgets.styled(new Label(name), "stat-name");
+        valueLabel.getStyleClass().add("stat-value");
         grid.add(nameLabel, 0, row);
         grid.add(valueLabel, 1, row);
     }
 
     /** A smaller, indented stat that breaks down the one above it. */
     private static void addSubStat(GridPane grid, int row, String name, Label valueLabel) {
-        Label nameLabel = new Label(name);
-        nameLabel.setStyle("-fx-font-size: 13px; -fx-text-fill: #6b7280; -fx-padding: 0 0 0 16;");
-        valueLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: 600;");
+        Label nameLabel = Widgets.styled(new Label(name), "sub-stat-name");
+        valueLabel.getStyleClass().add("sub-stat-value");
         grid.add(nameLabel, 0, row);
         grid.add(valueLabel, 1, row);
-    }
-
-    private void editGoals() {
-        if (new GoalsDialog(context, goalService.settings()).edit(context.decks().current())) {
-            context.errors().guard("Goals saved, but refreshing the views failed",
-                () -> context.changes().publish(DataChange.GOALS));
-        }
     }
 
     private void refresh() {

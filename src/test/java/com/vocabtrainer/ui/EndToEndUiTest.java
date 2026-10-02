@@ -67,8 +67,11 @@ class EndToEndUiTest extends MainWindowUiTest {
         });
         assertEquals("lucid", text("addEnglishField"));
         assertEquals("清晰的; 明白易懂的", text("addChineseField"));
+        // The starter deck has lucid too; the new deck gets a card of its own.
+        dialogs.chooseButton("Add as typed");
         click("addWordButton");
         waitForTextStartingWith("addWordStatusLabel", "Added to E2E: lucid");
+        assertEquals("lucid is already in " + STARTER_DECK, dialogs.last(ScriptedDialogs.Kind.CHOOSE).header());
         WordCard added = services.wordRepository().findByEnglish(deck.getId(), "lucid").orElseThrow();
         assertEquals(CardState.NEW, added.getState());
         assertFalse(added.getTags().contains("UNCHECKED"), added.getTags());

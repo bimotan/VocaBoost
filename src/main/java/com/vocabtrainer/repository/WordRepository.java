@@ -1,6 +1,7 @@
 package com.vocabtrainer.repository;
 
 import com.vocabtrainer.domain.CardState;
+import com.vocabtrainer.domain.ValidatedWord;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.util.DateTimeUtil;
 
@@ -127,6 +128,31 @@ public class WordRepository {
         }
     }
 
+    /**
+     * Saves the word's text: English, Chinese, phonetic, part of speech, example, note and tags. Its
+     * deck and review schedule are not written, so an edit can never put back a schedule older than
+     * the one stored. Returns false when there is no word with this id.
+     */
+    public boolean updateText(long id, ValidatedWord text) throws SQLException {
+        String sql = """
+            UPDATE words
+            SET english = ?, chinese = ?, phonetic = ?, part_of_speech = ?, example_sentence = ?, note = ?, tags = ?
+            WHERE id = ?
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, normalized(text.english()));
+            statement.setString(2, normalized(text.chinese()));
+            statement.setString(3, nullable(text.phonetic()));
+            statement.setString(4, nullable(text.partOfSpeech()));
+            statement.setString(5, nullable(text.exampleSentence()));
+            statement.setString(6, nullable(text.note()));
+            statement.setString(7, nullable(text.tags()));
+            statement.setLong(8, id);
+            return statement.executeUpdate() == 1;
+        }
+    }
+
     public void deleteById(long id) throws SQLException {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement("DELETE FROM words WHERE id = ?")) {
@@ -212,6 +238,28 @@ public class WordRepository {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * The words with this English text, ignoring case, in the active decks other than {@code deckId},
+     * oldest deck first: what adding the word to {@code deckId} would duplicate elsewhere.
+     */
+    public List<WordCard> findInOtherDecks(String english, long deckId) throws SQLException {
+        // Looked up deck by deck through the unique index on (deck_id, english COLLATE NOCASE).
+        String sql = """
+            SELECT w.* FROM decks d
+            JOIN words w ON w.deck_id = d.id AND w.english = ? COLLATE NOCASE
+            WHERE d.archived = 0 AND d.id <> ?
+            ORDER BY d.id, w.id
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, english.trim());
+            statement.setLong(2, deckId);
+            try (ResultSet rs = statement.executeQuery()) {
+                return mapList(rs);
+            }
+        }
     }
 
     /**

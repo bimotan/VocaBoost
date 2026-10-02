@@ -75,6 +75,7 @@ final class ImportBox {
 
         importPathField.setId("importPathField");
         importPathField.setPromptText("Choose a CSV, TSV, Anki export, word list or legacy txt");
+        importPathField.setAccessibleText("File to import");
         importPathField.textProperty().addListener((observable, previous, text) -> {
             if (previewedPath != null && !previewedPath.toString().equals(text.trim())) {
                 // The columns shown belong to another file.

@@ -75,13 +75,19 @@ class MainWindowSmokeTest extends MainWindowUiTest {
             "reviewResultArea", "completionCard",
             "addDeckSelector", "addEnglishField", "addChineseField", "addPhoneticField", "addPosField", "addTagsField",
             "addExampleArea", "addNoteArea", "addWordButton", "addWordStatusLabel",
-            "ecdictPathField", "chooseEcdictButton", "testEcdictButton", "saveEcdictButton", "reimportEcdictButton",
-            "clearEcdictButton", "ecdictProgressBar", "cancelEcdictImportButton", "ecdictStatusLabel",
             "importPathField", "chooseImportFileButton", "importLegacyButton", "previewCsvButton", "importCsvButton",
             "importStarterButton", "importStatusLabel",
             "statisticsCharts", "reviewCountChart", "accuracyChart", "memoryChart", "exportBackupButton",
             "importBackupButton",
-            "wordTable", "wordSearchField", "wordStatusFilter", "wordTagFilterField", "wordPosFilterField"
+            "wordTable", "wordSearchField", "wordStatusFilter", "wordTagFilterField", "wordPosFilterField",
+            "offlineModeToggle", "desiredRetentionSlider", "desiredRetentionLabel", "desiredRetentionHintLabel",
+            "dayRolloverHourSelector", "defaultNewCardsPerDaySpinner", "newCardsPerDayHintLabel", "goalsSummaryLabel",
+            "settingsEditGoalsButton", "settingsOfflineModeToggle",
+            "ecdictPathField", "chooseEcdictButton", "testEcdictButton", "saveEcdictButton", "reimportEcdictButton",
+            "clearEcdictButton", "ecdictProgressBar", "cancelEcdictImportButton", "ecdictStatusLabel",
+            "aiProviderField", "aiBaseUrlField", "aiApiKeyField", "aiModelField", "aiTemperatureField", "saveAiButton",
+            "clearAiButton", "testAiButton", "clearAiCacheButton", "aiStatusLabel",
+            "openDataFolderButton", "openLogFolderButton", "languageSelector"
         );
         List<String> missing = required.stream().filter(id -> !ids.contains(id)).toList();
         assertTrue(missing.isEmpty(), "missing ids: " + missing);
@@ -89,7 +95,8 @@ class MainWindowSmokeTest extends MainWindowUiTest {
 
     @Test
     void everyTabRendersAndIsSavedAsASnapshot() throws Exception {
-        List<String> tabIds = List.of("dashboardTab", "decksTab", "reviewTab", "addImportTab", "statisticsTab", "wordListTab");
+        List<String> tabIds = List.of("dashboardTab", "decksTab", "reviewTab", "addImportTab", "statisticsTab", "wordListTab",
+            "settingsTab");
         assertEquals(tabIds, Fx.call(() -> find("mainTabs", TabPane.class).getTabs().stream()
             .map(Tab::getId).toList()));
 

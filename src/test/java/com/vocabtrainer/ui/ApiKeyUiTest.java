@@ -41,7 +41,7 @@ class ApiKeyUiTest extends MainWindowUiTest {
 
     @Test
     void aSavedKeyIsNeverPutBackIntoTheFormAndCanBeReplacedOrRemoved() {
-        selectTab("addImportTab");
+        selectTab("settingsTab");
 
         assertTrue(Fx.call(() -> find("aiApiKeyField", Node.class) instanceof PasswordField));
         assertEquals("", text("aiApiKeyField"), "the saved key is not pre-filled");
@@ -83,7 +83,7 @@ class ApiKeyUiTest extends MainWindowUiTest {
 
     @Test
     void aTypedKeyIsSavedAndThenOnlyShownByItsLastCharacters() {
-        selectTab("addImportTab");
+        selectTab("settingsTab");
         assertTrue(isVisible("aiApiKeyField"));
         assertFalse(isVisible("aiKeyStatusLabel"));
         assertFalse(isVisible("replaceAiKeyButton"));
@@ -102,7 +102,7 @@ class ApiKeyUiTest extends MainWindowUiTest {
 
     @Test
     void plainHttpToAnotherComputerIsRefusedWhenSaving() {
-        selectTab("addImportTab");
+        selectTab("settingsTab");
         type("aiBaseUrlField", "http://api.example.com/v1");
         type("aiApiKeyField", NEW_KEY);
         type("aiModelField", "model-a");

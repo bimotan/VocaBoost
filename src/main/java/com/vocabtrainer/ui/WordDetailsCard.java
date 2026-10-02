@@ -56,10 +56,10 @@ public final class WordDetailsCard {
         tags.setId(idPrefix + "Tags");
         empty.setId(idPrefix + "Empty");
 
-        title.setStyle("-fx-font-size: 15px; -fx-font-weight: 700;");
+        title.getStyleClass().add("details-title");
         title.setWrapText(true);
         empty.setWrapText(true);
-        empty.setStyle("-fx-text-fill: #6b7280;");
+        empty.getStyleClass().add("muted-text");
         note.setMaxHeight(NOTE_MAX_HEIGHT);
 
         addRow("Phonetic", phonetic);
@@ -70,8 +70,7 @@ public final class WordDetailsCard {
 
         root.getChildren().addAll(title, rowBox, empty);
         root.setPadding(new Insets(10, 14, 10, 14));
-        root.setStyle("-fx-background-color: #f8fafc; -fx-border-color: #cbd5e1;"
-            + " -fx-border-radius: 6; -fx-background-radius: 6;");
+        root.getStyleClass().add("details-card");
         show(title, false);
         show(empty, false);
     }
@@ -114,7 +113,7 @@ public final class WordDetailsCard {
      */
     private void addRow(String name, Region value) {
         Label nameLabel = new Label(name);
-        nameLabel.setStyle("-fx-text-fill: #4b5563; -fx-font-weight: 600;");
+        nameLabel.getStyleClass().add("details-name");
         nameLabel.setPadding(new Insets(2, 0, 2, 0));
         nameLabel.setMinWidth(NAME_WIDTH);
         nameLabel.setPrefWidth(NAME_WIDTH);
@@ -142,7 +141,6 @@ public final class WordDetailsCard {
             Text text = new Text(span.text());
             if (span.target()) {
                 text.getStyleClass().add(TARGET_STYLE_CLASS);
-                text.setStyle("-fx-font-weight: bold; -fx-fill: #1d4ed8;");
             }
             texts.add(text);
         }

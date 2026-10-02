@@ -7,10 +7,8 @@ import com.vocabtrainer.service.ExamPlanService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.ui.DataChange;
-import com.vocabtrainer.ui.Folders;
 import com.vocabtrainer.ui.UiErrors;
 import com.vocabtrainer.ui.ViewContext;
-import com.vocabtrainer.util.AppLogging;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
@@ -24,7 +22,7 @@ import java.util.function.BiFunction;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-/** Report and CSV exports, JSON backup export and restore, and opening the data and log folders. */
+/** Report and CSV exports, and JSON backup export and restore. */
 final class DataActions {
     private static final Logger LOGGER = Logger.getLogger(DataActions.class.getName());
 
@@ -33,18 +31,16 @@ final class DataActions {
     private final GoalService goalService;
     private final BackupService backupService;
     private final ExamPlanService examPlanService;
-    private final Path databasePath;
     private final Labeled status;
 
     /** {@code status} shows progress while an export or restore runs. */
     DataActions(ViewContext context, StatsService statsService, GoalService goalService, BackupService backupService,
-                ExamPlanService examPlanService, Path databasePath, Labeled status) {
+                ExamPlanService examPlanService, Labeled status) {
         this.context = context;
         this.statsService = statsService;
         this.goalService = goalService;
         this.backupService = backupService;
         this.examPlanService = examPlanService;
-        this.databasePath = databasePath;
         this.status = status;
     }
 
@@ -55,13 +51,6 @@ final class DataActions {
             button("exportReviewLogsCsvButton", "Export review logs CSV", this::exportReviewLogsCsv),
             button("exportBackupButton", "Export JSON backup", this::exportJsonBackup),
             button("importBackupButton", "Import JSON backup", this::importJsonBackup)
-        );
-    }
-
-    List<Button> folderButtons() {
-        return List.of(
-            button("openDataFolderButton", "Open data folder", this::openDataFolder),
-            button("openLogFolderButton", "Open log folder", this::openLogFolder)
         );
     }
 
@@ -179,22 +168,5 @@ final class DataActions {
             () -> context.changes().publish(DataChange.WORDS, DataChange.REVIEWS));
         context.dialogs().showText("Import JSON backup", "Deck: " + targetDeck.getName(), result.toSummary(),
             result.invalidRows().isEmpty() ? 5 : 12);
-    }
-
-    private void openDataFolder() {
-        openFolder("Data folder", databasePath.toAbsolutePath().getParent());
-    }
-
-    private void openLogFolder() {
-        Optional<Path> logDirectory = AppLogging.logDirectory();
-        if (logDirectory.isEmpty()) {
-            context.errors().showInfo("File logging is unavailable; logs are written to the console only.");
-            return;
-        }
-        openFolder("Log folder", logDirectory.get());
-    }
-
-    private void openFolder(String name, Path folder) {
-        Folders.open(context.errors(), name, folder);
     }
 }

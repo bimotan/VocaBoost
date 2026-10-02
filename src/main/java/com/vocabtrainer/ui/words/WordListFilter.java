@@ -6,6 +6,7 @@ import com.vocabtrainer.domain.WordCard;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Predicate;
 
 /**
  * The Word List's status, tag and part-of-speech filters and its Status column, without JavaFX.
@@ -48,6 +49,19 @@ public record WordListFilter(String status, String tag, String partOfSpeech) {
             || containsIgnoreCase(word.getPartOfSpeech(), partOfSpeech.trim());
     }
 
+    /**
+     * The search box: the words whose English, Chinese or tags contain {@code query}, ignoring case;
+     * a blank query matches every word.
+     */
+    public static Predicate<WordCard> searching(String query) {
+        if (query == null || query.isBlank()) {
+            return word -> true;
+        }
+        String needle = query.trim().toLowerCase(Locale.ROOT);
+        return word -> containsLowerCase(word.getEnglish(), needle) || containsLowerCase(word.getChinese(), needle)
+            || containsLowerCase(word.getTags(), needle);
+    }
+
     /** The Status column: Suspended, Mastered, Due, New or Learning. */
     public static String statusOf(WordCard word, LocalDateTime now, LocalDateTime dayEnd) {
         if (word.isSuspended()) {
@@ -66,7 +80,10 @@ public record WordListFilter(String status, String tag, String partOfSpeech) {
     }
 
     private static boolean containsIgnoreCase(String value, String needle) {
-        return value != null && needle != null
-            && value.toLowerCase(Locale.ROOT).contains(needle.toLowerCase(Locale.ROOT));
+        return needle != null && containsLowerCase(value, needle.toLowerCase(Locale.ROOT));
+    }
+
+    private static boolean containsLowerCase(String value, String lowerCaseNeedle) {
+        return value != null && value.toLowerCase(Locale.ROOT).contains(lowerCaseNeedle);
     }
 }
