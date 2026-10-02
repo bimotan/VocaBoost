@@ -406,6 +406,30 @@ public class WordRepository {
         }
     }
 
+    /** The deck's active words that were never reviewed (state {@code NEW}), due or not. */
+    public int countNew(long deckId) throws SQLException {
+        return count("SELECT COUNT(*) FROM words WHERE deck_id = ? AND archived = 0 AND card_state = 'NEW'", deckId);
+    }
+
+    /**
+     * Active review cards (state {@code REVIEW}) of every deck that are due at {@code from} or later,
+     * such as the cards an exam date may bring forward.
+     */
+    public List<WordCard> findReviewCardsDueFrom(LocalDateTime from) throws SQLException {
+        String sql = """
+            SELECT * FROM words
+            WHERE archived = 0 AND card_state = 'REVIEW' AND next_review_at >= ?
+            ORDER BY deck_id, id
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, DateTimeUtil.toDatabase(from));
+            try (ResultSet rs = statement.executeQuery()) {
+                return mapList(rs);
+            }
+        }
+    }
+
     /**
      * Active-word and due-word counts of every deck that has words, by deck id, in one query.
      *

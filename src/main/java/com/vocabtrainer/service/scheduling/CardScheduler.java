@@ -5,10 +5,13 @@ import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 
 /**
@@ -24,6 +27,9 @@ import java.util.Random;
  * stability, so early reviews barely change the schedule. Intervals of three days or more get a
  * fuzz of a few percent, derived from the card id and its review count so that it is reproducible,
  * and Hard, Good and Easy always give increasing intervals.
+ *
+ * <p>With an exam day, a review that would fall on or after it is brought forward into the last
+ * days before it ({@link ExamClamp}); Hard, Good and Easy then give intervals that never decrease.
  */
 public final class CardScheduler {
     /** Intervals shorter than this are not fuzzed. */
@@ -59,13 +65,14 @@ public final class CardScheduler {
      * @param intervalDays  the interval in study days when the card is in review afterwards, otherwise 0
      * @param due           when the card is due next
      * @param lapse         whether the rating is a lapse: a review card rated Again
+     * @param beforeExam    whether the interval was shortened so the card is reviewed before the exam
      */
     public record Outcome(CardState state, double stability, double difficulty, int learningStep, int intervalDays,
-                          LocalDateTime due, boolean lapse) {
+                          LocalDateTime due, boolean lapse, boolean beforeExam) {
         /** The interval a rating button shows. */
         public IntervalPreview preview(LocalDateTime now) {
             return state == CardState.REVIEW
-                ? IntervalPreview.days(intervalDays)
+                ? new IntervalPreview(Duration.ZERO, intervalDays, beforeExam)
                 : IntervalPreview.step(Duration.between(now, due));
         }
     }
@@ -90,7 +97,7 @@ public final class CardScheduler {
             boolean lapse = card.getState() == CardState.REVIEW && rating == ReviewRating.AGAIN;
             if (step.delay() != null) {
                 outcomes.put(rating, new Outcome(step.state(), after.stability(), after.difficulty(), step.index(), 0,
-                    now.plus(step.delay()), lapse));
+                    now.plus(step.delay()), lapse, false));
                 continue;
             }
             int minimum = rating == ReviewRating.AGAIN ? 1 : minimumPassingInterval;
@@ -99,13 +106,73 @@ public final class CardScheduler {
                 minimumPassingInterval = Math.min(days + 1, options.maximumInterval());
             }
             outcomes.put(rating, new Outcome(CardState.REVIEW, after.stability(), after.difficulty(), 0, days,
-                studyDay.startOfDayAfter(now, days), lapse));
+                studyDay.startOfDayAfter(now, days), lapse, false));
         }
         return outcomes;
     }
 
+    /**
+     * What each rating would do to {@code card} at {@code now} when its deck's exam is on
+     * {@code examDay} (null for none): as {@link #outcomes(WordCard, LocalDateTime)}, with review
+     * intervals that would reach the exam day shortened by {@link ExamClamp#interval}. Only the due
+     * date and interval change; Hard, Good and Easy never get a shorter interval than the rating
+     * below them. The card is not changed.
+     */
+    public Map<ReviewRating, Outcome> outcomes(WordCard card, LocalDateTime now, LocalDate examDay) {
+        Map<ReviewRating, Outcome> outcomes = outcomes(card, now);
+        long daysToExam = examDay == null ? 0 : ChronoUnit.DAYS.between(studyDay.of(now), examDay);
+        if (daysToExam <= 0) {
+            return outcomes;
+        }
+        double fuzz = fuzzFraction(card);
+        Map<ReviewRating, Outcome> clamped = new EnumMap<>(ReviewRating.class);
+        int previousPassing = 0;
+        for (ReviewRating rating : ReviewRating.values()) {
+            Outcome outcome = outcomes.get(rating);
+            if (outcome.state() != CardState.REVIEW) {
+                clamped.put(rating, outcome);
+                continue;
+            }
+            int days = ExamClamp.interval(outcome.intervalDays(), daysToExam,
+                ExamClamp.lead(outcome.intervalDays(), fuzz));
+            if (rating != ReviewRating.AGAIN) {
+                days = Math.max(days, previousPassing);
+                previousPassing = days;
+            }
+            clamped.put(rating, days == outcome.intervalDays() ? outcome
+                : new Outcome(outcome.state(), outcome.stability(), outcome.difficulty(), outcome.learningStep(), days,
+                    studyDay.startOfDayAfter(now, days), outcome.lapse(), true));
+        }
+        return clamped;
+    }
+
     public Outcome outcome(WordCard card, ReviewRating rating, LocalDateTime now) {
         return outcomes(card, now).get(rating);
+    }
+
+    /** What {@code rating} would do to {@code card} at {@code now} before an exam on {@code examDay} (null for none). */
+    public Outcome outcome(WordCard card, ReviewRating rating, LocalDateTime now, LocalDate examDay) {
+        return outcomes(card, now, examDay).get(rating);
+    }
+
+    /**
+     * When {@code card}, a review card already due on or after the exam on {@code examDay}, should be
+     * due instead so that it is reviewed in the last days before it (see {@link ExamClamp#rescheduleIn});
+     * empty when it can stay as it is. Its lead comes from its current interval and fuzz, as if it
+     * had been clamped when it was last reviewed.
+     */
+    public Optional<LocalDateTime> dueBeforeExam(WordCard card, LocalDateTime now, LocalDate examDay) {
+        if (examDay == null || card.getState() != CardState.REVIEW || card.getNextReviewAt() == null) {
+            return Optional.empty();
+        }
+        LocalDate today = studyDay.of(now);
+        LocalDate lastReview = card.getLastReviewedAt() == null ? today : studyDay.of(card.getLastReviewedAt());
+        int days = ExamClamp.rescheduleIn(
+            ChronoUnit.DAYS.between(today, examDay),
+            ChronoUnit.DAYS.between(today, studyDay.of(card.getNextReviewAt())),
+            ChronoUnit.DAYS.between(lastReview, examDay),
+            ExamClamp.lead(Math.max(1, card.getIntervalDays()), fuzzFraction(card)));
+        return days < 0 ? Optional.empty() : Optional.of(studyDay.startOfDayAfter(now, days));
     }
 
     /**
@@ -114,7 +181,16 @@ public final class CardScheduler {
      * is the scheduled interval (0 while learning) and the easiness factor follows the difficulty.
      */
     public Outcome apply(WordCard card, ReviewRating rating, LocalDateTime now) {
-        Outcome outcome = outcome(card, rating, now);
+        return apply(card, rating, now, null);
+    }
+
+    /**
+     * Rates {@code card} at {@code now} before an exam on {@code examDay} (null for none): as
+     * {@link #apply(WordCard, ReviewRating, LocalDateTime)} with the outcome of
+     * {@link #outcomes(WordCard, LocalDateTime, LocalDate)}.
+     */
+    public Outcome apply(WordCard card, ReviewRating rating, LocalDateTime now, LocalDate examDay) {
+        Outcome outcome = outcome(card, rating, now, examDay);
         card.setState(outcome.state());
         card.setStability(outcome.stability());
         card.setDifficulty(outcome.difficulty());

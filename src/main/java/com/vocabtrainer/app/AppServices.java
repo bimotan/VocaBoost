@@ -19,6 +19,8 @@ import com.vocabtrainer.service.CardStateBackfill;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.DictionaryServiceFactory;
+import com.vocabtrainer.service.ExamPlanService;
+import com.vocabtrainer.service.ExamSettings;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.GoalSettings;
 import com.vocabtrainer.service.ImportExportService;
@@ -56,8 +58,9 @@ import java.util.function.Supplier;
  * @param aiServices         builds the AI service from the saved settings; called again when the
  *                           AI settings change
  * @param startupDeck        the deck the main window opens on
- * @param reviewScheduler    schedules reviews with the saved scheduling settings
+ * @param reviewScheduler    schedules reviews with the saved scheduling settings and exam dates
  * @param clock              the time every service and view works with
+ * @param examPlanService    the exam dates, the countdown and the new-word plan
  */
 public record AppServices(
     DatabaseManager databaseManager,
@@ -85,7 +88,8 @@ public record AppServices(
     Supplier<AiService> aiServices,
     Deck startupDeck,
     ReviewScheduler reviewScheduler,
-    Clock clock
+    Clock clock,
+    ExamPlanService examPlanService
 ) implements AutoCloseable {
     public static Builder builder(Path databasePath) {
         return new Builder(databasePath);
@@ -184,7 +188,9 @@ public record AppServices(
             Deck startupDeck = deckService.resolveStartupDeck();
 
             SimilarityService similarityService = new SimilarityService();
-            ReviewScheduler reviewScheduler = new ReviewScheduler(settingsService.getSchedulingOptions());
+            ExamSettings examSettings = new ExamSettings(settingsService);
+            ReviewScheduler reviewScheduler = new ReviewScheduler(settingsService.getSchedulingOptions(), new Random(),
+                examSettings::examDate);
             CardStateBackfill cardStates = new CardStateBackfill(wordRepository, reviewLogRepository, reviewScheduler);
             cardStates.run();
             ReviewSettings reviewSettings = new ReviewSettings(settingsService);
@@ -220,6 +226,8 @@ public record AppServices(
             );
             StatsService statsService = new StatsService(wordRepository, reviewLogRepository, clock,
                 reviewScheduler.studyDay(), reviewSettings);
+            ExamPlanService examPlanService = new ExamPlanService(examSettings, wordRepository, reviewLogRepository,
+                reviewSettings, reviewScheduler, clock);
             BackupService backupService = new BackupService(deckRepository, wordRepository, reviewLogRepository,
                 goalRepository, achievementRepository, databaseManager, validationService, clock, cardStates);
             BiFunction<AiCacheRepository, SettingsService, AiService> aiFactory = aiServiceFactory;
@@ -250,7 +258,8 @@ public record AppServices(
                 () -> aiFactory.apply(aiCacheRepository, settingsService),
                 startupDeck,
                 reviewScheduler,
-                clock
+                clock,
+                examPlanService
             );
         }
     }

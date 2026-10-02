@@ -269,6 +269,26 @@ public final class ReviewSessionPresenter {
     }
 
     /**
+     * The review settings changed elsewhere, such as the deck's new-cards-per-day limit set from the
+     * Dashboard's new-word plan: the limit is read again, and a session that ran out of cards goes on
+     * when the new limit lets more new cards in today.
+     */
+    public void reviewSettingsChanged() {
+        int limit = reviewService.newCardsPerDay(deckId);
+        if (limit == newCardsPerDay) {
+            return;
+        }
+        newCardsPerDay = limit;
+        try {
+            if (state == State.COMPLETE) {
+                loadNextCard();
+            }
+        } finally {
+            fireChanged();
+        }
+    }
+
+    /**
      * The goals were edited on the Dashboard: the session takes the session goal as its target, as if
      * it had been chosen here, and a completed session shows the new daily goals.
      */
