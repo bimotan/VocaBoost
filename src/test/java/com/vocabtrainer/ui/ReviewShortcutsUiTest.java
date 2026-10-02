@@ -3,6 +3,7 @@ package com.vocabtrainer.ui;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
+import javafx.scene.Node;
 import javafx.scene.input.KeyCode;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -95,6 +96,31 @@ class ReviewShortcutsUiTest extends MainWindowUiTest {
 
         assertTrue(logs().isEmpty());
         assertFalse(isDisabled("ratingButtons"));
+    }
+
+    @Test
+    void spaceOnAFocusedRatingButtonPressesThatButton() throws SQLException {
+        answerWithEnter(false);
+        Fx.run(() -> find("rateAgainButton", Node.class).requestFocus());
+
+        pressKey(null, KeyCode.SPACE);
+
+        assertEquals(List.of(ReviewRating.AGAIN), logs().stream().map(ReviewLog::getRating).toList());
+        assertEquals("", text("answerField"));
+        assertEquals("answerField", focusOwnerId());
+    }
+
+    @Test
+    void aRatingKeyWhoseTypedEventWentElsewhereDoesNotEatTheNextCharacter() throws SQLException {
+        answerWithEnter(true);
+        // The key's typed and released events never reach the window, e.g. because the rating
+        // opened an error dialog that took them.
+        pressKeyDown(null, KeyCode.DIGIT3);
+        assertEquals(1, logs().size());
+
+        pressKey(null, KeyCode.A);
+
+        assertEquals("a", text("answerField"));
     }
 
     /** Types an answer for the card on the Review tab and presses Enter; returns the card. */

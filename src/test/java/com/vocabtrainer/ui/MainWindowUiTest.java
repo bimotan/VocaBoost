@@ -278,15 +278,31 @@ abstract class MainWindowUiTest {
      * to whichever node has the focus at that moment, as the window delivers them.
      */
     void pressKey(String targetId, KeyCode code) {
-        String character = code.isDigitKey() || code == KeyCode.SPACE ? code.getChar() : "";
-        fireKey(targetId, new KeyEvent(KeyEvent.KEY_PRESSED, KeyEvent.CHAR_UNDEFINED, character, code,
-            false, false, false, false));
+        String character = keyCharacter(code);
+        pressKeyDown(targetId, code);
         if (!character.isEmpty()) {
             fireKey(targetId, new KeyEvent(KeyEvent.KEY_TYPED, character, "", KeyCode.UNDEFINED,
                 false, false, false, false));
         }
         fireKey(targetId, new KeyEvent(KeyEvent.KEY_RELEASED, KeyEvent.CHAR_UNDEFINED, character, code,
             false, false, false, false));
+    }
+
+    /**
+     * Only the key-pressed event of a key, as when its typed and released events go to another window,
+     * such as a dialog opened by the key press.
+     */
+    void pressKeyDown(String targetId, KeyCode code) {
+        fireKey(targetId, new KeyEvent(KeyEvent.KEY_PRESSED, KeyEvent.CHAR_UNDEFINED, keyCharacter(code), code,
+            false, false, false, false));
+    }
+
+    /** The character a digit, letter (lower case) or Space key types; empty for other keys. */
+    private static String keyCharacter(KeyCode code) {
+        if (code.isDigitKey() || code == KeyCode.SPACE) {
+            return code.getChar();
+        }
+        return code.isLetterKey() ? code.getChar().toLowerCase(Locale.ROOT) : "";
     }
 
     private void fireKey(String targetId, KeyEvent event) {

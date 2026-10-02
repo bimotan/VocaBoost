@@ -13,7 +13,9 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBase;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.ComboBoxBase;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.Tab;
@@ -37,8 +39,8 @@ import java.util.Optional;
  * user's input to it; the review flow itself lives in the presenter.
  *
  * <p>Keyboard: Enter in the answer field submits. Once the answer is checked, 1, 2, 3 and 4 rate
- * Again, Hard, Good and Easy and Space rates Good, while the Review tab is shown and the user is
- * not typing in another field.
+ * Again, Hard, Good and Easy and Space rates Good (or presses the focused button, which is Good
+ * right after submitting), while the Review tab is shown and the user is not typing in another field.
  */
 public final class ReviewView {
     private final ViewContext context;
@@ -123,8 +125,14 @@ public final class ReviewView {
     }
 
     private void rateWithKey(KeyEvent event) {
+        // A new key press: the typed event of an earlier rating key is over, even if it never came
+        // here (e.g. an error dialog opened by that rating took it).
+        swallowTypedKey = false;
         if (!tab.isSelected() || !presenter.canRate() || event.isShortcutDown() || event.isControlDown()
             || event.isAltDown() || event.isMetaDown() || isTypingIn(event.getTarget())) {
+            return;
+        }
+        if (event.getCode() == KeyCode.SPACE && usesSpace(event.getTarget())) {
             return;
         }
         Optional<ReviewRating> rating = ratingForKey(event.getCode());
@@ -133,6 +141,14 @@ public final class ReviewView {
             swallowTypedKey = true;
             presenter.rate(rating.get());
         }
+    }
+
+    /**
+     * Space presses the focused button, e.g. Again after the user tabbed to it, or opens the focused
+     * combo box, as everywhere else; it only means Good when the focus is elsewhere.
+     */
+    private static boolean usesSpace(EventTarget target) {
+        return target instanceof ButtonBase || target instanceof ComboBoxBase<?>;
     }
 
     /** Digits typed into a field, such as the custom session size, are text, not ratings. */
