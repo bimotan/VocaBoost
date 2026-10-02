@@ -55,8 +55,13 @@ public final class CsvReader implements Closeable {
     private int line = 1;
 
     private CsvReader(Reader in, TextEncoding encoding, Character delimiter) throws IOException {
+        this(in, encoding, delimiter, 1);
+    }
+
+    private CsvReader(Reader in, TextEncoding encoding, Character delimiter, int firstLine) throws IOException {
         this.in = in;
         this.encoding = encoding;
+        this.line = firstLine;
         if (delimiter != null) {
             this.delimiter = delimiter;
         } else {
@@ -101,6 +106,16 @@ public final class CsvReader implements Closeable {
         return new CsvReader(reader, null, delimiter);
     }
 
+    /**
+     * Reads text that a caller already started on, such as a file whose leading header lines it
+     * read itself: records are numbered from {@code firstLine}, {@code encoding} (may be null) names
+     * the file's encoding in messages, and a null {@code delimiter} is sniffed from what follows.
+     */
+    public static CsvReader open(Reader reader, TextEncoding encoding, Character delimiter, int firstLine)
+        throws IOException {
+        return new CsvReader(reader, encoding, delimiter, firstLine);
+    }
+
     /** The encoding the file is read in; empty when the caller passed decoded text. */
     public Optional<TextEncoding> encoding() {
         return Optional.ofNullable(encoding);
@@ -116,6 +131,9 @@ public final class CsvReader implements Closeable {
             case ',' -> "comma";
             case '\t' -> "tab";
             case ';' -> "semicolon";
+            case '|' -> "pipe";
+            case ' ' -> "space";
+            case ':' -> "colon";
             default -> "'" + delimiter + "'";
         };
     }

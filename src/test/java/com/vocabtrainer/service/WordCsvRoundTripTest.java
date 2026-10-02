@@ -23,7 +23,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** "Export words CSV" and "Import GRE CSV" agree on the columns, so a deck survives the trip. */
+/** "Export words CSV" and "Import word list" agree on the columns, so a deck survives the trip. */
 class WordCsvRoundTripTest {
     @TempDir
     Path tempDir;

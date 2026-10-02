@@ -110,7 +110,7 @@ class ImportAndSettingsUiTest extends MainWindowUiTest {
         click("importCsvButton");
         waitForBackgroundTasks();
 
-        String expected = "Cannot read GRE CSV file " + csv + ": Line 3: the text is not valid GBK/GB18030"
+        String expected = "Cannot read word list " + csv + ": Line 3: the text is not valid GBK/GB18030"
             + " (save the file as UTF-8 and try again)";
         ScriptedDialogs.Shown error = dialogs.takeError();
         assertEquals("Import failed", error.title());

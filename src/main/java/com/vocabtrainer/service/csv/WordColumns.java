@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -92,6 +93,68 @@ public final class WordColumns {
         return new WordColumns(indexes, false);
     }
 
+    /**
+     * Columns by name, such as the names of an Anki file's "#columns:" line: each name is matched like
+     * a header cell, and {@code extraAliases} (normalized names, see {@link WordColumn#normalize})
+     * add names that only count here. Unknown names are not read. Unlike {@link #fromHeader}, any
+     * number of known names is enough.
+     */
+    public static WordColumns byNames(List<String> names, Map<String, WordColumn> extraAliases) {
+        int[] indexes = new int[WordColumn.values().length];
+        int[] ranks = new int[indexes.length];
+        Arrays.fill(indexes, -1);
+        Arrays.fill(ranks, Integer.MAX_VALUE);
+        for (int i = 0; i < names.size(); i++) {
+            WordColumn.Alias alias = WordColumn.match(names.get(i));
+            if (alias == null) {
+                WordColumn extra = extraAliases.get(WordColumn.normalize(names.get(i)));
+                // Ranked after every built-in alias.
+                alias = extra == null ? null : new WordColumn.Alias(extra, Integer.MAX_VALUE - 1);
+            }
+            if (alias != null && alias.rank() < ranks[alias.column().ordinal()]) {
+                indexes[alias.column().ordinal()] = i;
+                ranks[alias.column().ordinal()] = alias.rank();
+            }
+        }
+        return new WordColumns(indexes, true);
+    }
+
+    /** No column read at all; add them with {@link #with}. */
+    public static WordColumns none() {
+        int[] indexes = new int[WordColumn.values().length];
+        Arrays.fill(indexes, -1);
+        return new WordColumns(indexes, false);
+    }
+
+    /** These columns with {@code column} read from field {@code index} instead; -1 stops reading it. */
+    public WordColumns with(WordColumn column, int index) {
+        if (index < -1) {
+            throw new IllegalArgumentException("Column index " + index);
+        }
+        int[] changed = indexes.clone();
+        changed[column.ordinal()] = index;
+        return new WordColumns(changed, fromHeader);
+    }
+
+    /** The word field read from field {@code index}, if any; the first in {@link WordColumn} order. */
+    public Optional<WordColumn> fieldAt(int index) {
+        for (WordColumn column : WordColumn.values()) {
+            if (indexes[column.ordinal()] == index && index >= 0) {
+                return Optional.of(column);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** One more than the highest field index read; 0 when nothing is read. */
+    public int width() {
+        int width = 0;
+        for (int index : indexes) {
+            width = Math.max(width, index + 1);
+        }
+        return width;
+    }
+
     public boolean fromHeader() {
         return fromHeader;
     }
@@ -111,6 +174,21 @@ public final class WordColumns {
      */
     public String get(CsvRecord record, WordColumn column) {
         return FormulaGuard.unprotect(record.get(index(column)));
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof WordColumns columns && Arrays.equals(indexes, columns.indexes);
+    }
+
+    @Override
+    public int hashCode() {
+        return Arrays.hashCode(indexes);
+    }
+
+    @Override
+    public String toString() {
+        return describe();
     }
 
     /** The mapped fields in file order, e.g. "english, chinese, pos, example, tags". */

@@ -103,6 +103,21 @@ public record AppServices(
         return new MainWindow(this, dialogs);
     }
 
+    /** Calls {@code supplier} once, on first use, and returns that value from then on. */
+    private static <T> Supplier<T> memoize(Supplier<T> supplier) {
+        return new Supplier<>() {
+            private T value;
+
+            @Override
+            public synchronized T get() {
+                if (value == null) {
+                    value = supplier.get();
+                }
+                return value;
+            }
+        };
+    }
+
     /**
      * Opens one database. The app uses the defaults; tests replace the network-backed dictionary
      * and AI services, or a repository, before calling {@link #open()}.
@@ -177,7 +192,18 @@ public record AppServices(
                 new GoalSettings(settingsService, reviewSettings), reviewScheduler.studyDay(), clock);
             AchievementService achievementService = new AchievementService(achievementRepository, goalService, clock);
             WordValidationService validationService = new WordValidationService();
-            ImportExportService importExportService = new ImportExportService(wordRepository, validationService);
+            // Only opened by the first lookup; the ECDICT CSV itself is never read here.
+            EcdictRepository ecdictRepository = new EcdictRepository(databasePath.resolveSibling("ecdict.db"));
+            EcdictImportService ecdictImportService = new EcdictImportService(ecdictRepository);
+            LocalDictionaryService localDictionary = new LocalDictionaryService(ecdictRepository);
+            BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> dictionaryFactory =
+                dictionaryServiceFactory != null
+                    ? dictionaryServiceFactory
+                    : (cache, local) -> DictionaryServiceFactory.create(cache, local, settingsService::isOfflineMode);
+            // A word list import asks the network only when the user allows it, and builds the chain only then.
+            ImportExportService importExportService = new ImportExportService(wordRepository, validationService,
+                localDictionary, memoize(() -> dictionaryFactory.apply(dictionaryCacheRepository, localDictionary)),
+                settingsService::isOfflineMode);
             StarterImportService starterImportService = new StarterImportService(
                 importExportService, wordRepository, reviewLogRepository, goalRepository, settingsService);
             starterImportService.importOnce(startupDeck.getId());
@@ -196,14 +222,6 @@ public record AppServices(
                 reviewScheduler.studyDay(), reviewSettings);
             BackupService backupService = new BackupService(deckRepository, wordRepository, reviewLogRepository,
                 goalRepository, achievementRepository, databaseManager, validationService, clock, cardStates);
-            // Only opened by the first lookup; the ECDICT CSV itself is never read here.
-            EcdictRepository ecdictRepository = new EcdictRepository(databasePath.resolveSibling("ecdict.db"));
-            EcdictImportService ecdictImportService = new EcdictImportService(ecdictRepository);
-            LocalDictionaryService localDictionary = new LocalDictionaryService(ecdictRepository);
-            BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> dictionaryFactory =
-                dictionaryServiceFactory != null
-                    ? dictionaryServiceFactory
-                    : (cache, local) -> DictionaryServiceFactory.create(cache, local, settingsService::isOfflineMode);
             BiFunction<AiCacheRepository, SettingsService, AiService> aiFactory = aiServiceFactory;
 
             return new AppServices(

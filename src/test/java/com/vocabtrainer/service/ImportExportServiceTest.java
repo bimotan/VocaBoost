@@ -204,7 +204,7 @@ class ImportExportServiceTest {
         assertEquals(2, service.importGreCsv(tabs, deck.getId()).importedCount());
 
         assertEquals("tab", tabPreview.delimiter());
-        assertEquals("english, chinese, pos, example, tags (by position, no header row)", tabPreview.columns());
+        assertEquals("english, chinese, pos (no header row)", tabPreview.columns());
         assertEquals("清晰的; 易懂的", word("lucid").orElseThrow().getChinese());
         assertEquals("adjective", word("lucid").orElseThrow().getPartOfSpeech());
         assertEquals("减弱; 减少", word("abate").orElseThrow().getChinese());
@@ -239,7 +239,7 @@ class ImportExportServiceTest {
         ImportResult result = service.importGreCsv(csvFile, deck.getId());
 
         assertEquals(1, preview.totalRows());
-        assertEquals("english, chinese, pos, example, tags (by position; header row line 1 skipped)", preview.columns());
+        assertEquals("english, chinese, pos (header row line 1 skipped)", preview.columns());
         assertEquals(1, result.importedCount(), result.toSummary());
         assertTrue(word("english").isEmpty());
         assertEquals("清晰的", word("lucid").orElseThrow().getChinese());
@@ -259,7 +259,7 @@ class ImportExportServiceTest {
         IllegalStateException error = assertThrows(IllegalStateException.class,
             () -> service.importGreCsv(csvFile, deck.getId()));
 
-        assertEquals("Cannot read GRE CSV file " + csvFile + ": Line 7: the text is not valid UTF-8"
+        assertEquals("Cannot read word list " + csvFile + ": Line 7: the text is not valid UTF-8"
             + " (a character on this line is damaged or in another encoding)", error.getMessage());
         assertEquals(List.of(), wordRepository.findAll(deck.getId()));
     }
@@ -282,7 +282,7 @@ class ImportExportServiceTest {
         Path missing = tempDir.resolve("missing.csv");
         IllegalStateException notFound = assertThrows(IllegalStateException.class,
             () -> service.importGreCsv(missing, deck.getId()));
-        assertEquals("Cannot read GRE CSV file " + missing + ": the file does not exist", notFound.getMessage());
+        assertEquals("Cannot read word list " + missing + ": the file does not exist", notFound.getMessage());
         assertInstanceOf(NoSuchFileException.class, notFound.getCause());
 
         Path broken = tempDir.resolve("broken.csv");
@@ -290,7 +290,7 @@ class ImportExportServiceTest {
             new byte[] {'l', 'u', 'c', 'i', 'd', ',', (byte) 0xFF, '\n'}));
         IllegalStateException undecodable = assertThrows(IllegalStateException.class,
             () -> service.previewGreCsv(broken, deck.getId()));
-        assertTrue(undecodable.getMessage().startsWith("Cannot read GRE CSV file " + broken
+        assertTrue(undecodable.getMessage().startsWith("Cannot read word list " + broken
             + ": Line 2: the text is not valid GBK/GB18030"), undecodable.getMessage());
         assertInstanceOf(CharacterCodingException.class, undecodable.getCause().getCause(),
             ErrorMessages.causeChain(undecodable));

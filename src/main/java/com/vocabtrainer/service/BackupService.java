@@ -110,7 +110,7 @@ public class BackupService {
 
     /**
      * Writes the deck's words as CSV for spreadsheets ({@link CsvWriter}: UTF-8 with BOM, formula
-     * cells neutralized). The header row uses the names "Import GRE CSV" maps columns by, so the
+     * cells neutralized). The header row uses the names "Import word list" maps columns by, so the
      * file imports back with every field in place.
      */
     public Path exportWordsCsv(long deckId, Path outputPath) {
