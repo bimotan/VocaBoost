@@ -29,6 +29,8 @@ class MainWindowSmokeTest extends MainWindowUiTest {
         assertEquals(String.valueOf(STARTER_WORDS), text("totalWordsLabel"));
         // Only the first 20 new words are due today (the default new-words-per-day limit).
         assertEquals(String.valueOf(NEW_WORDS_PER_DAY), text("dueTodayLabel"));
+        assertEquals("0", text("dueReviewsLabel"));
+        assertEquals(String.valueOf(NEW_WORDS_PER_DAY), text("newAvailableTodayLabel"));
         assertEquals("0 / 20", text("reviewedTodayLabel"));
         assertEquals("0 / 5", text("newWordsTodayLabel"));
         assertEquals("0%", text("accuracyTodayLabel"));
@@ -62,10 +64,11 @@ class MainWindowSmokeTest extends MainWindowUiTest {
         assertTrue(duplicates.isEmpty(), "duplicate ids: " + duplicates);
         List<String> required = List.of(
             "mainTabs", "headerSubtitleLabel", "deckSelector", "newDeckButton", "renameDeckButton", "archiveDeckButton",
-            "totalWordsLabel", "dueTodayLabel", "reviewedTodayLabel", "newWordsTodayLabel", "accuracyTodayLabel",
+            "totalWordsLabel", "dueTodayLabel", "dueReviewsLabel", "newAvailableTodayLabel", "reviewedTodayLabel", "newWordsTodayLabel", "accuracyTodayLabel",
             "masteredWordsLabel", "streakLabel", "xpLabel", "badgesLabel", "reviewGoalProgress", "newWordGoalProgress",
             "deckTable", "archivedDeckTable", "switchDeckButton", "restoreDeckButton",
-            "reviewModeSelector", "sessionSizeSelector", "customSessionSizeField", "startSessionButton",
+            "reviewModeSelector", "sessionSizeSelector", "customSessionSizeField", "newCardsPerDaySpinner",
+            "startSessionButton",
             "resetSessionButton", "sessionProgressLabel", "reviewWordLabel", "answerField", "submitAnswerButton",
             "ratingButtons", "rateAgainButton", "rateHardButton", "rateGoodButton", "rateEasyButton",
             "reviewResultArea", "completionCard",

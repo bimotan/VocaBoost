@@ -4,10 +4,12 @@ import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ReviewService;
+import com.vocabtrainer.service.ReviewSettings;
 import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
+import javafx.event.ActionEvent;
 import javafx.event.EventTarget;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -18,9 +20,12 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.ComboBoxBase;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
+import javafx.scene.control.Spinner;
+import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextFormatter;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
@@ -28,9 +33,12 @@ import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.util.StringConverter;
 
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -53,6 +61,7 @@ public final class ReviewView {
     private final ComboBox<ReviewMode> reviewModeSelector = new ComboBox<>();
     private final ComboBox<String> sessionSizeSelector = new ComboBox<>();
     private final TextField customSessionSizeField = new TextField();
+    private final Spinner<Integer> newCardsPerDaySpinner = new Spinner<>();
     private final Label sessionProgressLabel = new Label();
     private final Label reviewWordLabel = new Label(ReviewSessionPresenter.LOADING);
     private final Label reviewMetaLabel = new Label();
@@ -68,6 +77,8 @@ public final class ReviewView {
     private long renderedCardNumber = -1;
     private boolean renderedCanRate;
     private boolean swallowTypedKey;
+    /** Set while {@link #render} updates the selectors, whose listeners only react to the user. */
+    private boolean rendering;
 
     /** {@code clock} times the answers. */
     public ReviewView(ViewContext context, ReviewService reviewService, GoalService goalService,
@@ -159,9 +170,10 @@ public final class ReviewView {
         return target instanceof ButtonBase || target instanceof ComboBoxBase<?>;
     }
 
-    /** Digits typed into a field, such as the custom session size, are text, not ratings. */
+    /** Digits typed into a field, such as the custom session size or new words per day, are text, not ratings. */
     private static boolean isTypingIn(EventTarget target) {
-        return target instanceof TextInputControl input && input.isEditable() && !input.isDisabled();
+        return (target instanceof TextInputControl input && input.isEditable() && !input.isDisabled())
+            || (target instanceof Spinner<?> spinner && spinner.isEditable() && !spinner.isDisabled());
     }
 
     private VBox createContent() {
@@ -169,18 +181,14 @@ public final class ReviewView {
         reviewModeSelector.getItems().setAll(ReviewMode.values());
         reviewModeSelector.setCellFactory(list -> reviewModeCell());
         reviewModeSelector.setButtonCell(reviewModeCell());
-        reviewModeSelector.getSelectionModel().select(ReviewMode.EN_TO_ZH);
-        reviewModeSelector.valueProperty().addListener((observable, oldMode, newMode) ->
-            context.errors().guard("Change review mode failed", () -> presenter.changeMode(newMode)));
-        sessionSizeSelector.setId("sessionSizeSelector");
-        sessionSizeSelector.getItems().setAll("10", "20", "50", "All Due", "Custom");
-        sessionSizeSelector.getSelectionModel().select("20");
-        customSessionSizeField.setId("customSessionSizeField");
-        customSessionSizeField.setPromptText("Custom");
-        customSessionSizeField.setPrefWidth(90);
-        customSessionSizeField.setDisable(true);
-        sessionSizeSelector.valueProperty().addListener((observable, oldValue, newValue) ->
-            customSessionSizeField.setDisable(!"Custom".equals(newValue)));
+        reviewModeSelector.getSelectionModel().select(presenter.mode());
+        reviewModeSelector.valueProperty().addListener((observable, oldMode, newMode) -> {
+            if (!rendering) {
+                context.errors().guard("Change review mode failed", () -> presenter.changeMode(newMode));
+            }
+        });
+        configureSessionSize();
+        configureNewWordsPerDay();
         Button startSessionButton = new Button("Start Session");
         startSessionButton.setId("startSessionButton");
         startSessionButton.setOnAction(event -> context.errors().guard("Start session failed",
@@ -193,7 +201,7 @@ public final class ReviewView {
         HBox modeBox = new HBox(10, new Label("Mode"), reviewModeSelector, sessionProgressLabel);
         modeBox.setAlignment(Pos.CENTER_LEFT);
         HBox sessionBox = new HBox(10, new Label("Session size"), sessionSizeSelector, customSessionSizeField,
-            startSessionButton, resetSessionButton);
+            startSessionButton, resetSessionButton, new Label("New words/day"), newCardsPerDaySpinner);
         sessionBox.setAlignment(Pos.CENTER_LEFT);
 
         reviewWordLabel.setId("reviewWordLabel");
@@ -239,6 +247,102 @@ public final class ReviewView {
         return content;
     }
 
+    /**
+     * The session-size selector always shows the session's target: a choice applies at once, and a
+     * mode change, Reset or a deck switch keeps it. A custom size applies as soon as it is a number
+     * from 1 to 500.
+     */
+    private void configureSessionSize() {
+        sessionSizeSelector.setId("sessionSizeSelector");
+        sessionSizeSelector.getItems().setAll(sessionSizeChoices());
+        sessionSizeSelector.getSelectionModel().select(presenter.sessionSizeChoice());
+        customSessionSizeField.setId("customSessionSizeField");
+        customSessionSizeField.setPromptText("1-" + ReviewSessionPresenter.MAX_CUSTOM_SESSION_SIZE);
+        customSessionSizeField.setPrefWidth(90);
+        customSessionSizeField.setTextFormatter(new TextFormatter<String>(change ->
+            change.getControlNewText().matches("\\d{0,3}") ? change : null));
+        customSessionSizeField.setText(presenter.customSessionSize());
+        customSessionSizeField.setDisable(!ReviewSessionPresenter.CUSTOM.equals(sessionSizeSelector.getValue()));
+        sessionSizeSelector.valueProperty().addListener((observable, oldValue, newValue) -> {
+            boolean custom = ReviewSessionPresenter.CUSTOM.equals(newValue);
+            customSessionSizeField.setDisable(!custom);
+            if (rendering) {
+                return;
+            }
+            if (custom && customSessionSizeField.getText().isBlank()) {
+                int target = presenter.sessionTarget();
+                int start = target > 0 ? target : ReviewSessionPresenter.DEFAULT_SESSION_SIZE;
+                customSessionSizeField.setText(String.valueOf(start));
+            }
+            context.errors().guard("Change session size failed",
+                () -> presenter.selectSessionSize(newValue, customSessionSizeField.getText()));
+        });
+        customSessionSizeField.textProperty().addListener((observable, oldText, newText) -> {
+            if (!rendering && ReviewSessionPresenter.CUSTOM.equals(sessionSizeSelector.getValue())) {
+                context.errors().guard("Change session size failed",
+                    () -> presenter.selectSessionSize(ReviewSessionPresenter.CUSTOM, newText));
+            }
+        });
+    }
+
+    /** The current deck's new-words-per-day limit, typed or stepped by 5. */
+    private void configureNewWordsPerDay() {
+        newCardsPerDaySpinner.setId("newCardsPerDaySpinner");
+        SpinnerValueFactory.IntegerSpinnerValueFactory newCardsPerDay =
+            new SpinnerValueFactory.IntegerSpinnerValueFactory(0, ReviewSettings.MAX_NEW_CARDS_PER_DAY,
+                presenter.newCardsPerDay(), 5);
+        // Text that is not a number (an emptied field) keeps the value instead of clearing it.
+        newCardsPerDay.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(Integer value) {
+                return value == null ? "" : value.toString();
+            }
+
+            @Override
+            public Integer fromString(String text) {
+                try {
+                    return Integer.valueOf(text.trim());
+                } catch (NumberFormatException e) {
+                    return newCardsPerDay.getValue();
+                }
+            }
+        });
+        newCardsPerDaySpinner.setValueFactory(newCardsPerDay);
+        newCardsPerDaySpinner.setEditable(true);
+        newCardsPerDaySpinner.setPrefWidth(90);
+        newCardsPerDaySpinner.setTooltip(new Tooltip("The most new words this deck introduces per study day"));
+        newCardsPerDaySpinner.getEditor().setTextFormatter(new TextFormatter<String>(change ->
+            change.getControlNewText().matches("\\d{0,4}") ? change : null));
+        // A typed value counts after Enter and when the field loses the focus.
+        newCardsPerDaySpinner.getEditor().addEventHandler(ActionEvent.ACTION,
+            event -> commitEditorText(newCardsPerDaySpinner));
+        newCardsPerDaySpinner.focusedProperty().addListener((observable, wasFocused, focused) -> {
+            if (!focused) {
+                commitEditorText(newCardsPerDaySpinner);
+            }
+        });
+        newCardsPerDaySpinner.valueProperty().addListener((observable, oldValue, newValue) -> {
+            if (!rendering && newValue != null) {
+                context.errors().guard("Change new words per day failed", () -> presenter.setNewCardsPerDay(newValue));
+            }
+        });
+    }
+
+    private static List<String> sessionSizeChoices() {
+        List<String> choices = new ArrayList<>();
+        ReviewSessionPresenter.PRESET_SESSION_SIZES.forEach(size -> choices.add(String.valueOf(size)));
+        choices.add(ReviewSessionPresenter.ALL_DUE);
+        choices.add(ReviewSessionPresenter.CUSTOM);
+        return choices;
+    }
+
+    /** Takes the number typed into an editable spinner as its value, and shows the value it ends up with. */
+    private static void commitEditorText(Spinner<Integer> spinner) {
+        SpinnerValueFactory<Integer> factory = spinner.getValueFactory();
+        factory.setValue(factory.getConverter().fromString(spinner.getEditor().getText()));
+        spinner.getEditor().setText(factory.getConverter().toString(factory.getValue()));
+    }
+
     /** The id of a rating button: rateAgainButton, rateHardButton, rateGoodButton or rateEasyButton. */
     private static String ratingButtonId(ReviewRating rating) {
         String name = rating.name();
@@ -273,6 +377,21 @@ public final class ReviewView {
     }
 
     private void render() {
+        rendering = true;
+        try {
+            reviewModeSelector.setValue(presenter.mode());
+            sessionSizeSelector.setValue(presenter.sessionSizeChoice());
+            customSessionSizeField.setDisable(!ReviewSessionPresenter.CUSTOM.equals(presenter.sessionSizeChoice()));
+            if (!customSessionSizeField.isFocused() && !presenter.customSessionSize().isEmpty()
+                && !customSessionSizeField.getText().equals(presenter.customSessionSize())) {
+                customSessionSizeField.setText(presenter.customSessionSize());
+            }
+            if (newCardsPerDaySpinner.getValue() == null || newCardsPerDaySpinner.getValue() != presenter.newCardsPerDay()) {
+                newCardsPerDaySpinner.getValueFactory().setValue(presenter.newCardsPerDay());
+            }
+        } finally {
+            rendering = false;
+        }
         reviewWordLabel.setText(presenter.question());
         reviewMetaLabel.setText(presenter.details());
         sessionProgressLabel.setText(presenter.sessionProgress());

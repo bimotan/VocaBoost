@@ -9,5 +9,7 @@ public enum DataChange {
     /** Decks were created, renamed, archived or restored. */
     DECKS,
     /** Dictionary or AI settings changed. */
-    SETTINGS
+    SETTINGS,
+    /** Review settings changed, such as a deck's new-cards-per-day limit, which changes what is due today. */
+    REVIEW_SETTINGS
 }

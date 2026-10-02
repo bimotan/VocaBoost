@@ -10,8 +10,10 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.service.AiService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ReviewAnswer;
+import com.vocabtrainer.service.ReviewQueueCounts;
 import com.vocabtrainer.service.ReviewScheduler;
 import com.vocabtrainer.service.ReviewService;
+import com.vocabtrainer.service.ReviewSettings;
 import com.vocabtrainer.service.scheduling.IntervalPreview;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.DataChanges;
@@ -73,8 +75,14 @@ public final class ReviewSessionPresenter {
 
     private static final Logger LOGGER = Logger.getLogger(ReviewSessionPresenter.class.getName());
     static final String LOADING = "Loading...";
-    static final int DEFAULT_SESSION_SIZE = 20;
-    static final int MAX_CUSTOM_SESSION_SIZE = 500;
+    static final int DEFAULT_SESSION_SIZE = ReviewSettings.DEFAULT_SESSION_SIZE;
+    static final int MAX_CUSTOM_SESSION_SIZE = ReviewSettings.MAX_SESSION_SIZE;
+    static final String ALL_DUE = "All Due";
+    static final String CUSTOM = "Custom";
+    /** The session sizes the selector offers, besides All Due and Custom. */
+    static final List<Integer> PRESET_SESSION_SIZES = List.of(10, 20, 50);
+    /** What the result area says after practicing a weak word that was not due. */
+    static final String PRACTICE_SAVED = "Practice saved: the word was not due, so its schedule did not change.";
 
     private final ReviewService reviewService;
     private final GoalService goalService;
@@ -88,7 +96,11 @@ public final class ReviewSessionPresenter {
     private final Map<ReviewRating, IntervalPreview> ratingPreviews = new EnumMap<>(ReviewRating.class);
 
     private long deckId;
-    private ReviewMode mode = ReviewMode.EN_TO_ZH;
+    private ReviewMode mode;
+    /** Whether the user chose Custom, so a custom size of 10, 20 or 50 still shows as Custom. */
+    private boolean customSizeChosen;
+    /** The deck's new-cards-per-day limit, read when the deck is shown. */
+    private int newCardsPerDay = ReviewSettings.DEFAULT_NEW_CARDS_PER_DAY;
     private ReviewMode questionMode = ReviewMode.EN_TO_ZH;
     private State state = State.IDLE;
     private WordCard card;
@@ -133,6 +145,7 @@ public final class ReviewSessionPresenter {
         this.changes = changes;
         this.failures = failures;
         this.clock = clock;
+        this.mode = reviewService.sessionMode();
     }
 
     /** Called after every change of the state or of a displayed text. */
@@ -142,22 +155,27 @@ public final class ReviewSessionPresenter {
 
     // ---- Input ----
 
-    /** Starts a new session on {@code deckId} with the default size and shows its first card. */
+    /** Starts a new session on {@code deckId}, with the current mode and size, and shows its first card. */
     public void showDeck(long deckId) {
         this.deckId = deckId;
         resetSession();
     }
 
-    /** Starts a new session in {@code mode} with the default size. */
+    /** Starts a new session in {@code mode}, with the current size; the next launch starts in this mode. */
     public void changeMode(ReviewMode mode) {
-        this.mode = mode == null ? ReviewMode.EN_TO_ZH : mode;
+        ReviewMode chosen = mode == null ? ReviewMode.EN_TO_ZH : mode;
+        if (chosen == this.mode) {
+            return;
+        }
+        this.mode = chosen;
         resetSession();
     }
 
-    /** Starts a new session with the default size. */
+    /** Starts a new session with the current mode and size. */
     public void resetSession() {
         try {
-            reviewService.resetSession(deckId);
+            newCardsPerDay = reviewService.newCardsPerDay(deckId);
+            reviewService.startSession(deckId, mode, reviewService.sessionTarget());
             loadNextCard();
         } finally {
             fireChanged();
@@ -165,18 +183,71 @@ public final class ReviewSessionPresenter {
     }
 
     /**
-     * Starts a session of the chosen size, see {@link #parseSessionSize}.
+     * Starts a new session of the chosen size, see {@link #parseSessionSize}.
      *
      * @throws IllegalArgumentException if the custom size is not a number from 1 to 500
      */
     public void startSession(String sizeChoice, String customSize) {
         int target = parseSessionSize(sizeChoice, customSize);
         try {
+            customSizeChosen = CUSTOM.equals(sizeChoice);
             reviewService.startSession(deckId, mode, target);
             loadNextCard();
         } finally {
             fireChanged();
         }
+    }
+
+    /**
+     * The user chose a session size: the running session takes it as its target at once and keeps
+     * what it has done, and the next launch starts with it. A custom size that is not a number from
+     * 1 to 500 yet (the user is still typing) changes nothing. A session that had reached its target
+     * goes on when the new one is larger.
+     */
+    public void selectSessionSize(String sizeChoice, String customText) {
+        int target;
+        try {
+            target = parseSessionSize(sizeChoice, customText);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        boolean custom = CUSTOM.equals(sizeChoice);
+        if (target == reviewService.sessionTarget() && custom == customSizeChosen) {
+            return;
+        }
+        customSizeChosen = custom;
+        try {
+            reviewService.setSessionTarget(target);
+            if (state == State.COMPLETE) {
+                loadNextCard();
+            } else {
+                updateSessionProgress();
+            }
+        } finally {
+            fireChanged();
+        }
+    }
+
+    /**
+     * Sets the deck's new-cards-per-day limit. A session that ran out of cards goes on when the new
+     * limit lets more new cards in today.
+     *
+     * @throws IllegalArgumentException if {@code limit} is not from 0 to 9999
+     */
+    public void setNewCardsPerDay(int limit) {
+        if (limit == newCardsPerDay) {
+            return;
+        }
+        reviewService.setNewCardsPerDay(deckId, limit);
+        newCardsPerDay = limit;
+        try {
+            if (state == State.COMPLETE) {
+                loadNextCard();
+            }
+        } finally {
+            fireChanged();
+        }
+        changes.publish(DataChange.REVIEW_SETTINGS);
     }
 
     /** The text in the answer field; the user may edit it until the answer is submitted. */
@@ -251,8 +322,8 @@ public final class ReviewSessionPresenter {
         try {
             loadNextCard();
             if (card != null) {
-                result = "Saved. XP +" + outcome.xpEarned() + Formats.unlockedSuffix(outcome.unlockedAchievements())
-                    + leechNotice(outcome);
+                result = (outcome.isPractice() ? PRACTICE_SAVED : "Saved.") + " XP +" + outcome.xpEarned()
+                    + Formats.unlockedSuffix(outcome.unlockedAchievements()) + leechNotice(outcome);
             }
         } catch (RuntimeException e) {
             failure = e;
@@ -312,6 +383,35 @@ public final class ReviewSessionPresenter {
 
     public State state() {
         return state;
+    }
+
+    /** The review mode of the session. */
+    public ReviewMode mode() {
+        return mode;
+    }
+
+    /** What the session-size selector shows for the session's target: "10", "20", "50", "All Due" or "Custom". */
+    public String sessionSizeChoice() {
+        int target = reviewService.sessionTarget();
+        if (target == 0) {
+            return ALL_DUE;
+        }
+        return customSizeChosen || !PRESET_SESSION_SIZES.contains(target) ? CUSTOM : String.valueOf(target);
+    }
+
+    /** The custom session size, when the selector shows Custom; otherwise empty. */
+    public String customSessionSize() {
+        return CUSTOM.equals(sessionSizeChoice()) ? String.valueOf(reviewService.sessionTarget()) : "";
+    }
+
+    /** The session's target: a number of different cards, or 0 for All Due. */
+    public int sessionTarget() {
+        return reviewService.sessionTarget();
+    }
+
+    /** The current deck's new-cards-per-day limit. */
+    public int newCardsPerDay() {
+        return newCardsPerDay;
     }
 
     /** The card on screen; empty when the session is complete or nothing is loaded. */
@@ -387,11 +487,16 @@ public final class ReviewSessionPresenter {
      * @throws IllegalArgumentException if the custom size is not a number from 1 to 500
      */
     public static int parseSessionSize(String choice, String customSize) {
-        if ("All Due".equals(choice)) {
+        if (ALL_DUE.equals(choice)) {
             return 0;
         }
-        if ("Custom".equals(choice)) {
-            int custom = Integer.parseInt(customSize == null ? "" : customSize.trim());
+        if (CUSTOM.equals(choice)) {
+            int custom;
+            try {
+                custom = Integer.parseInt(customSize == null ? "" : customSize.trim());
+            } catch (NumberFormatException e) {
+                custom = -1;
+            }
             if (custom <= 0 || custom > MAX_CUSTOM_SESSION_SIZE) {
                 throw new IllegalArgumentException("Custom session size must be between 1 and 500.");
             }
@@ -431,11 +536,7 @@ public final class ReviewSessionPresenter {
         shownBefore = Duration.ZERO;
         questionMode = reviewService.currentQuestionMode();
         answerPrompt = questionMode.getPrompt();
-        ReviewSessionSummary session = reviewService.sessionSummary();
-        String target = session.sessionGoal() > 0 ? String.valueOf(session.sessionGoal()) : "All Due";
-        sessionProgress = "Session " + session.cardsReviewed() + "/" + target
-            + " | Accuracy " + Formats.percent(session.accuracy())
-            + " | XP " + session.xpEarned();
+        ReviewSessionSummary session = updateSessionProgress();
         if (card == null) {
             showCompletion(session);
             return;
@@ -443,6 +544,15 @@ public final class ReviewSessionPresenter {
         state = State.AWAITING_ANSWER;
         question = questionMode == ReviewMode.ZH_TO_EN ? card.getChinese() : card.getEnglish();
         details = questionMode.getLabel() + " | " + cardDetails(card, now);
+    }
+
+    private ReviewSessionSummary updateSessionProgress() {
+        ReviewSessionSummary session = reviewService.sessionSummary();
+        String target = session.sessionGoal() > 0 ? String.valueOf(session.sessionGoal()) : ALL_DUE;
+        sessionProgress = "Session " + session.cardsReviewed() + "/" + target
+            + " | Accuracy " + Formats.percent(session.accuracy())
+            + " | XP " + session.xpEarned();
+        return session;
     }
 
     /**
@@ -485,7 +595,7 @@ public final class ReviewSessionPresenter {
         state = State.COMPLETE;
         question = "Review complete";
         boolean targetReached = session.sessionGoal() > 0 && session.cardsReviewed() >= session.sessionGoal();
-        details = targetReached ? "Session target reached." : "No due words right now.";
+        details = targetReached ? "Session target reached." : nothingLeft();
         completionTitle = "Session Complete";
         completionMetrics = "Completed: " + session.cardsReviewed()
             + (session.sessionGoal() > 0 ? "/" + session.sessionGoal() : " / All Due")
@@ -494,7 +604,21 @@ public final class ReviewSessionPresenter {
             + System.lineSeparator() + "Today review goal: " + progress.reviewedCount() + "/" + progress.reviewGoal()
             + " | New words: " + progress.newWordsCount() + "/" + progress.newWordGoal()
             + System.lineSeparator() + "Unlocked: " + Formats.achievementNames(session.unlockedAchievements());
-        result = "Use Weak Words mode to keep working on your most fragile cards, or switch deck from the header.";
+        result = mode == ReviewMode.WEAK_WORDS
+            ? "Reset Session to go through the weak words again, or switch deck from the header."
+            : "Use Weak Words mode to keep working on your most fragile cards, or switch deck from the header.";
+    }
+
+    /** Why a session that did not reach its target has no card left. */
+    private String nothingLeft() {
+        if (mode == ReviewMode.WEAK_WORDS) {
+            return "Every weak word was shown in this session.";
+        }
+        ReviewQueueCounts queue = reviewService.queueCounts(deckId);
+        if (queue.newCardsDue() > 0 && queue.newAvailableToday() == 0) {
+            return "No due words right now; today's limit of " + queue.newCardsPerDay() + " new words is reached.";
+        }
+        return "No due words right now.";
     }
 
     /** Shows an explanation only for the answer it was requested for, never on a later card. */

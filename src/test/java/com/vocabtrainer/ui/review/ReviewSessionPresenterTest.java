@@ -495,6 +495,145 @@ class ReviewSessionPresenterTest {
     }
 
     @Test
+    void aChosenSessionSizeAppliesAtOnceAndOutlivesModeChangesResetsAndDeckSwitches() {
+        Deck other = services.deckService().createDeck("Other");
+        presenter.showDeck(deckId);
+        assertEquals("20", presenter.sessionSizeChoice());
+        assertEquals("Session 0/20 | Accuracy 0% | XP 0", presenter.sessionProgress());
+        long cardNumber = presenter.cardNumber();
+
+        presenter.selectSessionSize("50", "");
+        assertEquals("50", presenter.sessionSizeChoice());
+        assertEquals("Session 0/50 | Accuracy 0% | XP 0", presenter.sessionProgress());
+        assertEquals(cardNumber, presenter.cardNumber(), "the card on screen stays");
+
+        presenter.changeMode(ReviewMode.MIXED);
+        assertEquals("50", presenter.sessionSizeChoice());
+        assertEquals("Session 0/50 | Accuracy 0% | XP 0", presenter.sessionProgress());
+        presenter.resetSession();
+        assertEquals("Session 0/50 | Accuracy 0% | XP 0", presenter.sessionProgress());
+        presenter.showDeck(other.getId());
+        assertEquals("Session 0/50 | Accuracy 0% | XP 0", presenter.sessionProgress());
+        presenter.showDeck(deckId);
+        assertEquals(ReviewMode.MIXED, presenter.mode());
+
+        presenter.selectSessionSize("All Due", "");
+        assertEquals("All Due", presenter.sessionSizeChoice());
+        assertEquals("Session 0/All Due | Accuracy 0% | XP 0", presenter.sessionProgress());
+        presenter.selectSessionSize("Custom", "7");
+        assertEquals("Custom", presenter.sessionSizeChoice());
+        assertEquals("7", presenter.customSessionSize());
+        assertEquals("Session 0/7 | Accuracy 0% | XP 0", presenter.sessionProgress());
+        // While the user is still typing, nothing changes.
+        presenter.selectSessionSize("Custom", "");
+        presenter.selectSessionSize("Custom", "0");
+        assertEquals("Session 0/7 | Accuracy 0% | XP 0", presenter.sessionProgress());
+        // A custom 20 stays Custom.
+        presenter.selectSessionSize("Custom", "20");
+        assertEquals("Custom", presenter.sessionSizeChoice());
+        assertEquals("Session 0/20 | Accuracy 0% | XP 0", presenter.sessionProgress());
+        presenter.selectSessionSize("20", "20");
+        assertEquals("20", presenter.sessionSizeChoice());
+    }
+
+    @Test
+    void aLargerSessionSizeLetsACompletedSessionGoOn() {
+        presenter.showDeck(deckId);
+        presenter.startSession("Custom", "1");
+        presenter.setAnswer(firstMeaning(presenter.card().orElseThrow()));
+        presenter.submit();
+        presenter.rate(ReviewRating.EASY);
+        assertEquals(State.COMPLETE, presenter.state());
+
+        presenter.selectSessionSize("10", "");
+
+        assertEquals(State.AWAITING_ANSWER, presenter.state());
+        assertTrue(presenter.sessionProgress().startsWith("Session 1/10 | Accuracy 100% | XP "), presenter.sessionProgress());
+    }
+
+    @Test
+    void theNextLaunchStartsWithTheLastSessionSizeAndMode() throws SQLException {
+        presenter.showDeck(deckId);
+        presenter.selectSessionSize("50", "");
+        presenter.changeMode(ReviewMode.ZH_TO_EN);
+
+        AppServices restarted = AppServices.builder(tempDir.resolve("vocab.db")).open();
+        databases.track(restarted.databaseManager());
+        ReviewSessionPresenter next = new ReviewSessionPresenter(restarted.reviewService(), restarted.goalService(),
+            () -> ai, tasks, changes, (title, error) -> failures.add(title));
+        assertEquals(ReviewMode.ZH_TO_EN, next.mode());
+        next.showDeck(deckId);
+
+        assertEquals("50", next.sessionSizeChoice());
+        assertEquals("Session 0/50 | Accuracy 0% | XP 0", next.sessionProgress());
+        assertEquals(next.card().orElseThrow().getChinese(), next.question());
+    }
+
+    @Test
+    void practicingAWeakWordThatIsNotDueSaysItsScheduleDidNotChange() throws SQLException {
+        Deck deck = services.deckService().createDeck("Weak");
+        WordCard abate = services.wordRepository().insert(weakWord(deck, "abate", "减弱"));
+        services.wordRepository().insert(weakWord(deck, "laud", "赞扬"));
+        presenter.changeMode(ReviewMode.WEAK_WORDS);
+        presenter.showDeck(deck.getId());
+        WordCard first = presenter.card().orElseThrow();
+        presenter.setAnswer(first.getChinese());
+        presenter.submit();
+        assertEquals("3d", presenter.ratingPreview(ReviewRating.GOOD), "when it is due anyway");
+
+        presenter.rate(ReviewRating.GOOD);
+
+        assertTrue(presenter.result().startsWith(ReviewSessionPresenter.PRACTICE_SAVED + " XP +"), presenter.result());
+        WordCard second = presenter.card().orElseThrow();
+        assertNotEquals(first.getId(), second.getId());
+        presenter.setAnswer(second.getChinese());
+        presenter.submit();
+        presenter.rate(ReviewRating.GOOD);
+        assertEquals(State.COMPLETE, presenter.state());
+        assertEquals("Every weak word was shown in this session.", presenter.details());
+        assertEquals(abate.getNextReviewAt(), services.wordRepository().findById(abate.getId()).orElseThrow().getNextReviewAt());
+    }
+
+    @Test
+    void theNewWordLimitEndsTheSessionAndRaisingItLetsTheSessionGoOn() throws SQLException {
+        Deck deck = services.deckService().createDeck("New words");
+        for (String english : List.of("lucid", "abate", "laud", "cavil")) {
+            services.wordRepository().insert(WordCard.createNew(deck.getId(), english, "释义" + english));
+        }
+        presenter.showDeck(deck.getId());
+        presenter.setNewCardsPerDay(2);
+        assertEquals(List.of(Set.of(DataChange.REVIEW_SETTINGS)), published);
+        for (int i = 0; i < 2; i++) {
+            presenter.setAnswer(presenter.card().orElseThrow().getChinese());
+            presenter.submit();
+            presenter.rate(ReviewRating.EASY);
+        }
+        assertEquals(State.COMPLETE, presenter.state());
+        assertEquals("No due words right now; today's limit of 2 new words is reached.", presenter.details());
+
+        presenter.setNewCardsPerDay(3);
+
+        assertEquals(State.AWAITING_ANSWER, presenter.state());
+        assertEquals(3, presenter.newCardsPerDay());
+        assertEquals(3, services.reviewService().newCardsPerDay(deck.getId()));
+        presenter.showDeck(deckId);
+        assertEquals(20, presenter.newCardsPerDay(), "each deck has its own limit");
+    }
+
+    private static WordCard weakWord(Deck deck, String english, String chinese) {
+        WordCard card = WordCard.createNew(deck.getId(), english, chinese);
+        card.setState(CardState.REVIEW);
+        card.setStability(3);
+        card.setDifficulty(6);
+        card.setRepetitions(4);
+        card.setConsecutiveCorrect(1);
+        card.setLapses(1);
+        card.setLastReviewedAt(LocalDateTime.now().minusDays(1));
+        card.setNextReviewAt(LocalDateTime.now().plusDays(3));
+        return card;
+    }
+
+    @Test
     void sessionSizeChoicesAreParsed() {
         assertEquals(10, ReviewSessionPresenter.parseSessionSize("10", ""));
         assertEquals(50, ReviewSessionPresenter.parseSessionSize("50", "7"));

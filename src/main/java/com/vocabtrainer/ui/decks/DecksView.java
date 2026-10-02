@@ -42,7 +42,7 @@ public final class DecksView {
         this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh decks failed", false);
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
-                || changes.contains(DataChange.DECKS)) {
+                || changes.contains(DataChange.DECKS) || changes.contains(DataChange.REVIEW_SETTINGS)) {
                 lazy.markStale();
             }
         });

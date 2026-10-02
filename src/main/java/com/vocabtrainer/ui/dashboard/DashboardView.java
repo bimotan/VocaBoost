@@ -32,6 +32,8 @@ public final class DashboardView {
 
     private final Label totalWordsLabel = new Label("-");
     private final Label dueTodayLabel = new Label("-");
+    private final Label dueReviewsLabel = new Label("-");
+    private final Label newAvailableTodayLabel = new Label("-");
     private final Label reviewedTodayLabel = new Label("-");
     private final Label newWordsTodayLabel = new Label("-");
     private final Label accuracyTodayLabel = new Label("-");
@@ -55,7 +57,8 @@ public final class DashboardView {
         this.tab = Widgets.tab("dashboardTab", "Dashboard", createContent());
         this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh failed", false);
         context.changes().subscribe(changes -> {
-            if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)) {
+            if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
+                || changes.contains(DataChange.REVIEW_SETTINGS)) {
                 lazy.markStale();
             }
         });
@@ -74,6 +77,8 @@ public final class DashboardView {
 
         totalWordsLabel.setId("totalWordsLabel");
         dueTodayLabel.setId("dueTodayLabel");
+        dueReviewsLabel.setId("dueReviewsLabel");
+        newAvailableTodayLabel.setId("newAvailableTodayLabel");
         reviewedTodayLabel.setId("reviewedTodayLabel");
         newWordsTodayLabel.setId("newWordsTodayLabel");
         accuracyTodayLabel.setId("accuracyTodayLabel");
@@ -86,12 +91,15 @@ public final class DashboardView {
         newWordProgress.setId("newWordGoalProgress");
         addStat(grid, 0, "Total words", totalWordsLabel);
         addStat(grid, 1, "Due today", dueTodayLabel);
-        addStat(grid, 2, "Reviews today", reviewedTodayLabel);
-        addStat(grid, 3, "New words today", newWordsTodayLabel);
-        addStat(grid, 4, "Accuracy today", accuracyTodayLabel);
-        addStat(grid, 5, "Mastered words", masteredWordsLabel);
-        addStat(grid, 6, "Streak", streakLabel);
-        addStat(grid, 7, "XP", xpLabel);
+        // "Due today" splits into the two queues: due reviews and the new words the daily limit lets in.
+        addSubStat(grid, 2, "Due reviews", dueReviewsLabel);
+        addSubStat(grid, 3, "New available today", newAvailableTodayLabel);
+        addStat(grid, 4, "Reviews today", reviewedTodayLabel);
+        addStat(grid, 5, "New words today", newWordsTodayLabel);
+        addStat(grid, 6, "Accuracy today", accuracyTodayLabel);
+        addStat(grid, 7, "Mastered words", masteredWordsLabel);
+        addStat(grid, 8, "Streak", streakLabel);
+        addStat(grid, 9, "XP", xpLabel);
 
         reviewProgress.setPrefWidth(420);
         newWordProgress.setPrefWidth(420);
@@ -113,7 +121,7 @@ public final class DashboardView {
             refreshButton
         );
         progressBox.setPadding(new Insets(18, 0, 0, 0));
-        grid.add(progressBox, 0, 8, 2, 1);
+        grid.add(progressBox, 0, 10, 2, 1);
         return grid;
     }
 
@@ -125,6 +133,15 @@ public final class DashboardView {
         grid.add(valueLabel, 1, row);
     }
 
+    /** A smaller, indented stat that breaks down the one above it. */
+    private static void addSubStat(GridPane grid, int row, String name, Label valueLabel) {
+        Label nameLabel = new Label(name);
+        nameLabel.setStyle("-fx-font-size: 13px; -fx-text-fill: #6b7280; -fx-padding: 0 0 0 16;");
+        valueLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: 600;");
+        grid.add(nameLabel, 0, row);
+        grid.add(valueLabel, 1, row);
+    }
+
     private void refresh() {
         long deckId = context.decks().currentId();
         DashboardStats stats = statsService.dashboardStats(deckId);
@@ -132,6 +149,8 @@ public final class DashboardView {
         List<Achievement> achievements = achievementService.getUnlockedAchievements(deckId);
         totalWordsLabel.setText(String.valueOf(stats.totalWords()));
         dueTodayLabel.setText(String.valueOf(stats.dueToday()));
+        dueReviewsLabel.setText(String.valueOf(stats.dueReviews()));
+        newAvailableTodayLabel.setText(String.valueOf(stats.newAvailableToday()));
         reviewedTodayLabel.setText(progress.reviewedCount() + " / " + progress.reviewGoal());
         newWordsTodayLabel.setText(progress.newWordsCount() + " / " + progress.newWordGoal());
         accuracyTodayLabel.setText(Formats.percent(progress.accuracy()));

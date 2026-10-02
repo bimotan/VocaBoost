@@ -98,6 +98,10 @@ abstract class MainWindowUiTest {
         testName = testInfo.getTestMethod().map(Method::getName).orElse("test");
         lastInputNanos = System.nanoTime() - INPUT_SETTLE_NANOS;
         Fx.drainUncaught();
+        showMainWindow();
+    }
+
+    private void showMainWindow() {
         AppServices.Builder builder = AppServices.builder(tempDir.resolve("vocab.db"))
             .dictionaryService((cache, settings) -> offlineDictionary(settings))
             .aiService((cache, settings) -> new MockAiService());
@@ -112,6 +116,18 @@ abstract class MainWindowUiTest {
             stage = new Stage();
             VocabTrainerApp.showMainWindow(stage, services.createMainWindow(dialogs));
         });
+    }
+
+    /**
+     * Closes the window and the database and opens both again on the same file, as quitting and
+     * starting the app again does.
+     */
+    void restartApp() {
+        waitForBackgroundTasks();
+        Fx.run(() -> stage.close());
+        services.close();
+        services = null;
+        showMainWindow();
     }
 
     /** Override to replace part of the wiring, for example with a repository that fails on demand. */
