@@ -9,7 +9,7 @@ It is suitable as a learning analytics prototype because each review produces st
 - JavaFX desktop app with SQLite persistence.
 - Multi-deck management: create, switch, rename, archive, and restore decks.
 - Spaced repetition scheduler based on SM-2 style intervals.
-- Typed answer review with similarity percentage, Again / Hard / Good / Easy self-rating, English-to-Chinese, Chinese-to-English, mixed, and weak-word modes.
+- Typed answer review with similarity percentage, Again / Hard / Good / Easy self-rating, English-to-Chinese, Chinese-to-English, mixed, and weak-word modes. The review loop works from the keyboard: Enter submits, then 1 / 2 / 3 / 4 rate Again / Hard / Good / Easy and Space rates Good.
 - Review session presets: 10 / 20 / 50 / All Due / Custom, with Start Session and Reset Session controls.
 - Similarity-aware scheduling: vague or low-similarity answers reduce easiness and increase future urgency.
 - Goals and achievements: daily review goal, daily new-word goal, session target, streak, XP, and badges.
@@ -191,7 +191,7 @@ src/main/resources/data/gre_starter_sample.csv
 
 For a larger GRE list, prepare your own CSV in the format above and use `Add / Import -> Import GRE CSV`. Unknown or copyrighted 2000-word lists are intentionally not bundled. The bundled starter is an original, self-maintained sample of common GRE-style study words; use your own licensed CSV for a full 2000-word deck.
 
-GRE CSV import stops at 2000 imported words. The one-click GRE starter import refreshes Dashboard, Word List, and Review immediately after import.
+GRE CSV import stops at 2000 imported words. Imports run in the background and count toward the deck they were started in, even if you switch decks meanwhile; Dashboard, Decks and Word List show the new words when you open them, and a review card you are answering stays on screen.
 
 ## Build a Clickable Windows App
 
@@ -225,7 +225,7 @@ src/main/java/com/vocabtrainer
 |- domain       WordCard, Deck, ReviewLog, goals, achievements, dictionary and stats records
 |- repository   SQLite setup and CRUD
 |- service      review scheduling, goals, achievements, validation, dictionary, import, stats, AI interface
-|- ui           JavaFX screens
+|- ui           JavaFX: MainWindow shell, one view per tab (dashboard, decks, review, importing, stats, words), FX-free review presenter
 `- util         date and path utilities
 ```
 
@@ -266,7 +266,8 @@ Current tests cover:
 - `StatsService`
 - `BackupService`
 - SQLite repository CRUD and new persistence tables
-- `MainWindow` UI characterization tests (tag `ui`, `src/test/java/com/vocabtrainer/ui`): startup on a fresh database, the review loop including a rating that fails to save and is retried, deck create/switch/rename/archive/restore, adding words, Word List filters, statistics, JSON backup export and restore, CSV import and dictionary settings. Each test opens the real window on its own temporary database, wired by `AppServices` like the app, with scripted dialogs and no network access.
+- `ReviewSessionPresenter` (plain JUnit, no JavaFX): the review state machine, retrying a failed save, late AI explanations; `WordListFilter`, and the SQL weak/mastered/due rules checked against the `WordCard` predicates.
+- Main window UI tests (tag `ui`, `src/test/java/com/vocabtrainer/ui`): startup on a fresh database, the review loop including a rating that fails to save and is retried, keyboard rating, deck create/switch/rename/archive/restore, adding words, Word List filters, statistics, JSON backup export and restore, CSV import and dictionary settings, hidden tabs refreshing only when shown, and imports or AI explanations that finish after the user moved on. Each test opens the real window on its own temporary database, wired by `AppServices` like the app, with scripted dialogs and no network access.
 
 Verified command:
 
