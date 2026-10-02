@@ -7,8 +7,12 @@ import java.sql.SQLException;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Locale;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class CachingAiService implements AiService {
+    private static final Logger LOGGER = Logger.getLogger(CachingAiService.class.getName());
+
     private final AiService delegate;
     private final AiCacheRepository cacheRepository;
     private final Clock clock;
@@ -37,16 +41,18 @@ public class CachingAiService implements AiService {
                 if (cached.isPresent()) {
                     return cached.get();
                 }
-            } catch (SQLException ignored) {
+            } catch (SQLException e) {
                 // Cache errors must not block review.
+                LOGGER.log(Level.WARNING, "Cannot read AI explanation cache; asking the provider instead", e);
             }
         }
         String response = delegate.explain(word);
         if (delegate.isAvailable() && response != null && !response.isBlank()) {
             try {
                 cacheRepository.save(key, response, LocalDateTime.now(clock));
-            } catch (SQLException ignored) {
+            } catch (SQLException e) {
                 // Cache errors must not block review.
+                LOGGER.log(Level.WARNING, "Cannot save AI explanation to cache", e);
             }
         }
         return response;

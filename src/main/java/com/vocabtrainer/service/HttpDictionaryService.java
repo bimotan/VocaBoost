@@ -13,10 +13,13 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class HttpDictionaryService implements DictionaryService {
+    private static final Logger LOGGER = Logger.getLogger(HttpDictionaryService.class.getName());
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final Pattern OBJECT_PATTERN = Pattern.compile("\\{[^{}]*}", Pattern.DOTALL);
 
@@ -61,11 +64,13 @@ public class HttpDictionaryService implements DictionaryService {
             }
             return DictionaryLookupResult.success("Loaded from configured dictionary API.", entries);
         } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Configured dictionary API lookup failed for '" + clean + "'", e);
             return DictionaryLookupResult.failure("Network error: " + e.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return DictionaryLookupResult.failure("Dictionary lookup was interrupted.");
         } catch (IllegalArgumentException e) {
+            LOGGER.log(Level.WARNING, "Configured dictionary API URL is invalid", e);
             return DictionaryLookupResult.failure("Dictionary API URL is invalid.");
         }
     }

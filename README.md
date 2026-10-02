@@ -49,6 +49,8 @@ The app creates a local SQLite database automatically:
 
 Existing databases are migrated with `CREATE TABLE IF NOT EXISTS`; the app does not delete your saved words.
 
+Diagnostic logs (rotating, 5 x 1 MB) are written next to the database, in `%USERPROFILE%\.vocab-trainer\logs\vocaboost-0.log`. Use **Statistics -> Open log folder** to find them when reporting a problem.
+
 ## Run in IntelliJ IDEA
 
 Clean clone setup:

@@ -15,8 +15,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class LocalDictionaryService implements DictionaryService {
+    private static final Logger LOGGER = Logger.getLogger(LocalDictionaryService.class.getName());
     private static final String STARTER_RESOURCE = "/data/gre_starter_sample.csv";
 
     private final Map<String, DictionaryEntry> entries;
@@ -79,8 +82,10 @@ public class LocalDictionaryService implements DictionaryService {
                     if (configuredLoaded) {
                         primarySource = path.toAbsolutePath().toString();
                     }
-                } catch (IOException ignored) {
+                } catch (IOException e) {
                     // Fall back to bundled starter data.
+                    LOGGER.log(Level.WARNING, "Cannot read local dictionary CSV " + path.toAbsolutePath()
+                        + "; using the bundled starter dictionary instead", e);
                 }
             }
         }
@@ -93,8 +98,9 @@ public class LocalDictionaryService implements DictionaryService {
                 if (primarySource.isBlank() && bundledLoaded) {
                     primarySource = "Bundled GRE starter";
                 }
-            } catch (IOException ignored) {
+            } catch (IOException e) {
                 // A missing local dictionary should not stop the app.
+                LOGGER.log(Level.WARNING, "Cannot read bundled starter dictionary " + STARTER_RESOURCE, e);
             }
         }
         return new LoadOutcome(result, new LocalDictionaryStatus(

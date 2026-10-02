@@ -2,7 +2,12 @@ package com.vocabtrainer.service;
 
 import com.vocabtrainer.domain.WordCard;
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 public class FallbackAiService implements AiService {
+    private static final Logger LOGGER = Logger.getLogger(FallbackAiService.class.getName());
+
     private final AiService primary;
     private final AiService fallback;
 
@@ -28,6 +33,7 @@ public class FallbackAiService implements AiService {
             }
             return fallback.explain(word);
         } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "AI provider failed; using the mock explanation instead", e);
             return fallback.explain(word) + System.lineSeparator()
                 + "AI provider failed; mock fallback was used.";
         }

@@ -37,7 +37,9 @@ import com.vocabtrainer.service.ReviewService;
 import com.vocabtrainer.service.SettingsService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.service.WordValidationService;
+import com.vocabtrainer.util.AppLogging;
 import com.vocabtrainer.util.DateTimeUtil;
+import com.vocabtrainer.util.ErrorMessages;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.animation.PauseTransition;
 import javafx.collections.FXCollections;
@@ -87,9 +89,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 public class MainWindow {
+    private static final Logger LOGGER = Logger.getLogger(MainWindow.class.getName());
+
     private record DeckRow(Deck deck, String name, int words, int due, String latestReview) {
     }
 
@@ -213,7 +219,7 @@ public class MainWindow {
         deckSelector.valueProperty().addListener((observable, oldDeck, newDeck) -> {
             if (newDeck != null && (currentDeck == null || newDeck.getId() != currentDeck.getId())) {
                 currentDeck = newDeck;
-                onDeckChanged();
+                guard("Switch deck failed", this::onDeckChanged);
             }
         });
 
@@ -293,15 +299,11 @@ public class MainWindow {
         dialog.setTitle("New deck");
         dialog.setHeaderText("Create a new deck");
         dialog.setContentText("Deck name");
-        dialog.showAndWait().ifPresent(name -> {
-            try {
-                currentDeck = deckService.createDeck(name);
-                refreshDeckSelector();
-                onDeckChanged();
-            } catch (RuntimeException e) {
-                showError("Create deck failed", rootMessage(e));
-            }
-        });
+        dialog.showAndWait().ifPresent(name -> guard("Create deck failed", () -> {
+            currentDeck = deckService.createDeck(name);
+            refreshDeckSelector();
+            onDeckChanged();
+        }));
     }
 
     private void renameCurrentDeck() {
@@ -312,15 +314,11 @@ public class MainWindow {
         dialog.setTitle("Rename deck");
         dialog.setHeaderText("Rename current deck");
         dialog.setContentText("Deck name");
-        dialog.showAndWait().ifPresent(name -> {
-            try {
-                currentDeck = deckService.renameDeck(currentDeck.getId(), name);
-                refreshDeckSelector();
-                onDeckChanged();
-            } catch (RuntimeException e) {
-                showError("Rename deck failed", rootMessage(e));
-            }
-        });
+        dialog.showAndWait().ifPresent(name -> guard("Rename deck failed", () -> {
+            currentDeck = deckService.renameDeck(currentDeck.getId(), name);
+            refreshDeckSelector();
+            onDeckChanged();
+        }));
     }
 
     private void archiveCurrentDeck() {
@@ -333,13 +331,11 @@ public class MainWindow {
         confirm.setContentText("Words remain in SQLite, but the deck will be hidden from active study views.");
         Optional<ButtonType> result = confirm.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
-            try {
+            guard("Archive deck failed", () -> {
                 currentDeck = deckService.archiveDeck(currentDeck.getId());
                 refreshDeckSelector();
                 onDeckChanged();
-            } catch (RuntimeException e) {
-                showError("Archive deck failed", rootMessage(e));
-            }
+            });
         }
     }
 
@@ -352,13 +348,11 @@ public class MainWindow {
             showInfo("Please select an archived deck to restore.");
             return;
         }
-        try {
+        guard("Restore deck failed", () -> {
             currentDeck = deckService.restoreDeck(selected.deck().getId());
             refreshDeckSelector();
             onDeckChanged();
-        } catch (RuntimeException e) {
-            showError("Restore deck failed", rootMessage(e));
-        }
+        });
     }
 
     private void onDeckChanged() {
@@ -390,7 +384,7 @@ public class MainWindow {
         badgesLabel.setWrapText(true);
         databasePathLabel.setStyle("-fx-text-fill: #6b7280;");
         Button refreshButton = new Button("Refresh");
-        refreshButton.setOnAction(event -> refreshAll());
+        refreshButton.setOnAction(event -> guard("Refresh failed", this::refreshAll));
 
         VBox progressBox = new VBox(10,
             sectionTitle("Daily Goals"),
@@ -433,9 +427,11 @@ public class MainWindow {
         switchButton.setOnAction(event -> {
             DeckRow selected = deckTable.getSelectionModel().getSelectedItem();
             if (selected != null) {
-                currentDeck = selected.deck();
-                refreshDeckSelector();
-                onDeckChanged();
+                guard("Switch deck failed", () -> {
+                    currentDeck = selected.deck();
+                    refreshDeckSelector();
+                    onDeckChanged();
+                });
             }
         });
         Button restoreButton = new Button("Restore selected archived deck");
@@ -475,10 +471,11 @@ public class MainWindow {
         reviewModeSelector.setCellFactory(list -> reviewModeCell());
         reviewModeSelector.setButtonCell(reviewModeCell());
         reviewModeSelector.getSelectionModel().select(ReviewMode.EN_TO_ZH);
-        reviewModeSelector.valueProperty().addListener((observable, oldMode, newMode) -> {
-            reviewService.resetSession(currentDeck.getId());
-            loadNextReviewWord();
-        });
+        reviewModeSelector.valueProperty().addListener((observable, oldMode, newMode) ->
+            guard("Change review mode failed", () -> {
+                reviewService.resetSession(currentDeck.getId());
+                loadNextReviewWord();
+            }));
         sessionSizeSelector = new ComboBox<>();
         sessionSizeSelector.getItems().setAll("10", "20", "50", "All Due", "Custom");
         sessionSizeSelector.getSelectionModel().select("20");
@@ -491,10 +488,10 @@ public class MainWindow {
         Button startSessionButton = new Button("Start Session");
         startSessionButton.setOnAction(event -> startReviewSession());
         Button resetSessionButton = new Button("Reset Session");
-        resetSessionButton.setOnAction(event -> {
+        resetSessionButton.setOnAction(event -> guard("Reset session failed", () -> {
             reviewService.resetSession(currentDeck.getId());
             loadNextReviewWord();
-        });
+        }));
         sessionProgressLabel = new Label();
         sessionProgressLabel.setStyle("-fx-text-fill: #4b5563;");
         HBox modeBox = new HBox(10, new Label("Mode"), reviewModeSelector, sessionProgressLabel);
@@ -511,8 +508,8 @@ public class MainWindow {
         answerField.setPromptText("Enter Chinese meaning");
         answerField.setPrefWidth(420);
         submitAnswerButton = new Button("Submit");
-        submitAnswerButton.setOnAction(event -> submitCurrentAnswer());
-        answerField.setOnAction(event -> submitCurrentAnswer());
+        submitAnswerButton.setOnAction(event -> guard("Submit answer failed", this::submitCurrentAnswer));
+        answerField.setOnAction(event -> guard("Submit answer failed", this::submitCurrentAnswer));
 
         reviewResultArea = new TextArea();
         reviewResultArea.setEditable(false);
@@ -732,7 +729,7 @@ public class MainWindow {
         });
 
         Button saveButton = new Button("Save Dictionary Path");
-        saveButton.setOnAction(event -> {
+        saveButton.setOnAction(event -> guard("Save dictionary path failed", () -> {
             settingsService.saveEcdictPath(pathField.getText());
             LocalDictionaryService local = new LocalDictionaryService(pathField.getText());
             LocalDictionaryStatus status = local.status();
@@ -740,15 +737,15 @@ public class MainWindow {
             settingsService.save(SettingsService.ECDICT_LAST_LOADED_AT_KEY, LocalDateTime.now().toString());
             reloadDictionaryService();
             statusLabel.setText("Saved. " + status.toDisplayText());
-        });
+        }));
 
         Button clearButton = new Button("Clear Dictionary Path");
-        clearButton.setOnAction(event -> {
+        clearButton.setOnAction(event -> guard("Clear dictionary path failed", () -> {
             settingsService.clearEcdictPath();
             pathField.clear();
             reloadDictionaryService();
             statusLabel.setText("Cleared. Using bundled starter and online fallback.");
-        });
+        }));
 
         HBox controls = new HBox(10, pathField, chooseButton, testButton, saveButton, clearButton);
         HBox.setHgrow(pathField, Priority.ALWAYS);
@@ -780,12 +777,13 @@ public class MainWindow {
                 reloadAiService();
                 statusLabel.setText("Saved. " + aiStatusText());
             } catch (RuntimeException e) {
+                logFailure("Save AI settings failed", e);
                 statusLabel.setText(rootMessage(e));
             }
         });
 
         Button clearButton = new Button("Clear AI Settings");
-        clearButton.setOnAction(event -> {
+        clearButton.setOnAction(event -> guard("Clear AI settings failed", () -> {
             settingsService.clearAiSettings();
             providerField.setText("openai-compatible");
             baseUrlField.clear();
@@ -793,7 +791,7 @@ public class MainWindow {
             modelField.clear();
             reloadAiService();
             statusLabel.setText("Cleared. " + aiStatusText());
-        });
+        }));
 
         Button testButton = new Button("Test AI Explanation");
         testButton.setOnAction(event -> {
@@ -930,7 +928,7 @@ public class MainWindow {
         analyticsArea.setPrefRowCount(8);
 
         Button refreshButton = new Button("Refresh statistics");
-        refreshButton.setOnAction(event -> refreshStatistics());
+        refreshButton.setOnAction(event -> guard("Refresh statistics failed", this::refreshStatistics));
         Button exportButton = new Button("Export Markdown report");
         exportButton.setOnAction(event -> exportReport());
         Button exportWordsButton = new Button("Export words CSV");
@@ -943,12 +941,15 @@ public class MainWindow {
         importBackupButton.setOnAction(event -> importJsonBackup());
         Button openDataDirButton = new Button("Open data folder");
         openDataDirButton.setOnAction(event -> openDataFolder());
+        Button openLogDirButton = new Button("Open log folder");
+        openLogDirButton.setOnAction(event -> openLogFolder());
 
         HBox buttons = new HBox(10, refreshButton, exportButton, exportWordsButton, exportLogsButton,
-            exportBackupButton, importBackupButton, openDataDirButton);
+            exportBackupButton, importBackupButton);
+        HBox folderButtons = new HBox(10, openDataDirButton, openLogDirButton);
         VBox charts = new VBox(16, reviewCountChart, accuracyChart, memoryChart, overdueStatsLabel,
             sectionTitle("Hardest Words"), hardestWordsArea,
-            sectionTitle("Portfolio Summary"), analyticsArea, buttons);
+            sectionTitle("Portfolio Summary"), analyticsArea, buttons, folderButtons);
         charts.setPadding(new Insets(24));
         ScrollPane scrollPane = new ScrollPane(charts);
         scrollPane.setFitToWidth(true);
@@ -957,7 +958,7 @@ public class MainWindow {
         tab.setOnSelectionChanged(event -> {
             if (tab.isSelected()) {
                 statisticsSelected = true;
-                refreshStatistics();
+                guard("Refresh statistics failed", this::refreshStatistics);
             }
         });
         return tab;
@@ -1075,8 +1076,7 @@ public class MainWindow {
             WordCard word = WordCard.createNew(targetDeck.getId(), wordToSave.english(), wordToSave.chinese());
             applyValidatedFields(word, wordToSave);
             wordRepository.save(word);
-            GoalUpdate update = goalService.recordNewWords(targetDeck.getId(), 1);
-            List<Achievement> unlocked = achievementService.evaluate(targetDeck.getId(), update.progress(), false, update.dailyGoalCompleted());
+            // The word is saved: clear the form now so a later failure can't invite a duplicate add.
             englishField.clear();
             chineseField.clear();
             phoneticField.clear();
@@ -1084,14 +1084,19 @@ public class MainWindow {
             exampleArea.clear();
             noteArea.clear();
             tagsField.clear();
-            statusLabel.setText("Added to " + targetDeck.getName() + ": " + wordToSave.english()
-                + (verification.found() ? " | Verified by " + verification.source() : " | Marked UNVERIFIED")
-                + achievementText(unlocked));
-            refreshAll();
+            String addedText = "Added to " + targetDeck.getName() + ": " + wordToSave.english()
+                + (verification.found() ? " | Verified by " + verification.source() : " | Marked UNVERIFIED");
+            statusLabel.setText(addedText);
+            guard("Word added, but updating progress failed", () -> {
+                GoalUpdate update = goalService.recordNewWords(targetDeck.getId(), 1);
+                List<Achievement> unlocked = achievementService.evaluate(targetDeck.getId(), update.progress(), false, update.dailyGoalCompleted());
+                statusLabel.setText(addedText + achievementText(unlocked));
+                refreshAll();
+            });
         } catch (IllegalArgumentException e) {
             statusLabel.setText(e.getMessage());
-        } catch (SQLException e) {
-            showError("Add failed", e.getMessage());
+        } catch (SQLException | RuntimeException e) {
+            reportFailure("Add failed", e);
         }
     }
 
@@ -1112,8 +1117,8 @@ public class MainWindow {
                 importStatus,
                 "Importing..."
             );
-        } catch (Exception e) {
-            showError("Import failed", e.getMessage());
+        } catch (RuntimeException e) {
+            reportFailure("Import failed", e);
         }
     }
 
@@ -1133,18 +1138,22 @@ public class MainWindow {
                 importStatus,
                 "Analyzing CSV..."
             );
-        } catch (Exception e) {
-            showError("Preview failed", e.getMessage());
+        } catch (RuntimeException e) {
+            reportFailure("Preview failed", e);
         }
     }
 
     private void afterImport(ImportResult result, Label importStatus) {
-        GoalUpdate update = goalService.recordNewWords(currentDeck.getId(), result.importedCount());
-        List<Achievement> unlocked = achievementService.evaluate(currentDeck.getId(), update.progress(), false, update.dailyGoalCompleted());
-        importStatus.setText("Deck: " + currentDeck.getName() + System.lineSeparator()
-            + result.toSummary() + achievementText(unlocked));
-        refreshAll();
-        loadNextReviewWord();
+        // The import itself has finished; show its summary even if the progress update below fails.
+        String summary = "Deck: " + currentDeck.getName() + System.lineSeparator() + result.toSummary();
+        importStatus.setText(summary);
+        guard("Import finished, but updating progress failed", () -> {
+            GoalUpdate update = goalService.recordNewWords(currentDeck.getId(), result.importedCount());
+            List<Achievement> unlocked = achievementService.evaluate(currentDeck.getId(), update.progress(), false, update.dailyGoalCompleted());
+            importStatus.setText(summary + achievementText(unlocked));
+            refreshAll();
+            loadNextReviewWord();
+        });
     }
 
     private void startReviewSession() {
@@ -1152,8 +1161,8 @@ public class MainWindow {
             int target = selectedSessionTarget();
             reviewService.startSession(currentDeck.getId(), currentReviewMode(), target);
             loadNextReviewWord();
-        } catch (IllegalArgumentException e) {
-            showError("Start session failed", e.getMessage());
+        } catch (RuntimeException e) {
+            reportFailure("Start session failed", e);
         }
     }
 
@@ -1204,12 +1213,28 @@ public class MainWindow {
         if (currentReviewWord == null) {
             return;
         }
-        ReviewOutcome outcome = reviewService.rateCurrent(currentReviewWord.getId(), rating);
-        refreshAll();
-        loadNextReviewWord();
-        if (currentReviewWord != null) {
-            reviewResultArea.setText("Saved. XP +" + outcome.xpEarned() + achievementText(outcome.unlockedAchievements()));
+        // Never leave the rating buttons armed after a click: a second rating of the same card
+        // would be graded without the submitted answer and recorded as a lapse.
+        ratingButtons.setDisable(true);
+        ReviewOutcome outcome;
+        try {
+            outcome = reviewService.rateCurrent(currentReviewWord.getId(), rating);
+        } catch (RuntimeException e) {
+            // The AI explanation may still overwrite the hint below, so the dialog says it too.
+            reportFailure("Rating not saved - submit your answer again", e);
+            // rateCurrent has already consumed the submitted answer, so ask for it again.
+            submitAnswerButton.setDisable(false);
+            answerField.setDisable(false);
+            reviewResultArea.setText("The rating was not saved. Submit your answer again to retry.");
+            return;
         }
+        guard("Rating saved, but refreshing the review failed", () -> {
+            loadNextReviewWord();
+            if (currentReviewWord != null) {
+                reviewResultArea.setText("Saved. XP +" + outcome.xpEarned() + achievementText(outcome.unlockedAchievements()));
+            }
+            refreshAll();
+        });
     }
 
     private void loadNextReviewWord() {
@@ -1318,7 +1343,7 @@ public class MainWindow {
             deckRows.setAll(deckRowsFor(deckService.activeDecks(), now));
             archivedDeckRows.setAll(deckRowsFor(deckService.archivedDecks(), now));
         } catch (RuntimeException e) {
-            showError("Refresh decks failed", rootMessage(e));
+            reportFailure("Refresh decks failed", e);
         }
     }
 
@@ -1349,7 +1374,7 @@ public class MainWindow {
             List<WordCard> words = wordRepository.search(currentDeck.getId(), searchField == null ? "" : searchField.getText());
             wordItems.setAll(words.stream().filter(this::matchesWordFilters).toList());
         } catch (SQLException e) {
-            showError("Refresh failed", e.getMessage());
+            reportFailure("Refresh failed", e);
         }
     }
 
@@ -1440,8 +1465,8 @@ public class MainWindow {
                 file.toPath()
             );
             showInfo("Report exported: " + exported.toAbsolutePath());
-        } catch (Exception e) {
-            showError("Export failed", e.getMessage());
+        } catch (RuntimeException e) {
+            reportFailure("Export failed", e);
         }
     }
 
@@ -1499,19 +1524,32 @@ public class MainWindow {
     }
 
     private void openDataFolder() {
-        Path parent = databasePath.toAbsolutePath().getParent();
-        if (parent == null) {
-            showInfo("Data folder is unavailable.");
+        openFolder("Data folder", databasePath.toAbsolutePath().getParent());
+    }
+
+    private void openLogFolder() {
+        Optional<Path> logDirectory = AppLogging.logDirectory();
+        if (logDirectory.isEmpty()) {
+            showInfo("File logging is unavailable; logs are written to the console only.");
+            return;
+        }
+        openFolder("Log folder", logDirectory.get());
+    }
+
+    private void openFolder(String name, Path folder) {
+        if (folder == null) {
+            showInfo(name + " is unavailable.");
             return;
         }
         try {
-            if (!Desktop.isDesktopSupported()) {
-                showInfo("Data folder: " + parent);
+            if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
+                showInfo(name + ": " + folder);
                 return;
             }
-            Desktop.getDesktop().open(parent.toFile());
-        } catch (IOException e) {
-            showError("Open folder failed", e.getMessage());
+            Desktop.getDesktop().open(folder.toFile());
+        } catch (IOException | RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Cannot open " + folder, e);
+            showError("Open folder failed", rootMessage(e) + System.lineSeparator() + name + ": " + folder);
         }
     }
 
@@ -1573,8 +1611,8 @@ public class MainWindow {
                 applyValidatedFields(selected, validated);
                 wordRepository.save(selected);
                 refreshAll();
-            } catch (IllegalArgumentException | SQLException e) {
-                showError("Save failed", e.getMessage());
+            } catch (SQLException | RuntimeException e) {
+                reportFailure("Save failed", e);
             }
         }
     }
@@ -1595,8 +1633,8 @@ public class MainWindow {
                 wordRepository.deleteById(selected.getId());
                 refreshAll();
                 loadNextReviewWord();
-            } catch (SQLException e) {
-                showError("Delete failed", e.getMessage());
+            } catch (SQLException | RuntimeException e) {
+                reportFailure("Delete failed", e);
             }
         }
     }
@@ -1677,7 +1715,9 @@ public class MainWindow {
 
     private <T> void runBackground(Callable<T> callable, Consumer<T> onSuccess, Consumer<Throwable> onFailure,
                                    Label statusLabel, String runningMessage) {
-        if (statusLabel != null && runningMessage != null) {
+        boolean showsProgress = statusLabel != null && runningMessage != null;
+        String previousStatus = showsProgress ? statusLabel.getText() : null;
+        if (showsProgress) {
             statusLabel.setText(runningMessage);
         }
         Task<T> task = new Task<>() {
@@ -1686,11 +1726,62 @@ public class MainWindow {
                 return callable.call();
             }
         };
-        task.setOnSucceeded(event -> onSuccess.accept(task.getValue()));
-        task.setOnFailed(event -> onFailure.accept(task.getException()));
+        task.setOnSucceeded(event -> {
+            try {
+                onSuccess.accept(task.getValue());
+                if (showsProgress && runningMessage.equals(statusLabel.getText())) {
+                    statusLabel.setText(previousStatus);
+                }
+            } catch (RuntimeException e) {
+                // A failing success callback is a failure too, not something to lose on the FX thread.
+                handleBackgroundFailure(e, onFailure, statusLabel, runningMessage);
+            }
+        });
+        task.setOnFailed(event -> handleBackgroundFailure(task.getException(), onFailure, statusLabel, runningMessage));
         Thread thread = new Thread(task, "vocaboost-background-task");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    private void handleBackgroundFailure(Throwable error, Consumer<Throwable> onFailure, Label statusLabel,
+                                         String runningMessage) {
+        LOGGER.log(Level.WARNING, "Background task failed" + (runningMessage == null ? "" : ": " + runningMessage), error);
+        if (statusLabel != null && runningMessage != null && runningMessage.equals(statusLabel.getText())) {
+            statusLabel.setText("Failed: " + rootMessage(error));
+        }
+        guard("Unexpected error", () -> onFailure.accept(error));
+    }
+
+    /** Runs an event-handler body; failures are logged and shown instead of being lost. */
+    private void guard(String errorTitle, Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException e) {
+            reportFailure(errorTitle, e);
+        }
+    }
+
+    private void reportFailure(String title, Throwable error) {
+        logFailure(title, error);
+        if (isInputValidationError(error)) {
+            // The message says it all.
+            showError(title, error.getMessage());
+            return;
+        }
+        showError(title, rootMessage(error) + System.lineSeparator() + System.lineSeparator()
+            + AppLogging.logLocationText());
+    }
+
+    private void logFailure(String title, Throwable error) {
+        if (isInputValidationError(error)) {
+            LOGGER.log(Level.INFO, title + ": " + error.getMessage());
+        } else {
+            LOGGER.log(Level.WARNING, title, error);
+        }
+    }
+
+    private static boolean isInputValidationError(Throwable error) {
+        return error instanceof IllegalArgumentException && error.getCause() == null;
     }
 
     private void showError(String title, String message) {
@@ -1702,11 +1793,7 @@ public class MainWindow {
     }
 
     private String rootMessage(Throwable throwable) {
-        Throwable current = throwable;
-        while (current.getCause() != null) {
-            current = current.getCause();
-        }
-        return current.getMessage() == null ? throwable.getMessage() : current.getMessage();
+        return ErrorMessages.rootMessage(throwable);
     }
 
     private void showInfo(String message) {

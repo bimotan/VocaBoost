@@ -12,8 +12,12 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class CachingDictionaryService implements DictionaryService {
+    private static final Logger LOGGER = Logger.getLogger(CachingDictionaryService.class.getName());
+
     private final DictionaryService delegate;
     private final DictionaryCacheRepository cacheRepository;
     private final Clock clock;
@@ -43,16 +47,18 @@ public class CachingDictionaryService implements DictionaryService {
                 }
                 cacheRepository.delete(key);
             }
-        } catch (SQLException ignored) {
+        } catch (SQLException e) {
             // Cache errors should not block adding words.
+            LOGGER.log(Level.WARNING, "Cannot read dictionary cache for '" + key + "'; looking it up instead", e);
         }
 
         DictionaryLookupResult result = delegate.lookup(key);
         if (result.success() && isUsableCache(result.entries())) {
             try {
                 cacheRepository.save(key, serialize(result.entries()), "dictionary", LocalDateTime.now(clock));
-            } catch (SQLException ignored) {
+            } catch (SQLException e) {
                 // Cache errors should not block adding words.
+                LOGGER.log(Level.WARNING, "Cannot save dictionary cache entry for '" + key + "'", e);
             }
         }
         return result;
@@ -66,8 +72,9 @@ public class CachingDictionaryService implements DictionaryService {
         }
         try {
             cacheRepository.delete(key);
-        } catch (SQLException ignored) {
+        } catch (SQLException e) {
             // Cache refresh should still attempt a fresh lookup.
+            LOGGER.log(Level.WARNING, "Cannot clear dictionary cache entry for '" + key + "'", e);
         }
         return lookup(key);
     }

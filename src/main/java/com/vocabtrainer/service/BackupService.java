@@ -20,10 +20,13 @@ import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class BackupService {
+    private static final Logger LOGGER = Logger.getLogger(BackupService.class.getName());
     private static final Pattern OBJECT_PATTERN = Pattern.compile("\\{([^{}]+)}", Pattern.DOTALL);
     private static final Pattern FIELD_PATTERN_TEMPLATE = Pattern.compile("\"%s\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
 
@@ -186,6 +189,8 @@ public class BackupService {
 
     private int importReviewLogsFromJson(String payload, long deckId) {
         int imported = 0;
+        int failed = 0;
+        Exception firstFailure = null;
         String logsSection = section(payload, "reviewLogs");
         Matcher matcher = OBJECT_PATTERN.matcher(logsSection);
         while (matcher.find()) {
@@ -207,9 +212,17 @@ public class BackupService {
                     Long.parseLong(field(object, "elapsedMillis"))
                 ));
                 imported++;
-            } catch (IllegalArgumentException | SQLException ignored) {
+            } catch (IllegalArgumentException | SQLException e) {
                 // A backup import should restore as much as possible.
+                failed++;
+                if (firstFailure == null) {
+                    firstFailure = e;
+                }
             }
+        }
+        if (failed > 0) {
+            LOGGER.log(Level.WARNING, "Skipped " + failed + " review log(s) while importing backup; first failure attached",
+                firstFailure);
         }
         return imported;
     }

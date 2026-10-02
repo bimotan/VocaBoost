@@ -25,15 +25,23 @@ import com.vocabtrainer.service.SettingsService;
 import com.vocabtrainer.service.SimilarityService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.service.WordValidationService;
+import com.vocabtrainer.ui.ErrorDialogs;
 import com.vocabtrainer.ui.MainWindow;
+import com.vocabtrainer.util.AppLogging;
 import javafx.application.Application;
 import javafx.scene.Scene;
-import javafx.scene.control.Alert;
 import javafx.stage.Stage;
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 public class VocabTrainerApp extends Application {
+    private static final Logger LOGGER = Logger.getLogger(VocabTrainerApp.class.getName());
+
     @Override
     public void start(Stage stage) {
+        AppLogging.initialize();
+        ErrorDialogs.installUncaughtExceptionHandler();
         try {
             DatabaseManager databaseManager = new DatabaseManager();
             databaseManager.initialize();
@@ -97,11 +105,8 @@ public class VocabTrainerApp extends Application {
             stage.setScene(scene);
             stage.show();
         } catch (Exception e) {
-            Alert alert = new Alert(Alert.AlertType.ERROR);
-            alert.setTitle("Startup failed");
-            alert.setHeaderText("The app could not start");
-            alert.setContentText(e.getMessage());
-            alert.showAndWait();
+            LOGGER.log(Level.SEVERE, "Startup failed", e);
+            ErrorDialogs.exceptionAlert("Startup failed", "The app could not start", e).showAndWait();
         }
     }
 

@@ -16,8 +16,11 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class PublicOnlineDictionaryService implements DictionaryService {
+    private static final Logger LOGGER = Logger.getLogger(PublicOnlineDictionaryService.class.getName());
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
 
     private final HttpClient httpClient;
@@ -74,6 +77,7 @@ public class PublicOnlineDictionaryService implements DictionaryService {
             }
             return DictionaryLookupResult.success("Loaded from dictionaryapi.dev. 该来源主要返回英文释义，请确认或填写中文释义。", entries);
         } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "dictionaryapi.dev lookup failed for '" + english + "'", e);
             return DictionaryLookupResult.failure("dictionaryapi.dev failed: " + e.getMessage());
         }
     }
@@ -90,6 +94,7 @@ public class PublicOnlineDictionaryService implements DictionaryService {
             }
             return DictionaryLookupResult.success("Loaded from Wiktionary. 该来源主要返回英文释义，请确认或填写中文释义。", entries);
         } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Wiktionary lookup failed for '" + english + "'", e);
             return DictionaryLookupResult.failure("Wiktionary failed: " + e.getMessage());
         }
     }
