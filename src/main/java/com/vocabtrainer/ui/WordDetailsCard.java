@@ -2,13 +2,13 @@ package com.vocabtrainer.ui;
 
 import com.vocabtrainer.service.cloze.SentenceSpan;
 import javafx.geometry.Insets;
-import javafx.geometry.VPos;
+import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
-import javafx.scene.layout.ColumnConstraints;
-import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
@@ -31,6 +31,8 @@ public final class WordDetailsCard {
     public static final String TARGET_STYLE_CLASS = "example-target";
     /** A long note is cut off after about this many lines; its tooltip has all of it. */
     private static final double NOTE_MAX_HEIGHT = 92;
+    /** The width of the column of row names. */
+    private static final double NAME_WIDTH = 100;
 
     private final VBox root = new VBox(6);
     private final Label title = new Label();
@@ -40,7 +42,8 @@ public final class WordDetailsCard {
     private final Label note = value();
     private final Label tags = value();
     private final Label empty = new Label();
-    private final List<Node[]> rows = new ArrayList<>();
+    private final VBox rowBox = new VBox(2);
+    private final List<HBox> rows = new ArrayList<>();
 
     /** @param idPrefix starts the id of every node of the card, e.g. "reviewDetails" */
     public WordDetailsCard(String idPrefix) {
@@ -59,21 +62,13 @@ public final class WordDetailsCard {
         empty.setStyle("-fx-text-fill: #6b7280;");
         note.setMaxHeight(NOTE_MAX_HEIGHT);
 
-        GridPane grid = new GridPane();
-        grid.setHgap(12);
-        ColumnConstraints names = new ColumnConstraints();
-        names.setMinWidth(100);
-        ColumnConstraints values = new ColumnConstraints();
-        values.setHgrow(Priority.ALWAYS);
-        values.setFillWidth(true);
-        grid.getColumnConstraints().addAll(names, values);
-        addRow(grid, "Phonetic", phonetic);
-        addRow(grid, "Part of speech", partOfSpeech);
-        addRow(grid, "Example", example);
-        addRow(grid, "Note", note);
-        addRow(grid, "Tags", tags);
+        addRow("Phonetic", phonetic);
+        addRow("Part of speech", partOfSpeech);
+        addRow("Example", example);
+        addRow("Note", note);
+        addRow("Tags", tags);
 
-        root.getChildren().addAll(title, grid, empty);
+        root.getChildren().addAll(title, rowBox, empty);
         root.setPadding(new Insets(10, 14, 10, 14));
         root.setStyle("-fx-background-color: #f8fafc; -fx-border-color: #cbd5e1;"
             + " -fx-border-radius: 6; -fx-background-radius: 6;");
@@ -112,24 +107,33 @@ public final class WordDetailsCard {
         show("", new WordDetails("", "", List.of(), "", ""), message);
     }
 
-    private void addRow(GridPane grid, String name, Node value) {
+    /**
+     * One row: the name, then the value in the rest of the width. A row of its own gives a value
+     * that wraps (the example, a long note) the height it needs at the width it gets, so its lines
+     * never overlap the rows around it, also when the card has less room than it would like.
+     */
+    private void addRow(String name, Region value) {
         Label nameLabel = new Label(name);
         nameLabel.setStyle("-fx-text-fill: #4b5563; -fx-font-weight: 600;");
         nameLabel.setPadding(new Insets(2, 0, 2, 0));
-        GridPane.setValignment(nameLabel, VPos.TOP);
+        nameLabel.setMinWidth(NAME_WIDTH);
+        nameLabel.setPrefWidth(NAME_WIDTH);
         if (value instanceof TextFlow flow) {
             flow.setPadding(new Insets(2, 0, 2, 0));
         }
-        int row = rows.size();
-        grid.add(nameLabel, 0, row);
-        grid.add(value, 1, row);
-        rows.add(new Node[] {nameLabel, value});
+        value.setMinWidth(0);
+        value.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(value, Priority.ALWAYS);
+        HBox row = new HBox(12, nameLabel, value);
+        row.setAlignment(Pos.TOP_LEFT);
+        rows.add(row);
+        rowBox.getChildren().add(row);
     }
 
     private void showRow(int row, boolean visible) {
-        for (Node node : rows.get(row)) {
-            show(node, visible);
-        }
+        HBox shown = rows.get(row);
+        show(shown, visible);
+        shown.getChildren().forEach(node -> show(node, visible));
     }
 
     private static List<Text> exampleTexts(List<SentenceSpan> spans) {
@@ -148,6 +152,8 @@ public final class WordDetailsCard {
     private static Label value() {
         Label label = new Label();
         label.setWrapText(true);
+        // Level with the row's name when a long note is cut short to fewer lines than it has.
+        label.setAlignment(Pos.TOP_LEFT);
         label.setPadding(new Insets(2, 0, 2, 0));
         return label;
     }

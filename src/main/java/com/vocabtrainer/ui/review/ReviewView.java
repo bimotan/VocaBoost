@@ -36,6 +36,7 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.util.StringConverter;
 
@@ -230,9 +231,12 @@ public final class ReviewView {
 
         reviewWordLabel.setId("reviewWordLabel");
         reviewWordLabel.setWrapText(true);
+        // A cloze's sentence may take a few lines: never cut it off, the blank may be at its end.
+        reviewWordLabel.setMinHeight(Region.USE_PREF_SIZE);
         reviewWordLabel.setStyle(WORD_QUESTION_STYLE);
         reviewHintLabel.setId("reviewHintLabel");
         reviewHintLabel.setWrapText(true);
+        reviewHintLabel.setMinHeight(Region.USE_PREF_SIZE);
         reviewHintLabel.setStyle("-fx-font-size: 15px; -fx-text-fill: #374151;");
         reviewMetaLabel.setId("reviewMetaLabel");
         reviewMetaLabel.setStyle("-fx-text-fill: #4b5563;");

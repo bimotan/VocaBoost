@@ -6,9 +6,11 @@ import com.vocabtrainer.domain.WordCard;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.control.Control;
+import javafx.scene.control.Label;
 import javafx.scene.control.Labeled;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextInputControl;
+import javafx.scene.layout.Region;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import org.junit.jupiter.api.BeforeEach;
@@ -126,6 +128,58 @@ class WordDetailsUiTest extends MainWindowUiTest {
         click("rateGoodButton");
 
         assertFalse(isVisible("reviewDetailsCard"), "the next card's details wait for its answer");
+    }
+
+    @Test
+    void aLongClozeSentenceIsShownWholeAndItsExampleWrapsBelowThePartOfSpeech() throws SQLException {
+        abate.setExampleSentence("Although the forecasters had predicted that the storm would continue for several"
+            + " days, by Tuesday morning the winds had begun to die down, and the residents, who had spent two"
+            + " sleepless nights listening to the shutters rattle, saw that the damage had abated.");
+        // A long note leaves the card less height than it would like.
+        abate.setNote("vt. to reduce in amount, degree, or intensity\nvi. to decrease in force or intensity\n"
+            + "law: to put an end to (a nuisance)\nlaw: to make void (a writ)\n"
+            + "Synonyms: diminish, lessen, decline, subside, wane, ebb, recede, dwindle, taper off, let up");
+        services.wordRepository().update(abate);
+        selectTab("reviewTab");
+        selectMode(ReviewMode.CLOZE);
+
+        assertTrue(text("reviewWordLabel").endsWith("had _____."), text("reviewWordLabel"));
+        type("answerField", "abated");
+        pressEnter("answerField");
+        waitForBackgroundTasks();
+
+        // With the result and the details card below it, the sentence still gets all the lines it needs.
+        assertGetsItsHeight(Fx.call(() -> find("reviewWordLabel", Label.class)), "the question, whose blank is at its end");
+        TextFlow example = Fx.call(() -> find("reviewDetailsExample", TextFlow.class));
+        assertTrue(Fx.call(() -> example.getChildren().size()) > 1);
+        assertGetsItsHeight(example, "the wrapped example");
+        double[] rows = Fx.call(() -> new double[] {
+            bottom(find("reviewDetailsPos", Label.class)),
+            top(example),
+            bottom(example),
+            top(find("reviewDetailsNote", Label.class))});
+        assertTrue(rows[1] >= rows[0] - 0.5, "the example overlaps the part of speech: " + rows[1] + " < " + rows[0]);
+        assertTrue(rows[3] >= rows[2] - 0.5, "the example overlaps the note: " + rows[3] + " < " + rows[2]);
+        snapshot("long-cloze");
+    }
+
+    /** Asserts that {@code node}, laid out now, is as high as its wrapped text needs at its width. */
+    private static void assertGetsItsHeight(Region node, String what) {
+        double[] heights = Fx.call(() -> {
+            Parent root = node.getScene().getRoot();
+            root.applyCss();
+            root.layout();
+            return new double[] {node.getHeight(), node.prefHeight(node.getWidth())};
+        });
+        assertTrue(heights[0] >= heights[1] - 0.5, what + " is cut off: " + heights[0] + " < " + heights[1]);
+    }
+
+    private static double top(Node node) {
+        return node.localToScene(node.getLayoutBounds()).getMinY();
+    }
+
+    private static double bottom(Node node) {
+        return node.localToScene(node.getLayoutBounds()).getMaxY();
     }
 
     @Test
