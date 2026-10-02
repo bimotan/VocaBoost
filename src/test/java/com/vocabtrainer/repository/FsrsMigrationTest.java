@@ -11,6 +11,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -57,7 +62,31 @@ class FsrsMigrationTest {
         ReviewLogRepository logs = new ReviewLogRepository(databaseManager);
         CardStateBackfill backfill = new CardStateBackfill(words, logs, new ReviewScheduler());
 
-        assertEquals(3, backfill.run());
+        List<String> logged = new CopyOnWriteArrayList<>();
+        Logger backfillLog = Logger.getLogger(CardStateBackfill.class.getName());
+        Handler capture = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                logged.add(record.getMessage());
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        backfillLog.addHandler(capture);
+        try {
+            assertEquals(3, backfill.run());
+        } finally {
+            backfillLog.removeHandler(capture);
+        }
+        // A word that was never reviewed is not "estimated from the SM-2 schedule": it stays new.
+        assertEquals(List.of("Derived the FSRS state of 3 word(s): 1 replayed from their review logs, "
+            + "1 estimated from the SM-2 schedule, 1 never reviewed (new)"), logged);
 
         // The reference scheduler (py-fsrs 5.1.3) ends these reviews in review with this memory.
         WordCard lucid = words.findById(1).orElseThrow();

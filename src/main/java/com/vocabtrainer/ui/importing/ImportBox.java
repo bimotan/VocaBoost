@@ -1,8 +1,6 @@
 package com.vocabtrainer.ui.importing;
 
 import com.vocabtrainer.domain.Deck;
-import com.vocabtrainer.service.AchievementService;
-import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ImportExportService;
 import com.vocabtrainer.service.ImportResult;
 import com.vocabtrainer.ui.DataChange;
@@ -34,8 +32,7 @@ final class ImportBox {
     private final Button importStarterButton = new Button("Import GRE starter deck");
     private final VBox root;
 
-    ImportBox(ViewContext context, ImportExportService importExportService, GoalService goalService,
-              AchievementService achievementService) {
+    ImportBox(ViewContext context, ImportExportService importExportService) {
         this.context = context;
         this.importExportService = importExportService;
 

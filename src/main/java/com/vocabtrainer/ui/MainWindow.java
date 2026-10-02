@@ -44,7 +44,7 @@ public class MainWindow {
         ReviewView review = new ReviewView(context, services.reviewService(), services.goalService(), configured,
             services.clock());
         AddImportView addImport = new AddImportView(context, services.wordRepository(), services.validationService(),
-            services.goalService(), services.achievementService(), services.importExportService(),
+            services.importExportService(),
             services.settingsService(), services.aiCacheRepository(), services.ecdictImportService(),
             services.localDictionary(), configured);
         StatisticsView statistics = new StatisticsView(context, services.statsService(), services.goalService(),

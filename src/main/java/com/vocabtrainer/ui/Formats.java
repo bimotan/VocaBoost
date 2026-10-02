@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.Achievement;
 import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.service.scheduling.IntervalPreview;
+import com.vocabtrainer.util.DateTimeUtil;
 
 import java.util.List;
 import java.util.Locale;
@@ -43,7 +44,7 @@ public final class Formats {
         if (state == CardState.NEW) {
             return "-";
         }
-        return state.isLearning() ? "learning" : word.getIntervalDays() + " days";
+        return state.isLearning() ? "learning" : DateTimeUtil.days(word.getIntervalDays());
     }
 
     /** The names of {@code achievements}, or "None yet". */

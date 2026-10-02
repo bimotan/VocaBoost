@@ -55,7 +55,7 @@ class GoalsUiTest extends MainWindowUiTest {
         assertEquals("1 / 5", text("newWordsTodayLabel"), "the first review of a new word");
         assertEquals("1 / 20", text("reviewedTodayLabel"));
         assertEquals("100%", text("accuracyTodayLabel"));
-        assertEquals("1 days", text("streakLabel"));
+        assertEquals("1 day", text("streakLabel"));
         selectTab("statisticsTab");
         List<ChartPoint> reviews = chartPoints("reviewCountChart");
         assertEquals(1.0, reviews.get(reviews.size() - 1).y(), "today's bar is the dashboard's count");

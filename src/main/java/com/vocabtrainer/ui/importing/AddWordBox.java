@@ -8,9 +8,7 @@ import com.vocabtrainer.domain.ValidatedWord;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.domain.WordVerificationResult;
 import com.vocabtrainer.repository.WordRepository;
-import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.DictionaryService;
-import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.DataChange;
@@ -77,7 +75,7 @@ final class AddWordBox {
     private String checkedWord;
 
     AddWordBox(ViewContext context, WordRepository wordRepository, WordValidationService validationService,
-               GoalService goalService, AchievementService achievementService, ConfiguredServices configured) {
+               ConfiguredServices configured) {
         this.context = context;
         this.wordRepository = wordRepository;
         this.validationService = validationService;

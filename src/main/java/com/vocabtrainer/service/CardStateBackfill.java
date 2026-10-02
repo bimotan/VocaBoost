@@ -1,5 +1,6 @@
 package com.vocabtrainer.service;
 
+import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.ReviewLogRepository;
@@ -48,15 +49,19 @@ public class CardStateBackfill {
                 histories.computeIfAbsent(log.getWordId(), id -> new ArrayList<>()).add(log);
             }
             int replayed = 0;
+            int neverReviewed = 0;
             for (WordCard word : words) {
                 List<ReviewLog> history = histories.getOrDefault(word.getId(), List.of());
                 if (derive(word, history)) {
                     replayed++;
+                } else if (word.getState() == CardState.NEW) {
+                    neverReviewed++;
                 }
                 wordRepository.update(word);
             }
             LOGGER.info("Derived the FSRS state of " + words.size() + " word(s): " + replayed
-                + " replayed from their review logs, " + (words.size() - replayed) + " estimated from the SM-2 schedule");
+                + " replayed from their review logs, " + (words.size() - replayed - neverReviewed)
+                + " estimated from the SM-2 schedule, " + neverReviewed + " never reviewed (new)");
             return words.size();
         });
     }

@@ -12,6 +12,7 @@ import com.vocabtrainer.ui.Formats;
 import com.vocabtrainer.ui.LazyRefresh;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
+import com.vocabtrainer.util.DateTimeUtil;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
@@ -181,7 +182,7 @@ public final class DashboardView {
         newWordsTodayLabel.setText(progress.newWordsCount() + " / " + progress.newWordGoal());
         accuracyTodayLabel.setText(Formats.percent(progress.accuracy()));
         masteredWordsLabel.setText(String.valueOf(stats.masteredWords()));
-        streakLabel.setText(progress.currentStreak() + " days");
+        streakLabel.setText(DateTimeUtil.days(progress.currentStreak()));
         goalScopeLabel.setText(goalService.settings().deckGoals(deckId).isPresent()
             ? "This deck's own goals" : "Default goals of every deck");
         xpLabel.setText(String.valueOf(progress.totalXp()));

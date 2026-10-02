@@ -10,6 +10,7 @@ import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.scheduling.StudyDay;
+import com.vocabtrainer.util.DateTimeUtil;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -250,7 +251,7 @@ public class StatsService {
                 .append(progress.reviewGoal()).append(System.lineSeparator());
             builder.append("- New-word goal: ").append(progress.newWordsCount()).append("/")
                 .append(progress.newWordGoal()).append(System.lineSeparator());
-            builder.append("- Streak (all decks): ").append(progress.currentStreak()).append(" days")
+            builder.append("- Streak (all decks): ").append(DateTimeUtil.days(progress.currentStreak()))
                 .append(System.lineSeparator());
             builder.append("- Deck XP: ").append(progress.totalXp()).append(System.lineSeparator()).append(System.lineSeparator());
         }

@@ -29,6 +29,11 @@ public final class DateTimeUtil {
         return value == null || value.isBlank() ? null : LocalDate.parse(value, DateTimeFormatter.ISO_LOCAL_DATE);
     }
 
+    /** A number of days as text: "1 day", "0 days", "12 days". */
+    public static String days(long count) {
+        return count == 1 ? "1 day" : count + " days";
+    }
+
     public static String toDisplay(LocalDateTime value) {
         return value == null ? "-" : value.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
     }
