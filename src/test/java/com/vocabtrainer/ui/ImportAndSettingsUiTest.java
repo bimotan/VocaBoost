@@ -1,11 +1,13 @@
 package com.vocabtrainer.ui;
 
+import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.LocalDictionaryStatus;
 import com.vocabtrainer.service.SettingsService;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -95,6 +97,74 @@ class ImportAndSettingsUiTest extends MainWindowUiTest {
         long deckId = currentDeck().getId();
         assertTrue(services.wordRepository().findByEnglish(deckId, "petrichor").isPresent());
         assertTrue(services.wordRepository().findByEnglish(deckId, "sesquipedalian").isPresent());
+    }
+
+    @Test
+    void aGbkCsvSavedByChineseExcelIsPreviewedWithItsEncodingAndImportedIntact() throws Exception {
+        Path csv = tempDir.resolve("excel-gbk.csv");
+        Files.write(csv, String.join("\r\n",
+            "单词,释义,词性,例句,备注",
+            "petrichor,雨后泥土的气味,noun,\"The petrichor rose, sweet and sharp.\",-雨后",
+            "sesquipedalian,\"冗长的",
+            "爱用长词的\",adjective,,",
+            "abate,减弱,verb,,",
+            "bad@word,坏词,noun,,",
+            "").getBytes(Charset.forName("GBK")));
+        selectTab("addImportTab");
+        type("importPathField", csv.toString());
+
+        click("previewCsvButton");
+        waitForBackgroundTasks();
+
+        String newLine = System.lineSeparator();
+        assertEquals("Deck: " + STARTER_DECK + newLine
+                + "Rows: 4, importable: 2, duplicates: 1, invalid: 1" + newLine
+                + "Encoding: GBK/GB18030 | Delimiter: comma | Columns: english, chinese, pos, example, note (header row)"
+                + newLine + "First errors:" + newLine
+                + "Line 5 skipped: duplicate word abate" + newLine
+                + "Line 6 skipped: English can only contain letters, spaces, hyphens and apostrophes.",
+            text("importStatusLabel"));
+
+        click("importCsvButton");
+        waitForBackgroundTasks();
+
+        assertTrue(text("importStatusLabel").startsWith("Deck: " + STARTER_DECK + newLine + "Imported 2, skipped 2."),
+            text("importStatusLabel"));
+        long deckId = currentDeck().getId();
+        WordCard petrichor = services.wordRepository().findByEnglish(deckId, "petrichor").orElseThrow();
+        assertEquals("雨后泥土的气味", petrichor.getChinese());
+        assertEquals("The petrichor rose, sweet and sharp.", petrichor.getExampleSentence());
+        assertEquals("-雨后", petrichor.getNote());
+        WordCard sesquipedalian = services.wordRepository().findByEnglish(deckId, "sesquipedalian").orElseThrow();
+        assertEquals("冗长的; 爱用长词的", sesquipedalian.getChinese());
+        assertEquals("adjective", sesquipedalian.getPartOfSpeech());
+        selectTab("wordListTab");
+        assertEquals(STARTER_WORDS + 2, rowCount("wordTable"));
+    }
+
+    @Test
+    void aFileThatCannotBeDecodedIsReportedWithItsLineAndNothingIsImported() throws Exception {
+        Path csv = tempDir.resolve("broken.csv");
+        byte[] text = "english,chinese\nlucid,clear\nbroken,".getBytes(StandardCharsets.US_ASCII);
+        byte[] content = new byte[text.length + 2];
+        System.arraycopy(text, 0, content, 0, text.length);
+        content[text.length] = (byte) 0xFF;
+        content[text.length + 1] = '\n';
+        Files.write(csv, content);
+        selectTab("addImportTab");
+        type("importPathField", csv.toString());
+
+        click("importCsvButton");
+        waitForBackgroundTasks();
+
+        String expected = "Cannot read GRE CSV file " + csv + ": Line 3: the text is not valid GBK/GB18030"
+            + " (save the file as UTF-8 and try again)";
+        ScriptedDialogs.Shown error = dialogs.takeError();
+        assertEquals("Import failed", error.title());
+        assertEquals(expected, error.content());
+        assertEquals("Import failed: " + expected, text("importStatusLabel"));
+        selectTab("dashboardTab");
+        assertEquals(String.valueOf(STARTER_WORDS), text("totalWordsLabel"));
     }
 
     @Test

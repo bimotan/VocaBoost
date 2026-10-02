@@ -11,9 +11,12 @@ import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 public class WordRepository {
     private final DatabaseManager databaseManager;
@@ -131,6 +134,24 @@ public class WordRepository {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * The deck's English words in lower case, for duplicate checks without one query per word.
+     * Archived words are included, because the unique index on (deck_id, english) covers them too.
+     */
+    public Set<String> findEnglishKeys(long deckId) throws SQLException {
+        Set<String> keys = new HashSet<>();
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement("SELECT english FROM words WHERE deck_id = ?")) {
+            statement.setLong(1, deckId);
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    keys.add(rs.getString(1).trim().toLowerCase(Locale.ROOT));
+                }
+            }
+        }
+        return keys;
     }
 
     public List<WordCard> findAll(long deckId) throws SQLException {
