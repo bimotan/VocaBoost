@@ -2,7 +2,9 @@ package com.vocabtrainer.service;
 
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.SettingsRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
@@ -15,10 +17,12 @@ class SettingsRepositoryTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     @Test
     void savesReadsAndClearsEcdictPath() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("settings.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("settings.db"));
         SettingsService service = new SettingsService(new SettingsRepository(databaseManager));
 
         service.saveEcdictPath("  C:/dict/ecdict.csv  ");
@@ -32,8 +36,7 @@ class SettingsRepositoryTest {
 
     @Test
     void readsLastDeckIdAndStarterFlag() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("settings.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("settings.db"));
         SettingsService service = new SettingsService(new SettingsRepository(databaseManager));
 
         assertTrue(service.getLastDeckId().isEmpty());

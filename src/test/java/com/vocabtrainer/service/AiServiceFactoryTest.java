@@ -5,9 +5,11 @@ import com.sun.net.httpserver.HttpServer;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.DatabaseManager;
+import com.vocabtrainer.repository.TestDatabases;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -39,6 +41,9 @@ class AiServiceFactoryTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     private final AtomicInteger requests = new AtomicInteger();
     private HttpServer server;
     private DatabaseManager databaseManager;
@@ -46,8 +51,7 @@ class AiServiceFactoryTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        databaseManager = new DatabaseManager(tempDir.resolve("ai-factory.db"));
-        databaseManager.initialize();
+        databaseManager = databases.open(tempDir.resolve("ai-factory.db"));
         cacheRepository = new AiCacheRepository(databaseManager);
     }
 

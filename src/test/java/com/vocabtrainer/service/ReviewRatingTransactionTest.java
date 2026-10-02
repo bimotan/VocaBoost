@@ -12,9 +12,11 @@ import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.repository.WordRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
@@ -37,6 +39,9 @@ class ReviewRatingTransactionTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     private DatabaseManager databaseManager;
     private Deck deck;
     private WordRepository wordRepository;
@@ -49,8 +54,7 @@ class ReviewRatingTransactionTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        databaseManager = new DatabaseManager(tempDir.resolve("rating.db"));
-        databaseManager.initialize();
+        databaseManager = databases.open(tempDir.resolve("rating.db"));
         deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         wordRepository = new WordRepository(databaseManager);
         logRepository = new FailingReviewLogRepository(databaseManager);
@@ -147,6 +151,30 @@ class ReviewRatingTransactionTest {
 
         service.rateCurrent(word.getId(), ReviewRating.GOOD);
         assertFalse(service.hasPendingAnswer(word.getId()));
+    }
+
+    @Test
+    void ratingsReusePooledConnectionsInsteadOfOpeningNewOnes() {
+        service.submitAnswer(word.getId(), "清晰的", ReviewMode.EN_TO_ZH);
+        service.rateCurrent(word.getId(), ReviewRating.GOOD);
+        long opened = databaseManager.connectionsOpened();
+
+        for (String english : new String[] {"abate", "candid", "laconic"}) {
+            WordCard next = saveWord(english);
+            service.submitAnswer(next.getId(), "释义", ReviewMode.EN_TO_ZH);
+            service.rateCurrent(next.getId(), ReviewRating.HARD);
+            goalService.getTodayProgress(deck.getId());
+        }
+
+        assertEquals(opened, databaseManager.connectionsOpened());
+    }
+
+    private WordCard saveWord(String english) {
+        try {
+            return wordRepository.save(WordCard.createNew(deck.getId(), english, "释义"));
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private WordCard storedWord() throws SQLException {

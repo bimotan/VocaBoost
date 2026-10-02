@@ -1,6 +1,7 @@
 package com.vocabtrainer.util;
 
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
@@ -17,6 +18,15 @@ public final class DateTimeUtil {
 
     public static LocalDateTime fromDatabase(String value) {
         return value == null || value.isBlank() ? null : LocalDateTime.parse(value, ISO_FORMATTER);
+    }
+
+    /** Days, such as daily_goals.goal_date, are stored as ISO dates (yyyy-MM-dd), which sort by date. */
+    public static String toDatabaseDate(LocalDate value) {
+        return value == null ? null : value.format(DateTimeFormatter.ISO_LOCAL_DATE);
+    }
+
+    public static LocalDate dateFromDatabase(String value) {
+        return value == null || value.isBlank() ? null : LocalDate.parse(value, DateTimeFormatter.ISO_LOCAL_DATE);
     }
 
     public static String toDisplay(LocalDateTime value) {

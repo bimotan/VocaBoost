@@ -32,6 +32,10 @@ public class GoalRepository {
     ) {
     }
 
+    /** A run of consecutive days with at least one review, ending on {@code lastDay}. */
+    public record ReviewRun(LocalDate lastDay, int days) {
+    }
+
     public GoalRow ensure(LocalDate date, int reviewGoal, int newWordGoal, int sessionGoal) throws SQLException {
         return ensure(0L, date, reviewGoal, newWordGoal, sessionGoal);
     }
@@ -44,7 +48,7 @@ public class GoalRepository {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
-            statement.setString(2, date.toString());
+            statement.setString(2, DateTimeUtil.toDatabaseDate(date));
             statement.setInt(3, reviewGoal);
             statement.setInt(4, newWordGoal);
             statement.setInt(5, sessionGoal);
@@ -62,7 +66,7 @@ public class GoalRepository {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
-            statement.setString(2, date.toString());
+            statement.setString(2, DateTimeUtil.toDatabaseDate(date));
             try (ResultSet rs = statement.executeQuery()) {
                 if (rs.next()) {
                     return Optional.of(map(rs));
@@ -90,9 +94,9 @@ public class GoalRepository {
 
     /**
      * Writes a day of goal history from a backup unless the deck already has progress for that day,
-     * so restoring the same history twice never counts it twice. A row with no progress yet (the
-     * placeholder the dashboard creates for today) is replaced, but only by a row that has progress,
-     * so restoring an empty day again changes nothing. Returns whether the row was written.
+     * so restoring the same history twice never counts it twice. A row with no progress yet (older
+     * versions created one whenever the dashboard was shown) is replaced, but only by a row that has
+     * progress, so restoring an empty day again changes nothing. Returns whether the row was written.
      */
     public boolean restoreRow(GoalRow row) throws SQLException {
         String sql = """
@@ -116,7 +120,7 @@ public class GoalRepository {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, row.deckId());
-            statement.setString(2, row.date().toString());
+            statement.setString(2, DateTimeUtil.toDatabaseDate(row.date()));
             statement.setInt(3, row.reviewGoal());
             statement.setInt(4, row.newWordGoal());
             statement.setInt(5, row.sessionGoal());
@@ -151,7 +155,7 @@ public class GoalRepository {
             statement.setInt(3, newWordDelta);
             statement.setInt(4, xpDelta);
             statement.setLong(5, deckId);
-            statement.setString(6, date.toString());
+            statement.setString(6, DateTimeUtil.toDatabaseDate(date));
             statement.executeUpdate();
         }
         return find(deckId, date).orElseThrow(() -> new SQLException("Daily goal not found: " + date));
@@ -166,7 +170,7 @@ public class GoalRepository {
              PreparedStatement statement = connection.prepareStatement(
                  "UPDATE daily_goals SET completed = 1 WHERE deck_id = ? AND goal_date = ?")) {
             statement.setLong(1, deckId);
-            statement.setString(2, date.toString());
+            statement.setString(2, DateTimeUtil.toDatabaseDate(date));
             statement.executeUpdate();
         }
     }
@@ -177,6 +181,34 @@ public class GoalRepository {
 
     public boolean hasReviewedOn(long deckId, LocalDate date) throws SQLException {
         return scalarInt("SELECT reviewed_count FROM daily_goals WHERE deck_id = ? AND goal_date = ?", deckId, date) > 0;
+    }
+
+    /**
+     * The deck's most recent run of consecutive days with reviews, among days up to {@code date}.
+     * One query: the days are read newest first and reading stops at the first gap.
+     */
+    public Optional<ReviewRun> latestReviewRun(long deckId, LocalDate date) throws SQLException {
+        String sql = """
+            SELECT goal_date FROM daily_goals
+            WHERE deck_id = ? AND goal_date <= ? AND reviewed_count > 0
+            ORDER BY goal_date DESC
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            statement.setString(2, DateTimeUtil.toDatabaseDate(date));
+            try (ResultSet rs = statement.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+                LocalDate lastDay = DateTimeUtil.dateFromDatabase(rs.getString(1));
+                int days = 1;
+                while (rs.next() && DateTimeUtil.dateFromDatabase(rs.getString(1)).equals(lastDay.minusDays(days))) {
+                    days++;
+                }
+                return Optional.of(new ReviewRun(lastDay, days));
+            }
+        }
     }
 
     /** Daily goal rows in every deck; any row means the app has been used with this database before. */
@@ -204,7 +236,7 @@ public class GoalRepository {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             if (date != null) {
-                statement.setString(1, date.toString());
+                statement.setString(1, DateTimeUtil.toDatabaseDate(date));
             }
             try (ResultSet rs = statement.executeQuery()) {
                 return rs.next() ? rs.getInt(1) : 0;
@@ -217,7 +249,7 @@ public class GoalRepository {
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
             if (date != null) {
-                statement.setString(2, date.toString());
+                statement.setString(2, DateTimeUtil.toDatabaseDate(date));
             }
             try (ResultSet rs = statement.executeQuery()) {
                 return rs.next() ? rs.getInt(1) : 0;
@@ -228,7 +260,7 @@ public class GoalRepository {
     private GoalRow map(ResultSet rs) throws SQLException {
         return new GoalRow(
             rs.getLong("deck_id"),
-            LocalDate.parse(rs.getString("goal_date")),
+            DateTimeUtil.dateFromDatabase(rs.getString("goal_date")),
             rs.getInt("review_goal"),
             rs.getInt("new_word_goal"),
             rs.getInt("session_goal"),

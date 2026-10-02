@@ -3,8 +3,10 @@ package com.vocabtrainer.service;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.repository.WordRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
@@ -18,10 +20,12 @@ class ImportExportServiceTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     @Test
     void importsValidLegacyRowsAndSkipsInvalidRows() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("test.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("test.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         ImportExportService service = new ImportExportService(wordRepository);
@@ -45,8 +49,7 @@ class ImportExportServiceTest {
 
     @Test
     void importsGreCsvAndSkipsDuplicatesAndBadRows() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("test.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("test.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         ImportExportService service = new ImportExportService(wordRepository);
@@ -74,8 +77,7 @@ class ImportExportServiceTest {
 
     @Test
     void bundledGreStarterImportsVisibleSampleWords() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("starter.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("starter.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         ImportExportService service = new ImportExportService(wordRepository);

@@ -69,9 +69,15 @@ public record AppServices(
     Supplier<DictionaryService> dictionaryServices,
     Supplier<AiService> aiServices,
     Deck startupDeck
-) {
+) implements AutoCloseable {
     public static Builder builder(Path databasePath) {
         return new Builder(databasePath);
+    }
+
+    /** Closes the database so SQLite checkpoints the write-ahead log and releases the file. */
+    @Override
+    public void close() {
+        databaseManager.close();
     }
 
     /** The main window on these services; {@code dialogs} shows its modal dialogs and file choosers. */
@@ -152,7 +158,7 @@ public record AppServices(
                 goalService,
                 achievementService
             );
-            StatsService statsService = new StatsService(wordRepository, reviewLogRepository, databaseManager);
+            StatsService statsService = new StatsService(wordRepository, reviewLogRepository);
             BackupService backupService = new BackupService(deckRepository, wordRepository, reviewLogRepository,
                 goalRepository, achievementRepository, databaseManager, validationService);
             BiFunction<DictionaryCacheRepository, SettingsService, DictionaryService> dictionaryFactory =

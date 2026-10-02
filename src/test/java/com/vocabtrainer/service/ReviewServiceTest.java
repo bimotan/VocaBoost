@@ -7,8 +7,10 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.repository.WordRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
@@ -22,10 +24,12 @@ class ReviewServiceTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     @Test
     void chineseToEnglishModeChecksEnglishAnswer() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("review.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("review.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewLogRepository reviewLogRepository = new ReviewLogRepository(databaseManager);
@@ -41,8 +45,7 @@ class ReviewServiceTest {
 
     @Test
     void weakModeCanSelectWeakWordsBeforeTheyAreDue() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("weak.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("weak.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewService service = new ReviewService(wordRepository, new ReviewLogRepository(databaseManager),
@@ -60,8 +63,7 @@ class ReviewServiceTest {
 
     @Test
     void sessionTargetStopsReviewAfterTargetIsReachedAndResetClearsProgress() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("session-target.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("session-target.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewService service = new ReviewService(wordRepository, new ReviewLogRepository(databaseManager),
@@ -87,8 +89,7 @@ class ReviewServiceTest {
 
     @Test
     void mixedModeUsesConcreteQuestionModeForCurrentCard() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("mixed.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("mixed.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewService service = new ReviewService(wordRepository, new ReviewLogRepository(databaseManager),

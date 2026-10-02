@@ -7,8 +7,10 @@ import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.SettingsRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.repository.WordRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
@@ -26,6 +28,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class StartupDeckTest {
     @TempDir
     Path tempDir;
+
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
 
     @Test
     void brandNewDatabaseImportsStarterExactlyOnce() throws Exception {
@@ -166,8 +171,7 @@ class StartupDeckTest {
     }
 
     private DatabaseManager initializedDatabase() throws Exception {
-        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("startup.db"));
-        databaseManager.initialize();
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("startup.db"));
         return databaseManager;
     }
 

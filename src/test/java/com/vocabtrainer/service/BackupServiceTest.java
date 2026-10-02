@@ -12,9 +12,11 @@ import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
+import com.vocabtrainer.repository.TestDatabases;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.util.ErrorMessages;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
@@ -47,6 +49,9 @@ class BackupServiceTest {
     @TempDir
     Path tempDir;
 
+    @RegisterExtension
+    final TestDatabases databases = new TestDatabases();
+
     @Test
     void exportsCsvFiles() throws Exception {
         Db db = new Db(tempDir.resolve("csv.db"));
@@ -60,7 +65,10 @@ class BackupServiceTest {
         Path logsCsv = db.backup.exportReviewLogsCsv(deck.getId(), tempDir.resolve("logs.csv"));
 
         assertTrue(Files.readString(wordsCsv, StandardCharsets.UTF_8).contains("lucid"));
-        assertTrue(Files.readString(logsCsv, StandardCharsets.UTF_8).contains("EASY"));
+        assertEquals(List.of(
+            "english,reviewed_at,user_answer,correct_answer,similarity,rating,elapsed_millis",
+            "\"lucid\",\"2026-05-28T09:00:00\",\"清晰的\",\"清晰的\",\"1.0\",\"EASY\",\"900\""),
+            Files.readAllLines(logsCsv, StandardCharsets.UTF_8));
     }
 
     @Test
@@ -302,9 +310,9 @@ class BackupServiceTest {
         Db db = new Db(tempDir.resolve("empty-day.db"));
         Deck deck = db.decks.ensureDefaultDeck();
         db.words.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
-        // Opening the dashboard creates an empty row for today, which the backup then contains.
-        GoalService goals = new GoalService(db.goals, CLOCK);
-        goals.getTodayProgress(deck.getId());
+        // Older versions created an empty row for today whenever the dashboard was shown, so backups contain them.
+        db.goals.ensure(deck.getId(), TODAY, GoalService.DEFAULT_REVIEW_GOAL, GoalService.DEFAULT_NEW_WORD_GOAL,
+            GoalService.DEFAULT_SESSION_GOAL);
         Path json = db.backup.exportJsonBackup(deck.getId(), tempDir.resolve("backup.json"));
         Deck other = db.decks.create("Other");
 
@@ -486,7 +494,7 @@ class BackupServiceTest {
     }
 
     /** One SQLite database with its repositories and a backup service on a fixed clock. */
-    private static final class Db {
+    private final class Db {
         final DatabaseManager databaseManager;
         final DeckRepository decks;
         final WordRepository words;
@@ -500,8 +508,7 @@ class BackupServiceTest {
         }
 
         Db(Path file, Function<DatabaseManager, ReviewLogRepository> logRepository) throws SQLException {
-            databaseManager = new DatabaseManager(file);
-            databaseManager.initialize();
+            databaseManager = databases.open(file);
             decks = new DeckRepository(databaseManager);
             words = new WordRepository(databaseManager);
             logs = logRepository.apply(databaseManager);
@@ -514,24 +521,23 @@ class BackupServiceTest {
 
     private static final class FailingReviewLogRepository extends ReviewLogRepository {
         private int failOnInsertNumber;
-        private int inserts;
 
         private FailingReviewLogRepository(DatabaseManager databaseManager) {
             super(databaseManager);
         }
 
+        /** Makes the restore fail at the given log, after the logs before it were written; 0 turns it off. */
         void failOnInsert(int insertNumber) {
             failOnInsertNumber = insertNumber;
-            inserts = 0;
         }
 
         @Override
-        public ReviewLog insert(ReviewLog log) throws SQLException {
-            inserts++;
-            if (failOnInsertNumber > 0 && inserts == failOnInsertNumber) {
+        public int insertAllIfAbsent(List<ReviewLog> logs) throws SQLException {
+            if (failOnInsertNumber > 0 && logs.size() >= failOnInsertNumber) {
+                super.insertAllIfAbsent(logs.subList(0, failOnInsertNumber - 1));
                 throw new SQLException("[SQLITE_IOERR] simulated disk error while restoring a review log");
             }
-            return super.insert(log);
+            return super.insertAllIfAbsent(logs);
         }
     }
 

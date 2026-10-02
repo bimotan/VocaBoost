@@ -1,5 +1,6 @@
 package com.vocabtrainer.repository;
 
+import com.vocabtrainer.domain.HardWordStat;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.util.DateTimeUtil;
@@ -9,14 +10,20 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 public class ReviewLogRepository {
     private final DatabaseManager databaseManager;
+
+    /** Reviews on one day, and how many of them were not rated Again. */
+    public record DailyCount(LocalDate day, int reviews, int correct) {
+    }
 
     public ReviewLogRepository(DatabaseManager databaseManager) {
         this.databaseManager = databaseManager;
@@ -46,6 +53,44 @@ public class ReviewLogRepository {
         return log;
     }
 
+    /**
+     * Inserts the logs, in order, except those whose word already has a log with the same time and
+     * rating: that is the same review, for example from restoring a backup twice or listed twice in
+     * one file. All or none are written; joins the caller's transaction if there is one. Returns how
+     * many were inserted; the ids of the logs are not set.
+     */
+    public int insertAllIfAbsent(List<ReviewLog> logs) throws SQLException {
+        if (logs == null || logs.isEmpty()) {
+            return 0;
+        }
+        String sql = """
+            INSERT INTO review_logs(word_id, reviewed_at, user_answer, correct_answer, similarity, rating, elapsed_millis)
+            SELECT ?, ?, ?, ?, ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM review_logs WHERE word_id = ? AND reviewed_at = ? AND rating = ?)
+            """;
+        return databaseManager.inTransaction(() -> {
+            try (Connection connection = databaseManager.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(sql)) {
+                int inserted = 0;
+                for (ReviewLog log : logs) {
+                    String reviewedAt = DateTimeUtil.toDatabase(log.getReviewedAt());
+                    statement.setLong(1, log.getWordId());
+                    statement.setString(2, reviewedAt);
+                    statement.setString(3, log.getUserAnswer());
+                    statement.setString(4, log.getCorrectAnswer());
+                    statement.setDouble(5, log.getSimilarity());
+                    statement.setString(6, log.getRating().name());
+                    statement.setLong(7, log.getElapsedMillis());
+                    statement.setLong(8, log.getWordId());
+                    statement.setString(9, reviewedAt);
+                    statement.setString(10, log.getRating().name());
+                    inserted += statement.executeUpdate();
+                }
+                return inserted;
+            }
+        });
+    }
+
     /** Every review log of the deck's words, archived words included, oldest first. */
     public List<ReviewLog> findByDeck(long deckId) throws SQLException {
         String sql = """
@@ -73,6 +118,100 @@ public class ReviewLogRepository {
                     ));
                 }
                 return logs;
+            }
+        }
+    }
+
+    /**
+     * Review counts per day since {@code since}, oldest day first; days without reviews are left
+     * out. A {@code deckId} of 0 or less counts every deck.
+     */
+    public List<DailyCount> dailyCounts(long deckId, LocalDateTime since) throws SQLException {
+        String sql = deckId <= 0 ? """
+            SELECT substr(reviewed_at, 1, 10) AS day,
+                   COUNT(*) AS reviews,
+                   SUM(CASE WHEN rating <> 'AGAIN' THEN 1 ELSE 0 END) AS correct
+            FROM review_logs
+            WHERE reviewed_at >= ?
+            GROUP BY day
+            ORDER BY day
+            """ : """
+            SELECT substr(l.reviewed_at, 1, 10) AS day,
+                   COUNT(*) AS reviews,
+                   SUM(CASE WHEN l.rating <> 'AGAIN' THEN 1 ELSE 0 END) AS correct
+            FROM review_logs l
+            JOIN words w ON w.id = l.word_id
+            WHERE w.deck_id = ? AND l.reviewed_at >= ?
+            GROUP BY day
+            ORDER BY day
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            int index = 1;
+            if (deckId > 0) {
+                statement.setLong(index++, deckId);
+            }
+            statement.setString(index, DateTimeUtil.toDatabase(since));
+            try (ResultSet rs = statement.executeQuery()) {
+                List<DailyCount> counts = new ArrayList<>();
+                while (rs.next()) {
+                    counts.add(new DailyCount(DateTimeUtil.dateFromDatabase(rs.getString("day")), rs.getInt("reviews"),
+                        rs.getInt("correct")));
+                }
+                return counts;
+            }
+        }
+    }
+
+    /**
+     * The deck's active words with the lowest average answer similarity, then the most Again
+     * ratings and the most reviews. Words never reviewed are left out.
+     */
+    public List<HardWordStat> hardestWords(long deckId, int limit) throws SQLException {
+        String sql = """
+            SELECT w.english, w.chinese, COUNT(l.id) AS reviews,
+                   AVG(l.similarity) AS avg_similarity,
+                   SUM(CASE WHEN l.rating = 'AGAIN' THEN 1 ELSE 0 END) AS again_count
+            FROM words w
+            JOIN review_logs l ON l.word_id = w.id
+            WHERE w.deck_id = ? AND w.archived = 0
+            GROUP BY w.id
+            ORDER BY avg_similarity ASC, again_count DESC, reviews DESC
+            LIMIT ?
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            statement.setInt(2, limit);
+            try (ResultSet rs = statement.executeQuery()) {
+                List<HardWordStat> result = new ArrayList<>();
+                while (rs.next()) {
+                    result.add(new HardWordStat(
+                        rs.getString("english"),
+                        rs.getString("chinese"),
+                        rs.getInt("reviews"),
+                        rs.getDouble("avg_similarity"),
+                        rs.getInt("again_count")
+                    ));
+                }
+                return result;
+            }
+        }
+    }
+
+    /** When a word of the deck, archived words included, was last reviewed. */
+    public Optional<LocalDateTime> latestReviewAt(long deckId) throws SQLException {
+        String sql = """
+            SELECT MAX(l.reviewed_at)
+            FROM review_logs l
+            JOIN words w ON w.id = l.word_id
+            WHERE w.deck_id = ?
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? Optional.ofNullable(DateTimeUtil.fromDatabase(rs.getString(1))) : Optional.empty();
             }
         }
     }

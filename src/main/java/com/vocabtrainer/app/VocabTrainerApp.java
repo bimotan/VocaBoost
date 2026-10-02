@@ -15,12 +15,14 @@ import java.util.logging.Logger;
 public class VocabTrainerApp extends Application {
     private static final Logger LOGGER = Logger.getLogger(VocabTrainerApp.class.getName());
 
+    private AppServices services;
+
     @Override
     public void start(Stage stage) {
         AppLogging.initialize();
         ErrorDialogs.installUncaughtExceptionHandler();
         try {
-            AppServices services = AppServices.builder(DateTimeUtil.defaultDatabasePath()).open();
+            services = AppServices.builder(DateTimeUtil.defaultDatabasePath()).open();
             showMainWindow(stage, services.createMainWindow(new JavaFxDialogs()));
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Startup failed", e);
@@ -36,6 +38,14 @@ public class VocabTrainerApp extends Application {
         stage.setMinHeight(760);
         stage.setScene(scene);
         stage.show();
+    }
+
+    /** Closes the database so SQLite checkpoints the write-ahead log and releases the file. */
+    @Override
+    public void stop() {
+        if (services != null) {
+            services.close();
+        }
     }
 
     public static void main(String[] args) {

@@ -130,6 +130,10 @@ abstract class MainWindowUiTest {
                     stage.close();
                 }
             });
+            // Release the pooled connections so the @TempDir database can be deleted (Windows).
+            if (services != null) {
+                services.close();
+            }
         }
         List<Throwable> uncaught = Fx.drainUncaught();
         if (!uncaught.isEmpty()) {

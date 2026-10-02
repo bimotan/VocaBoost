@@ -23,9 +23,8 @@ public class DeckRepository {
     }
 
     /**
-     * Returns the deck named {@link #DEFAULT_DECK_NAME}, restoring it if it was archived. A new
-     * row is inserted only when no deck has that name: decks.name is unique across archived
-     * rows too, so inserting next to an archived deck of the same name would fail.
+     * Returns the active deck named {@link #DEFAULT_DECK_NAME}. If only archived decks have that
+     * name, the newest of them is restored with its words instead of creating an empty one.
      */
     public Deck ensureDefaultDeck() throws SQLException {
         Optional<Deck> existing = findAnyByName(DEFAULT_DECK_NAME);
@@ -57,9 +56,14 @@ public class DeckRepository {
         return findOneByName("SELECT id, name, created_at, archived FROM decks WHERE name = ? AND archived = 0", name);
     }
 
-    /** Like {@link #findByName(String)}, but also matches archived decks. */
+    /**
+     * Like {@link #findByName(String)}, but also matches archived decks. Names are unique only among
+     * active decks, so this prefers the active deck and otherwise returns the newest archived one.
+     */
     public Optional<Deck> findAnyByName(String name) throws SQLException {
-        return findOneByName("SELECT id, name, created_at, archived FROM decks WHERE name = ?", name);
+        return findOneByName("""
+            SELECT id, name, created_at, archived FROM decks WHERE name = ? ORDER BY archived, id DESC LIMIT 1
+            """, name);
     }
 
     private Optional<Deck> findOneByName(String sql, String name) throws SQLException {
@@ -151,11 +155,15 @@ public class DeckRepository {
         }
     }
 
+    /**
+     * Makes an archived deck active again. Names are unique among active decks only (an archived
+     * deck's name can be reused), so restoring fails while an active deck has the same name.
+     */
     public Deck restore(long id) throws SQLException {
         Deck deck = findById(id).orElseThrow(() -> new SQLException("词库不存在"));
         Optional<Deck> activeWithSameName = findByName(deck.getName());
         if (activeWithSameName.isPresent() && activeWithSameName.get().getId() != id) {
-            throw new SQLException("已有同名活动词库，无法恢复：" + deck.getName());
+            throw new SQLException("已有同名的活动词库「" + deck.getName() + "」，无法恢复");
         }
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement("UPDATE decks SET archived = 0 WHERE id = ?")) {
