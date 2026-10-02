@@ -23,6 +23,7 @@ import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.AiService;
 import com.vocabtrainer.service.AiServiceFactory;
+import com.vocabtrainer.service.BackupRestoreResult;
 import com.vocabtrainer.service.BackupService;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.DictionaryService;
@@ -56,6 +57,7 @@ import javafx.scene.chart.PieChart;
 import javafx.scene.chart.XYChart;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Dialog;
@@ -1528,14 +1530,52 @@ public class MainWindow {
         if (file == null) {
             return;
         }
-        long deckId = currentDeck.getId();
+        Deck targetDeck = currentDeck;
+        Optional<BackupService.ExistingWordPolicy> policy = askExistingWordPolicy(targetDeck);
+        if (policy.isEmpty()) {
+            return;
+        }
         runBackground(
-            () -> backupService.importJsonBackup(file.toPath(), deckId),
-            result -> afterImport(result, overdueStatsLabel),
+            () -> backupService.importJsonBackup(file.toPath(), targetDeck.getId(), policy.get()),
+            result -> afterRestore(result, targetDeck),
             error -> showError("Import failed", rootMessage(error)),
             overdueStatsLabel,
             "Importing backup..."
         );
+    }
+
+    private Optional<BackupService.ExistingWordPolicy> askExistingWordPolicy(Deck targetDeck) {
+        ButtonType keepProgress = new ButtonType("Keep current progress", ButtonBar.ButtonData.OK_DONE);
+        ButtonType useBackupProgress = new ButtonType("Use backup progress", ButtonBar.ButtonData.OTHER);
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, "", keepProgress, useBackupProgress, ButtonType.CANCEL);
+        confirm.setTitle("Import JSON backup");
+        confirm.setHeaderText("Restore the backup into " + targetDeck.getName() + "?");
+        confirm.setContentText("Words missing from this deck are added with the review schedule saved in the backup. "
+            + "For words already in the deck, keep their current review progress or replace it with the backup's.");
+        Optional<ButtonType> choice = confirm.showAndWait();
+        if (choice.isEmpty() || choice.get() == ButtonType.CANCEL) {
+            return Optional.empty();
+        }
+        return Optional.of(choice.get() == useBackupProgress
+            ? BackupService.ExistingWordPolicy.OVERWRITE_SCHEDULE
+            : BackupService.ExistingWordPolicy.KEEP_SCHEDULE);
+    }
+
+    private void afterRestore(BackupRestoreResult result, Deck targetDeck) {
+        // A restore brings back saved history; unlike adding words it earns no XP or new-word credit.
+        guard("Backup restored, but refreshing the views failed", () -> {
+            refreshAll();
+            loadNextReviewWord();
+        });
+        TextArea summary = new TextArea(result.toSummary());
+        summary.setEditable(false);
+        summary.setWrapText(true);
+        summary.setPrefRowCount(result.invalidRows().isEmpty() ? 5 : 12);
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle("Import JSON backup");
+        alert.setHeaderText("Deck: " + targetDeck.getName());
+        alert.getDialogPane().setContent(summary);
+        alert.showAndWait();
     }
 
     private void openDataFolder() {

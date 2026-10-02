@@ -7,6 +7,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 public class GoalRepository {
@@ -68,6 +70,63 @@ public class GoalRepository {
             }
         }
         return Optional.empty();
+    }
+
+    /** The deck's goal rows, oldest day first. */
+    public List<GoalRow> findAll(long deckId) throws SQLException {
+        String sql = "SELECT * FROM daily_goals WHERE deck_id = ? ORDER BY goal_date";
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            try (ResultSet rs = statement.executeQuery()) {
+                List<GoalRow> rows = new ArrayList<>();
+                while (rs.next()) {
+                    rows.add(map(rs));
+                }
+                return rows;
+            }
+        }
+    }
+
+    /**
+     * Writes a day of goal history from a backup unless the deck already has progress for that day,
+     * so restoring the same history twice never counts it twice. A row with no progress yet (the
+     * placeholder the dashboard creates for today) is replaced, but only by a row that has progress,
+     * so restoring an empty day again changes nothing. Returns whether the row was written.
+     */
+    public boolean restoreRow(GoalRow row) throws SQLException {
+        String sql = """
+            INSERT INTO daily_goals(deck_id, goal_date, review_goal, new_word_goal, session_goal,
+                reviewed_count, correct_count, new_words_count, xp_earned, completed)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(deck_id, goal_date) DO UPDATE SET
+                review_goal = excluded.review_goal,
+                new_word_goal = excluded.new_word_goal,
+                session_goal = excluded.session_goal,
+                reviewed_count = excluded.reviewed_count,
+                correct_count = excluded.correct_count,
+                new_words_count = excluded.new_words_count,
+                xp_earned = excluded.xp_earned,
+                completed = excluded.completed
+            WHERE daily_goals.reviewed_count = 0 AND daily_goals.correct_count = 0
+              AND daily_goals.new_words_count = 0 AND daily_goals.xp_earned = 0 AND daily_goals.completed = 0
+              AND (excluded.reviewed_count > 0 OR excluded.correct_count > 0 OR excluded.new_words_count > 0
+                   OR excluded.xp_earned > 0 OR excluded.completed <> 0)
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, row.deckId());
+            statement.setString(2, row.date().toString());
+            statement.setInt(3, row.reviewGoal());
+            statement.setInt(4, row.newWordGoal());
+            statement.setInt(5, row.sessionGoal());
+            statement.setInt(6, row.reviewedCount());
+            statement.setInt(7, row.correctCount());
+            statement.setInt(8, row.newWordsCount());
+            statement.setInt(9, row.xpEarned());
+            statement.setInt(10, row.completed() ? 1 : 0);
+            return statement.executeUpdate() > 0;
+        }
     }
 
     public GoalRow addProgress(LocalDate date, int reviewDelta, int correctDelta,

@@ -142,6 +142,18 @@ public class WordRepository {
         }
     }
 
+    /** Every word in the deck, archived ones included. */
+    public List<WordCard> findAllIncludingArchived(long deckId) throws SQLException {
+        String sql = "SELECT * FROM words WHERE deck_id = ? ORDER BY lower(english), id";
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            try (ResultSet rs = statement.executeQuery()) {
+                return mapList(rs);
+            }
+        }
+    }
+
     public List<WordCard> search(long deckId, String query) throws SQLException {
         if (query == null || query.isBlank()) {
             return findAll(deckId);

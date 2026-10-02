@@ -1,15 +1,28 @@
 package com.vocabtrainer.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.json.JsonReadFeature;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.vocabtrainer.domain.Achievement;
+import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.ValidatedWord;
 import com.vocabtrainer.domain.WordCard;
+import com.vocabtrainer.repository.AchievementRepository;
 import com.vocabtrainer.repository.DatabaseManager;
+import com.vocabtrainer.repository.DeckRepository;
+import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.util.DateTimeUtil;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,30 +30,66 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class BackupService {
     private static final Logger LOGGER = Logger.getLogger(BackupService.class.getName());
-    private static final Pattern OBJECT_PATTERN = Pattern.compile("\\{([^{}]+)}", Pattern.DOTALL);
-    private static final Pattern FIELD_PATTERN_TEMPLATE = Pattern.compile("\"%s\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
 
+    /** What a restore does with backup words that are already in the target deck. */
+    public enum ExistingWordPolicy {
+        /** Keep the card's current review schedule. */
+        KEEP_SCHEDULE,
+        /** Replace the card's review schedule with the one saved in the backup. */
+        OVERWRITE_SCHEDULE
+    }
+
+    private final DeckRepository deckRepository;
     private final WordRepository wordRepository;
     private final ReviewLogRepository reviewLogRepository;
+    private final GoalRepository goalRepository;
+    private final AchievementRepository achievementRepository;
     private final DatabaseManager databaseManager;
     private final WordValidationService validationService;
+    private final Clock clock;
+    private final ObjectMapper objectMapper = JsonMapper.builder()
+        // Version 1 backups were written by hand and left tabs and other control characters unescaped.
+        .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
+        .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+        .enable(SerializationFeature.INDENT_OUTPUT)
+        .build();
 
-    public BackupService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository,
-                         DatabaseManager databaseManager, WordValidationService validationService) {
+    public BackupService(DeckRepository deckRepository, WordRepository wordRepository,
+                         ReviewLogRepository reviewLogRepository, GoalRepository goalRepository,
+                         AchievementRepository achievementRepository, DatabaseManager databaseManager,
+                         WordValidationService validationService) {
+        this(deckRepository, wordRepository, reviewLogRepository, goalRepository, achievementRepository,
+            databaseManager, validationService, Clock.systemDefaultZone());
+    }
+
+    public BackupService(DeckRepository deckRepository, WordRepository wordRepository,
+                         ReviewLogRepository reviewLogRepository, GoalRepository goalRepository,
+                         AchievementRepository achievementRepository, DatabaseManager databaseManager,
+                         WordValidationService validationService, Clock clock) {
+        this.deckRepository = deckRepository;
         this.wordRepository = wordRepository;
         this.reviewLogRepository = reviewLogRepository;
+        this.goalRepository = goalRepository;
+        this.achievementRepository = achievementRepository;
         this.databaseManager = databaseManager;
         this.validationService = validationService;
+        this.clock = clock;
     }
 
     public Path exportWordsCsv(long deckId, Path outputPath) {
@@ -102,176 +151,379 @@ public class BackupService {
         }
     }
 
+    /** Writes the deck's words with their review schedule, review logs, goal history and achievements. */
     public Path exportJsonBackup(long deckId, Path outputPath) {
         try {
+            // One transaction, so words and logs come from the same moment.
+            BackupFile backup = databaseManager.inTransaction(() -> buildBackup(deckId));
             ensureParent(outputPath);
-            Files.writeString(outputPath, buildJsonBackup(deckId), StandardCharsets.UTF_8);
+            // Written as text so emoji stay readable characters instead of escaped surrogate pairs.
+            Files.writeString(outputPath, objectMapper.writeValueAsString(backup), StandardCharsets.UTF_8);
             return outputPath;
         } catch (IOException | SQLException e) {
             throw new IllegalStateException("无法导出 JSON 备份", e);
         }
     }
 
-    public ImportResult importJsonBackup(Path inputPath, long deckId) {
+    public BackupRestoreResult importJsonBackup(Path inputPath, long deckId) {
+        return importJsonBackup(inputPath, deckId, ExistingWordPolicy.KEEP_SCHEDULE);
+    }
+
+    /**
+     * Restores a version 1 or 2 backup into the deck in one transaction: either everything valid in
+     * the file is restored or, if the database fails, nothing is. Rows the file gets wrong are skipped
+     * and listed in the result. Restoring the same file again adds nothing.
+     */
+    public BackupRestoreResult importJsonBackup(Path inputPath, long deckId, ExistingWordPolicy policy) {
+        JsonNode root = readBackup(inputPath);
+        int version = formatVersion(root);
+        RestoreTally tally;
         try {
-            String payload = Files.readString(inputPath, StandardCharsets.UTF_8);
-            ImportResult wordResult = importWordsFromJson(payload, deckId);
-            int logCount = importReviewLogsFromJson(payload, deckId);
-            List<String> messages = new ArrayList<>(wordResult.messages());
-            messages.add("Review logs imported: " + logCount);
-            return new ImportResult(wordResult.importedCount(), wordResult.skippedCount(), messages);
+            tally = databaseManager.inTransaction(() -> restore(root, version, deckId, policy));
+        } catch (SQLException e) {
+            throw new IllegalStateException("无法恢复 JSON 备份，数据库未作任何更改", e);
+        }
+        if (!tally.invalidRows.isEmpty()) {
+            LOGGER.log(Level.WARNING, "Skipped " + tally.invalidRows.size() + " invalid row(s) while restoring "
+                + inputPath + System.lineSeparator() + String.join(System.lineSeparator(), tally.invalidRows),
+                tally.firstFailure);
+        }
+        return tally.toResult();
+    }
+
+    private BackupFile buildBackup(long deckId) throws SQLException {
+        String deckName = deckRepository.findById(deckId).map(Deck::getName).orElse(null);
+        List<BackupFile.WordEntry> words = new ArrayList<>();
+        Map<Long, String> englishById = new HashMap<>();
+        for (WordCard word : wordRepository.findAllIncludingArchived(deckId)) {
+            englishById.put(word.getId(), word.getEnglish());
+            words.add(new BackupFile.WordEntry(
+                word.getEnglish(),
+                word.getChinese(),
+                word.getPhonetic(),
+                word.getPartOfSpeech(),
+                word.getExampleSentence(),
+                word.getNote(),
+                word.getTags(),
+                DateTimeUtil.toDatabase(word.getAddedAt()),
+                DateTimeUtil.toDatabase(word.getLastReviewedAt()),
+                DateTimeUtil.toDatabase(word.getNextReviewAt()),
+                word.getEasinessFactor(),
+                word.getIntervalDays(),
+                word.getRepetitions(),
+                word.getConsecutiveCorrect(),
+                word.getLapses(),
+                word.isArchived()
+            ));
+        }
+        List<BackupFile.ReviewLogEntry> logs = new ArrayList<>();
+        for (ReviewLog log : reviewLogRepository.findByDeck(deckId)) {
+            logs.add(new BackupFile.ReviewLogEntry(
+                englishById.get(log.getWordId()),
+                DateTimeUtil.toDatabase(log.getReviewedAt()),
+                log.getUserAnswer(),
+                log.getCorrectAnswer(),
+                log.getSimilarity(),
+                log.getRating().name(),
+                log.getElapsedMillis()
+            ));
+        }
+        List<BackupFile.DailyGoalEntry> goals = new ArrayList<>();
+        for (GoalRepository.GoalRow row : goalRepository.findAll(deckId)) {
+            goals.add(new BackupFile.DailyGoalEntry(
+                row.date().toString(),
+                row.reviewGoal(),
+                row.newWordGoal(),
+                row.sessionGoal(),
+                row.reviewedCount(),
+                row.correctCount(),
+                row.newWordsCount(),
+                row.xpEarned(),
+                row.completed()
+            ));
+        }
+        List<BackupFile.AchievementEntry> achievements = new ArrayList<>();
+        for (Achievement achievement : achievementRepository.findAll(deckId)) {
+            achievements.add(new BackupFile.AchievementEntry(
+                achievement.code(),
+                achievement.name(),
+                achievement.description(),
+                DateTimeUtil.toDatabase(achievement.unlockedAt()),
+                achievement.xpReward()
+            ));
+        }
+        return new BackupFile(BackupFile.FORMAT, BackupFile.VERSION, DateTimeUtil.toDatabase(LocalDateTime.now(clock)),
+            new BackupFile.DeckEntry(deckName), words, logs, goals, achievements);
+    }
+
+    private JsonNode readBackup(Path inputPath) {
+        try (InputStream input = Files.newInputStream(inputPath)) {
+            return objectMapper.readTree(input);
         } catch (IOException e) {
             throw new IllegalStateException("无法读取 JSON 备份", e);
         }
     }
 
-    String buildJsonBackup(long deckId) throws SQLException {
-        StringBuilder builder = new StringBuilder();
-        builder.append("{\n  \"version\": 1,\n  \"words\": [\n");
-        List<WordCard> words = wordRepository.findAll(deckId);
-        for (int i = 0; i < words.size(); i++) {
-            WordCard word = words.get(i);
-            builder.append("    {")
-                .append("\"english\":\"").append(json(word.getEnglish())).append("\",")
-                .append("\"chinese\":\"").append(json(word.getChinese())).append("\",")
-                .append("\"phonetic\":\"").append(json(word.getPhonetic())).append("\",")
-                .append("\"partOfSpeech\":\"").append(json(word.getPartOfSpeech())).append("\",")
-                .append("\"exampleSentence\":\"").append(json(word.getExampleSentence())).append("\",")
-                .append("\"note\":\"").append(json(word.getNote())).append("\",")
-                .append("\"tags\":\"").append(json(word.getTags())).append("\"")
-                .append("}");
-            builder.append(i == words.size() - 1 ? "\n" : ",\n");
+    private int formatVersion(JsonNode root) {
+        if (root == null || !root.isObject() || !root.path("words").isArray()
+            || (root.hasNonNull("format") && !BackupFile.FORMAT.equals(root.get("format").asText()))) {
+            throw new IllegalArgumentException("This file is not a VocaBoost JSON backup.");
         }
-        builder.append("  ],\n  \"reviewLogs\": [\n");
-        appendReviewLogsJson(deckId, builder);
-        builder.append("  ]\n}\n");
-        return builder.toString();
+        JsonNode version = root.get("version");
+        // Version 1 files may lack the field; their writer also put numbers in strings.
+        int number = version == null || version.isNull() ? 1 : version.asInt(-1);
+        if (number < 1 || number > BackupFile.VERSION) {
+            throw new IllegalArgumentException("Unsupported backup version " + version.asText()
+                + "; this VocaBoost reads versions 1 to " + BackupFile.VERSION + ".");
+        }
+        return number;
     }
 
-    private ImportResult importWordsFromJson(String payload, long deckId) {
-        int imported = 0;
-        int skipped = 0;
-        List<String> messages = new ArrayList<>();
-        String wordsSection = section(payload, "words");
-        Matcher matcher = OBJECT_PATTERN.matcher(wordsSection);
-        while (matcher.find()) {
-            String object = matcher.group(1);
+    private RestoreTally restore(JsonNode root, int version, long deckId, ExistingWordPolicy policy)
+        throws SQLException {
+        RestoreTally tally = new RestoreTally(version);
+        Map<String, WordCard> deckWords = new HashMap<>();
+        for (WordCard word : wordRepository.findAllIncludingArchived(deckId)) {
+            deckWords.put(wordKey(word.getEnglish()), word);
+        }
+
+        Set<String> restoredWords = new HashSet<>();
+        restoreRows(root, "words", "Word", tally,
+            row -> restoreWord(row, deckId, policy, deckWords, restoredWords, tally));
+
+        Set<LogKey> knownLogs = new HashSet<>();
+        for (ReviewLog log : reviewLogRepository.findByDeck(deckId)) {
+            knownLogs.add(new LogKey(log.getWordId(), log.getReviewedAt(), log.getRating()));
+        }
+        restoreRows(root, "reviewLogs", "Review log", tally, row -> restoreReviewLog(row, deckWords, knownLogs, tally));
+        restoreRows(root, "dailyGoals", "Daily goal", tally, row -> restoreDailyGoal(row, deckId, tally));
+        restoreRows(root, "achievements", "Achievement", tally, row -> restoreAchievement(row, deckId, tally));
+        return tally;
+    }
+
+    private void restoreRows(JsonNode root, String field, String rowName, RestoreTally tally, RowRestorer restorer)
+        throws SQLException {
+        JsonNode rows = root.path(field);
+        if (rows.isMissingNode() || rows.isNull()) {
+            return;
+        }
+        if (!rows.isArray()) {
+            tally.invalid("\"" + field + "\" is not a list", null);
+            return;
+        }
+        int index = 0;
+        for (JsonNode row : rows) {
+            index++;
+            if (!row.isObject()) {
+                tally.invalid(rowName + " #" + index + ": not a JSON object", null);
+                continue;
+            }
             try {
-                ValidatedWord validated = validationService.validate(
-                    field(object, "english"),
-                    field(object, "chinese"),
-                    field(object, "phonetic"),
-                    field(object, "partOfSpeech"),
-                    field(object, "exampleSentence"),
-                    field(object, "note"),
-                    field(object, "tags")
-                );
-                if (wordRepository.findByEnglish(deckId, validated.english()).isPresent()) {
-                    skipped++;
-                    messages.add("Skipped duplicate word: " + validated.english());
-                    continue;
-                }
-                WordCard word = WordCard.createNew(deckId, validated.english(), validated.chinese());
-                word.setPhonetic(validated.phonetic());
-                word.setPartOfSpeech(validated.partOfSpeech());
-                word.setExampleSentence(validated.exampleSentence());
-                word.setNote(validated.note());
-                word.setTags(validated.tags());
-                wordRepository.save(word);
-                imported++;
-            } catch (IllegalArgumentException | SQLException e) {
-                skipped++;
-                messages.add("Skipped word: " + e.getMessage());
-            }
-        }
-        return new ImportResult(imported, skipped, messages);
-    }
-
-    private int importReviewLogsFromJson(String payload, long deckId) {
-        int imported = 0;
-        int failed = 0;
-        Exception firstFailure = null;
-        String logsSection = section(payload, "reviewLogs");
-        Matcher matcher = OBJECT_PATTERN.matcher(logsSection);
-        while (matcher.find()) {
-            String object = matcher.group(1);
-            try {
-                String english = field(object, "wordEnglish");
-                WordCard word = wordRepository.findByEnglish(deckId, english).orElse(null);
-                if (word == null) {
-                    continue;
-                }
-                reviewLogRepository.insert(new ReviewLog(
-                    0,
-                    word.getId(),
-                    DateTimeUtil.fromDatabase(field(object, "reviewedAt")),
-                    field(object, "userAnswer"),
-                    field(object, "correctAnswer"),
-                    Double.parseDouble(field(object, "similarity")),
-                    ReviewRating.valueOf(field(object, "rating")),
-                    Long.parseLong(field(object, "elapsedMillis"))
-                ));
-                imported++;
-            } catch (IllegalArgumentException | SQLException e) {
-                // A backup import should restore as much as possible.
-                failed++;
-                if (firstFailure == null) {
-                    firstFailure = e;
-                }
-            }
-        }
-        if (failed > 0) {
-            LOGGER.log(Level.WARNING, "Skipped " + failed + " review log(s) while importing backup; first failure attached",
-                firstFailure);
-        }
-        return imported;
-    }
-
-    private void appendReviewLogsJson(long deckId, StringBuilder builder) throws SQLException {
-        String sql = """
-            SELECT w.english, l.reviewed_at, l.user_answer, l.correct_answer, l.similarity, l.rating, l.elapsed_millis
-            FROM review_logs l
-            JOIN words w ON w.id = l.word_id
-            WHERE w.deck_id = ?
-            ORDER BY l.reviewed_at, l.id
-            """;
-        try (Connection connection = databaseManager.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setLong(1, deckId);
-            try (ResultSet rs = statement.executeQuery()) {
-                boolean first = true;
-                while (rs.next()) {
-                    if (!first) {
-                        builder.append(",\n");
-                    }
-                    first = false;
-                    builder.append("    {")
-                        .append("\"wordEnglish\":\"").append(json(rs.getString("english"))).append("\",")
-                        .append("\"reviewedAt\":\"").append(json(rs.getString("reviewed_at"))).append("\",")
-                        .append("\"userAnswer\":\"").append(json(rs.getString("user_answer"))).append("\",")
-                        .append("\"correctAnswer\":\"").append(json(rs.getString("correct_answer"))).append("\",")
-                        .append("\"similarity\":\"").append(rs.getDouble("similarity")).append("\",")
-                        .append("\"rating\":\"").append(json(rs.getString("rating"))).append("\",")
-                        .append("\"elapsedMillis\":\"").append(rs.getLong("elapsed_millis")).append("\"")
-                        .append("}");
-                }
-                if (!first) {
-                    builder.append("\n");
-                }
+                restorer.restore(row);
+            } catch (JsonProcessingException e) {
+                tally.invalid(rowName + " #" + index + rowLabel(row) + ": " + e.getOriginalMessage(), e);
+            } catch (IllegalArgumentException e) {
+                tally.invalid(rowName + " #" + index + rowLabel(row) + ": " + e.getMessage(), e);
             }
         }
     }
 
-    private String section(String payload, String name) {
-        Pattern pattern = Pattern.compile("\"" + Pattern.quote(name) + "\"\\s*:\\s*\\[(.*?)]", Pattern.DOTALL);
-        Matcher matcher = pattern.matcher(payload);
-        return matcher.find() ? matcher.group(1) : "";
+    private void restoreWord(JsonNode row, long deckId, ExistingWordPolicy policy, Map<String, WordCard> deckWords,
+                             Set<String> restoredWords, RestoreTally tally)
+        throws SQLException, JsonProcessingException {
+        BackupFile.WordEntry entry = objectMapper.treeToValue(row, BackupFile.WordEntry.class);
+        ValidatedWord validated = validationService.validate(entry.english(), entry.chinese(), entry.phonetic(),
+            entry.partOfSpeech(), entry.exampleSentence(), entry.note(), entry.tags());
+        LocalDateTime addedAt = dateTime(entry.addedAt(), "addedAt");
+        Schedule schedule = scheduleOf(entry);
+        String key = wordKey(validated.english());
+        if (!restoredWords.add(key)) {
+            throw new IllegalArgumentException("the word appears more than once in the backup");
+        }
+
+        WordCard existing = deckWords.get(key);
+        if (existing == null) {
+            LocalDateTime now = LocalDateTime.now(clock);
+            WordCard word = new WordCard();
+            word.setDeckId(deckId);
+            word.setEnglish(validated.english());
+            // Text is restored exactly as saved; validation only decides whether the row is usable.
+            word.setChinese(entry.chinese());
+            word.setPhonetic(entry.phonetic());
+            word.setPartOfSpeech(entry.partOfSpeech());
+            word.setExampleSentence(entry.exampleSentence());
+            word.setNote(entry.note());
+            word.setTags(entry.tags());
+            word.setAddedAt(addedAt == null ? now : addedAt);
+            (schedule == null ? Schedule.newCard(now) : schedule).applyTo(word);
+            word.setArchived(Boolean.TRUE.equals(entry.archived()));
+            wordRepository.insert(word);
+            deckWords.put(key, word);
+            tally.wordsInserted++;
+        } else if (policy == ExistingWordPolicy.OVERWRITE_SCHEDULE && schedule != null
+            && !schedule.equals(Schedule.of(existing))) {
+            schedule.applyTo(existing);
+            wordRepository.update(existing);
+            tally.wordsUpdated++;
+        } else {
+            tally.wordsSkipped++;
+        }
     }
 
-    private String field(String object, String fieldName) {
-        Pattern pattern = Pattern.compile(FIELD_PATTERN_TEMPLATE.pattern().formatted(Pattern.quote(fieldName)), Pattern.DOTALL);
-        Matcher matcher = pattern.matcher(object);
-        return matcher.find() ? unescapeJson(matcher.group(1)) : "";
+    /** The saved review schedule, or null for a version 1 entry, which has none. */
+    private Schedule scheduleOf(BackupFile.WordEntry entry) {
+        LocalDateTime nextReviewAt = dateTime(entry.nextReviewAt(), "nextReviewAt");
+        if (nextReviewAt == null) {
+            return null;
+        }
+        double easiness = entry.easinessFactor() == null ? WordCard.DEFAULT_EASINESS : entry.easinessFactor();
+        if (!Double.isFinite(easiness) || easiness <= 0) {
+            throw new IllegalArgumentException("invalid easinessFactor " + easiness);
+        }
+        return new Schedule(
+            dateTime(entry.lastReviewedAt(), "lastReviewedAt"),
+            nextReviewAt,
+            easiness,
+            count(entry.intervalDays(), 0, "intervalDays"),
+            count(entry.repetitions(), 0, "repetitions"),
+            count(entry.consecutiveCorrect(), 0, "consecutiveCorrect"),
+            count(entry.lapses(), 0, "lapses")
+        );
+    }
+
+    private void restoreReviewLog(JsonNode row, Map<String, WordCard> deckWords, Set<LogKey> knownLogs,
+                                  RestoreTally tally) throws SQLException, JsonProcessingException {
+        BackupFile.ReviewLogEntry entry = objectMapper.treeToValue(row, BackupFile.ReviewLogEntry.class);
+        String english = validationService.normalizeEnglish(entry.english());
+        if (english.isEmpty()) {
+            throw new IllegalArgumentException("missing english");
+        }
+        WordCard word = deckWords.get(wordKey(english));
+        if (word == null) {
+            throw new IllegalArgumentException("no word \"" + english + "\" in the backup or the deck");
+        }
+        LocalDateTime reviewedAt = dateTime(entry.reviewedAt(), "reviewedAt");
+        if (reviewedAt == null) {
+            throw new IllegalArgumentException("missing reviewedAt");
+        }
+        ReviewRating rating = rating(entry.rating());
+        if (entry.similarity() == null || !Double.isFinite(entry.similarity())) {
+            throw new IllegalArgumentException("missing or invalid similarity");
+        }
+        if (!knownLogs.add(new LogKey(word.getId(), reviewedAt, rating))) {
+            tally.duplicateLogsSkipped++;
+            return;
+        }
+        reviewLogRepository.insert(new ReviewLog(
+            0,
+            word.getId(),
+            reviewedAt,
+            entry.userAnswer(),
+            entry.correctAnswer() == null ? "" : entry.correctAnswer(),
+            entry.similarity(),
+            rating,
+            entry.elapsedMillis() == null ? 0L : entry.elapsedMillis()
+        ));
+        tally.logsInserted++;
+    }
+
+    private void restoreDailyGoal(JsonNode row, long deckId, RestoreTally tally)
+        throws SQLException, JsonProcessingException {
+        BackupFile.DailyGoalEntry entry = objectMapper.treeToValue(row, BackupFile.DailyGoalEntry.class);
+        if (entry.date() == null || entry.date().isBlank()) {
+            throw new IllegalArgumentException("missing date");
+        }
+        LocalDate date;
+        try {
+            date = LocalDate.parse(entry.date().trim());
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("invalid date \"" + entry.date() + "\"", e);
+        }
+        GoalRepository.GoalRow goal = new GoalRepository.GoalRow(
+            deckId,
+            date,
+            count(entry.reviewGoal(), GoalService.DEFAULT_REVIEW_GOAL, "reviewGoal"),
+            count(entry.newWordGoal(), GoalService.DEFAULT_NEW_WORD_GOAL, "newWordGoal"),
+            count(entry.sessionGoal(), GoalService.DEFAULT_SESSION_GOAL, "sessionGoal"),
+            count(entry.reviewedCount(), 0, "reviewedCount"),
+            count(entry.correctCount(), 0, "correctCount"),
+            count(entry.newWordsCount(), 0, "newWordsCount"),
+            count(entry.xpEarned(), 0, "xpEarned"),
+            Boolean.TRUE.equals(entry.completed())
+        );
+        if (goalRepository.restoreRow(goal)) {
+            tally.dailyGoalsRestored++;
+        }
+    }
+
+    private void restoreAchievement(JsonNode row, long deckId, RestoreTally tally)
+        throws SQLException, JsonProcessingException {
+        BackupFile.AchievementEntry entry = objectMapper.treeToValue(row, BackupFile.AchievementEntry.class);
+        String code = entry.code() == null ? "" : entry.code().trim();
+        if (code.isEmpty()) {
+            throw new IllegalArgumentException("missing code");
+        }
+        LocalDateTime unlockedAt = dateTime(entry.unlockedAt(), "unlockedAt");
+        if (unlockedAt == null) {
+            throw new IllegalArgumentException("missing unlockedAt");
+        }
+        Achievement achievement = new Achievement(
+            code,
+            entry.name() == null ? code : entry.name(),
+            entry.description() == null ? "" : entry.description(),
+            unlockedAt,
+            count(entry.xpReward(), 0, "xpReward")
+        );
+        if (achievementRepository.insertIfAbsent(deckId, achievement)) {
+            tally.achievementsRestored++;
+        }
+    }
+
+    private static String wordKey(String english) {
+        // English words are ASCII (see WordValidationService), matching the NOCASE unique index.
+        return english.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String rowLabel(JsonNode row) {
+        for (String field : List.of("english", "wordEnglish", "code", "date")) {
+            JsonNode value = row.get(field);
+            if (value != null && value.isValueNode() && !value.asText().isBlank()) {
+                return " (" + value.asText().trim() + ")";
+            }
+        }
+        return "";
+    }
+
+    private static LocalDateTime dateTime(String value, String field) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return DateTimeUtil.fromDatabase(value.trim());
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("invalid " + field + " \"" + value + "\"", e);
+        }
+    }
+
+    private static int count(Integer value, int fallback, String field) {
+        if (value == null) {
+            return fallback;
+        }
+        if (value < 0) {
+            throw new IllegalArgumentException("negative " + field + " " + value);
+        }
+        return value;
+    }
+
+    private static ReviewRating rating(String value) {
+        if (value != null) {
+            for (ReviewRating rating : ReviewRating.values()) {
+                if (rating.name().equalsIgnoreCase(value.trim())) {
+                    return rating;
+                }
+            }
+        }
+        throw new IllegalArgumentException("unknown rating \"" + value + "\"");
     }
 
     private void ensureParent(Path outputPath) throws IOException {
@@ -286,34 +538,71 @@ public class BackupService {
         return "\"" + safe.replace("\"", "\"\"") + "\"";
     }
 
-    private String json(String value) {
-        String safe = value == null ? "" : value;
-        return safe.replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\r", "\\r")
-            .replace("\n", "\\n");
+    @FunctionalInterface
+    private interface RowRestorer {
+        void restore(JsonNode row) throws SQLException, JsonProcessingException;
     }
 
-    private String unescapeJson(String value) {
-        StringBuilder builder = new StringBuilder();
-        boolean escaped = false;
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (escaped) {
-                builder.append(switch (c) {
-                    case 'n' -> '\n';
-                    case 'r' -> '\r';
-                    case '"' -> '"';
-                    case '\\' -> '\\';
-                    default -> c;
-                });
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else {
-                builder.append(c);
+    /** A review log is the same review when word, time and rating all match. */
+    private record LogKey(long wordId, LocalDateTime reviewedAt, ReviewRating rating) {
+    }
+
+    /** The review-schedule columns of a card. */
+    private record Schedule(
+        LocalDateTime lastReviewedAt,
+        LocalDateTime nextReviewAt,
+        double easinessFactor,
+        int intervalDays,
+        int repetitions,
+        int consecutiveCorrect,
+        int lapses
+    ) {
+        static Schedule newCard(LocalDateTime now) {
+            return new Schedule(null, now, WordCard.DEFAULT_EASINESS, 0, 0, 0, 0);
+        }
+
+        static Schedule of(WordCard word) {
+            return new Schedule(word.getLastReviewedAt(), word.getNextReviewAt(), word.getEasinessFactor(),
+                word.getIntervalDays(), word.getRepetitions(), word.getConsecutiveCorrect(), word.getLapses());
+        }
+
+        void applyTo(WordCard word) {
+            word.setLastReviewedAt(lastReviewedAt);
+            word.setNextReviewAt(nextReviewAt);
+            word.setEasinessFactor(easinessFactor);
+            word.setIntervalDays(intervalDays);
+            word.setRepetitions(repetitions);
+            word.setConsecutiveCorrect(consecutiveCorrect);
+            word.setLapses(lapses);
+        }
+    }
+
+    private static final class RestoreTally {
+        private final int formatVersion;
+        private int wordsInserted;
+        private int wordsUpdated;
+        private int wordsSkipped;
+        private int logsInserted;
+        private int duplicateLogsSkipped;
+        private int dailyGoalsRestored;
+        private int achievementsRestored;
+        private final List<String> invalidRows = new ArrayList<>();
+        private Exception firstFailure;
+
+        private RestoreTally(int formatVersion) {
+            this.formatVersion = formatVersion;
+        }
+
+        private void invalid(String row, Exception failure) {
+            invalidRows.add(row);
+            if (firstFailure == null) {
+                firstFailure = failure;
             }
         }
-        return builder.toString();
+
+        private BackupRestoreResult toResult() {
+            return new BackupRestoreResult(formatVersion, wordsInserted, wordsUpdated, wordsSkipped, logsInserted,
+                duplicateLogsSkipped, dailyGoalsRestored, achievementsRestored, invalidRows);
+        }
     }
 }

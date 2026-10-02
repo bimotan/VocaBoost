@@ -4,10 +4,12 @@ import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.domain.WordCard;
+import com.vocabtrainer.repository.AchievementRepository;
 import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.DictionaryCacheRepository;
+import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.WordRepository;
 import org.junit.jupiter.api.Test;
@@ -132,8 +134,9 @@ class SwallowedErrorLoggingTest {
         databaseManager.initialize();
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
-        BackupService backupService = new BackupService(wordRepository, new ReviewLogRepository(databaseManager),
-            databaseManager, new WordValidationService());
+        BackupService backupService = new BackupService(new DeckRepository(databaseManager), wordRepository,
+            new ReviewLogRepository(databaseManager), new GoalRepository(databaseManager),
+            new AchievementRepository(databaseManager), databaseManager, new WordValidationService());
         Path backup = tempDir.resolve("backup.json");
         Files.writeString(backup, """
             {
@@ -149,17 +152,19 @@ class SwallowedErrorLoggingTest {
             }
             """, StandardCharsets.UTF_8);
 
-        ImportResult result;
+        BackupRestoreResult result;
         List<LogRecord> warnings;
         try (LogCapture log = LogCapture.of(BackupService.class)) {
             result = backupService.importJsonBackup(backup, deck.getId());
             warnings = log.warnings();
         }
 
-        assertEquals(1, result.importedCount());
-        assertTrue(result.messages().contains("Review logs imported: 1"));
+        assertEquals(1, result.wordsInserted());
+        assertEquals(1, result.logsInserted());
+        assertEquals(2, result.invalidRows().size());
         assertEquals(1, warnings.size());
-        assertTrue(warnings.get(0).getMessage().contains("Skipped 2 review log(s)"));
+        assertTrue(warnings.get(0).getMessage().contains("Skipped 2 invalid row(s)"));
+        assertTrue(warnings.get(0).getMessage().contains("unknown rating \"BOGUS\""));
         assertInstanceOf(IllegalArgumentException.class, warnings.get(0).getThrown());
     }
 

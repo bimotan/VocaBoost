@@ -78,7 +78,8 @@ public class VocabTrainerApp extends Application {
             );
             StatsService statsService = new StatsService(wordRepository, reviewLogRepository, databaseManager);
             DictionaryService dictionaryService = DictionaryServiceFactory.create(dictionaryCacheRepository, settingsService);
-            BackupService backupService = new BackupService(wordRepository, reviewLogRepository, databaseManager, validationService);
+            BackupService backupService = new BackupService(deckRepository, wordRepository, reviewLogRepository,
+                goalRepository, achievementRepository, databaseManager, validationService);
             AiService aiService = AiServiceFactory.create(aiCacheRepository, settingsService);
 
             MainWindow mainWindow = new MainWindow(

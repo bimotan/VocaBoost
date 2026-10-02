@@ -10,6 +10,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 public class ReviewLogRepository {
     private final DatabaseManager databaseManager;
@@ -40,6 +42,37 @@ public class ReviewLogRepository {
             }
         }
         return log;
+    }
+
+    /** Every review log of the deck's words, archived words included, oldest first. */
+    public List<ReviewLog> findByDeck(long deckId) throws SQLException {
+        String sql = """
+            SELECT l.*
+            FROM review_logs l
+            JOIN words w ON w.id = l.word_id
+            WHERE w.deck_id = ?
+            ORDER BY l.reviewed_at, l.id
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            try (ResultSet rs = statement.executeQuery()) {
+                List<ReviewLog> logs = new ArrayList<>();
+                while (rs.next()) {
+                    logs.add(new ReviewLog(
+                        rs.getLong("id"),
+                        rs.getLong("word_id"),
+                        DateTimeUtil.fromDatabase(rs.getString("reviewed_at")),
+                        rs.getString("user_answer"),
+                        rs.getString("correct_answer"),
+                        rs.getDouble("similarity"),
+                        ReviewRating.valueOf(rs.getString("rating")),
+                        rs.getLong("elapsed_millis")
+                    ));
+                }
+                return logs;
+            }
+        }
     }
 
     /** Every review log in every deck. */
