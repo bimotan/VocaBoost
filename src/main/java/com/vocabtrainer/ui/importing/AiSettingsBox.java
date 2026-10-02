@@ -83,7 +83,7 @@ final class AiSettingsBox {
 
         Button testButton = new Button("Test AI Explanation");
         testButton.setId("testAiButton");
-        testButton.setOnAction(event -> testProvider());
+        testButton.setOnAction(event -> testProvider(testButton));
 
         GridPane form = new GridPane();
         form.setHgap(10);
@@ -108,7 +108,7 @@ final class AiSettingsBox {
         return root;
     }
 
-    private void testProvider() {
+    private void testProvider(Button testButton) {
         // Ask the saved provider directly: no cache, so a fixed key or model shows up at once,
         // and no mock fallback, so a failure shows the provider's error instead of mock text.
         Optional<AiService> provider;
@@ -132,7 +132,8 @@ final class AiSettingsBox {
             text -> statusLabel.setText("AI test succeeded. Provider response:" + System.lineSeparator() + text),
             error -> statusLabel.setText("AI test failed: " + UiErrors.rootMessage(error)),
             statusLabel,
-            "Testing AI explanation..."
+            "Testing AI explanation...",
+            testButton
         );
     }
 

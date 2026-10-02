@@ -147,6 +147,15 @@ public class ReviewService {
         }
     }
 
+    /** Whether the word still exists and is not archived; false once it was deleted from the Word List. */
+    public boolean isReviewable(long wordId) {
+        try {
+            return wordRepository.findById(wordId).filter(word -> !word.isArchived()).isPresent();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot read word " + wordId, e);
+        }
+    }
+
     public boolean hasPendingAnswer(long wordId) {
         return pendingAnswers.containsKey(wordId);
     }

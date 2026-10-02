@@ -64,8 +64,9 @@ final class DictionaryLookupBox {
                 onChosen.accept(entry);
             }
         });
-        lookupButton.setOnAction(event -> runLookup(lookupField, lookupButton, lookupStatus, results, false));
-        refreshLookupButton.setOnAction(event -> runLookup(lookupField, refreshLookupButton, lookupStatus, results, true));
+        Button[] lookupButtons = {lookupButton, refreshLookupButton};
+        lookupButton.setOnAction(event -> runLookup(lookupField, lookupButtons, lookupStatus, results, false));
+        refreshLookupButton.setOnAction(event -> runLookup(lookupField, lookupButtons, lookupStatus, results, true));
         HBox controls = new HBox(10, lookupField, lookupButton, refreshLookupButton);
         HBox.setHgrow(lookupField, Priority.ALWAYS);
         root = new VBox(10, Widgets.sectionTitle("Dictionary Lookup"), controls, results, lookupStatus);
@@ -75,11 +76,11 @@ final class DictionaryLookupBox {
         return root;
     }
 
-    private void runLookup(TextField lookupField, Button actionButton, Label lookupStatus,
+    /** Looks up the word; both lookup buttons are disabled until it is done, so results cannot overtake each other. */
+    private void runLookup(TextField lookupField, Button[] lookupButtons, Label lookupStatus,
                            ListView<DictionaryEntry> results, boolean refresh) {
         try {
             String english = validationService.validateEnglishOnly(lookupField.getText());
-            actionButton.setDisable(true);
             DictionaryService dictionary = configured.dictionary();
             context.async().run(
                 () -> refresh ? dictionary.refresh(english) : dictionary.lookup(english),
@@ -91,14 +92,11 @@ final class DictionaryLookupBox {
                     if (!result.entries().isEmpty()) {
                         results.getSelectionModel().selectFirst();
                     }
-                    actionButton.setDisable(false);
                 },
-                error -> {
-                    lookupStatus.setText("查词失败：" + UiErrors.rootMessage(error));
-                    actionButton.setDisable(false);
-                },
+                error -> lookupStatus.setText("查词失败：" + UiErrors.rootMessage(error)),
                 lookupStatus,
-                refresh ? "Refreshing dictionary cache..." : "Looking up..."
+                refresh ? "Refreshing dictionary cache..." : "Looking up...",
+                lookupButtons
             );
         } catch (IllegalArgumentException e) {
             lookupStatus.setText(e.getMessage());

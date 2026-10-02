@@ -258,6 +258,56 @@ class ReviewSessionPresenterTest {
     }
 
     @Test
+    void changedWordsKeepTheCardOnScreenWithItsAnswer() throws SQLException {
+        presenter.showDeck(deckId);
+        WordCard card = presenter.card().orElseThrow();
+        long cardNumber = presenter.cardNumber();
+        presenter.setAnswer("半个答案");
+
+        services.wordRepository().insert(WordCard.createNew(deckId, "petrichor", "雨后泥土的气味"));
+        presenter.wordsChanged();
+
+        assertEquals(cardNumber, presenter.cardNumber());
+        assertEquals(card.getId(), presenter.card().orElseThrow().getId());
+        assertEquals("半个答案", presenter.answer());
+
+        presenter.submit();
+        String result = presenter.result();
+        presenter.wordsChanged();
+        assertEquals(State.ANSWERED, presenter.state());
+        assertEquals(result, presenter.result());
+    }
+
+    @Test
+    void aDeletedCardIsReplacedByTheNextOne() throws SQLException {
+        presenter.showDeck(deckId);
+        WordCard card = presenter.card().orElseThrow();
+        presenter.setAnswer("半个答案");
+        presenter.submit();
+
+        services.wordRepository().deleteById(card.getId());
+        presenter.wordsChanged();
+
+        assertEquals(State.AWAITING_ANSWER, presenter.state());
+        assertNotEquals(card.getId(), presenter.card().orElseThrow().getId());
+        assertEquals("", presenter.answer());
+        assertEquals("", presenter.result());
+    }
+
+    @Test
+    void newWordsEndAnEmptySession() throws SQLException {
+        Deck deck = services.deckService().createDeck("Later");
+        presenter.showDeck(deck.getId());
+        assertEquals(State.COMPLETE, presenter.state());
+
+        services.wordRepository().insert(WordCard.createNew(deck.getId(), "petrichor", "雨后泥土的气味"));
+        presenter.wordsChanged();
+
+        assertEquals(State.AWAITING_ANSWER, presenter.state());
+        assertEquals("petrichor", presenter.question());
+    }
+
+    @Test
     void reachingTheSessionTargetCompletesTheSession() {
         presenter.showDeck(deckId);
         presenter.startSession("Custom", " 1 ");

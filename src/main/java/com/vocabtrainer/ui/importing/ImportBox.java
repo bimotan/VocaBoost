@@ -33,6 +33,10 @@ final class ImportBox {
     private final AchievementService achievementService;
     private final TextField importPathField = new TextField();
     private final Label importStatus = new Label();
+    private final Button importLegacyButton = new Button("Import legacy txt");
+    private final Button importCsvButton = new Button("Import GRE CSV");
+    private final Button previewCsvButton = new Button("Preview GRE CSV");
+    private final Button importStarterButton = new Button("Import GRE starter deck");
     private final VBox root;
 
     ImportBox(ViewContext context, ImportExportService importExportService, GoalService goalService,
@@ -54,13 +58,9 @@ final class ImportBox {
             context.dialogs().chooseOpenFile(context.window().get(), "Choose import file", filters)
                 .ifPresent(file -> importPathField.setText(file.toString()));
         });
-        Button importLegacyButton = new Button("Import legacy txt");
         importLegacyButton.setId("importLegacyButton");
-        Button importCsvButton = new Button("Import GRE CSV");
         importCsvButton.setId("importCsvButton");
-        Button previewCsvButton = new Button("Preview GRE CSV");
         previewCsvButton.setId("previewCsvButton");
-        Button importStarterButton = new Button("Import GRE starter deck");
         importStarterButton.setId("importStarterButton");
         importStatus.setId("importStatusLabel");
         importStatus.setWrapText(true);
@@ -69,14 +69,14 @@ final class ImportBox {
         importCsvButton.setOnAction(event -> importFromPath(false));
         previewCsvButton.setOnAction(event -> previewGreCsv());
         importStarterButton.setOnAction(event -> {
-            long deckId = context.decks().currentId();
+            Deck deck = context.decks().current();
             context.async().run(
-                () -> importExportService.importBundledGreStarter(deckId),
-                this::afterImport,
+                () -> importExportService.importBundledGreStarter(deck.getId()),
+                result -> afterImport(result, deck),
                 error -> context.errors().showError("Import failed", UiErrors.rootMessage(error)),
                 importStatus,
                 "Importing GRE starter deck...",
-                importStarterButton
+                importButtons()
             );
         });
 
@@ -91,6 +91,11 @@ final class ImportBox {
         return root;
     }
 
+    /** Disabled while an import or preview runs, so the same file cannot be imported twice at once. */
+    private Node[] importButtons() {
+        return new Node[] {importLegacyButton, importCsvButton, previewCsvButton, importStarterButton};
+    }
+
     private void importFromPath(boolean legacy) {
         if (importPathField.getText().isBlank()) {
             importStatus.setText("Please choose an import file first.");
@@ -98,15 +103,18 @@ final class ImportBox {
         }
         try {
             Path path = Path.of(importPathField.getText().trim());
-            long deckId = context.decks().currentId();
+            // The import finishes later: it belongs to the deck that is current now, even if the
+            // user switches deck before it is done.
+            Deck deck = context.decks().current();
             context.async().run(
                 () -> legacy
-                    ? importExportService.importLegacyTxt(path, deckId)
-                    : importExportService.importGreCsv(path, deckId),
-                this::afterImport,
+                    ? importExportService.importLegacyTxt(path, deck.getId())
+                    : importExportService.importGreCsv(path, deck.getId()),
+                result -> afterImport(result, deck),
                 error -> context.errors().showError("Import failed", UiErrors.rootMessage(error)),
                 importStatus,
-                "Importing..."
+                "Importing...",
+                importButtons()
             );
         } catch (RuntimeException e) {
             context.errors().reportFailure("Import failed", e);
@@ -120,22 +128,22 @@ final class ImportBox {
         }
         try {
             Path path = Path.of(importPathField.getText().trim());
-            long deckId = context.decks().currentId();
+            Deck deck = context.decks().current();
             context.async().run(
-                () -> importExportService.previewGreCsv(path, deckId),
-                preview -> importStatus.setText("Deck: " + context.decks().current().getName()
-                    + System.lineSeparator() + preview.toSummary()),
+                () -> importExportService.previewGreCsv(path, deck.getId()),
+                preview -> importStatus.setText("Deck: " + deck.getName() + System.lineSeparator() + preview.toSummary()),
                 error -> context.errors().showError("Preview failed", UiErrors.rootMessage(error)),
                 importStatus,
-                "Analyzing CSV..."
+                "Analyzing CSV...",
+                importButtons()
             );
         } catch (RuntimeException e) {
             context.errors().reportFailure("Preview failed", e);
         }
     }
 
-    private void afterImport(ImportResult result) {
-        Deck deck = context.decks().current();
+    /** Credits the new words to {@code deck}, the deck the words went into, whichever deck is current now. */
+    private void afterImport(ImportResult result, Deck deck) {
         // The import itself has finished; show its summary even if the progress update below fails.
         String summary = "Deck: " + deck.getName() + System.lineSeparator() + result.toSummary();
         importStatus.setText(summary);

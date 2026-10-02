@@ -228,8 +228,16 @@ public final class ReviewSessionPresenter {
         }
     }
 
-    /** Words were added, edited, deleted or imported. */
+    /**
+     * Words were added, edited, deleted, imported or restored, possibly in another deck. A card the
+     * user is looking at stays, with whatever was typed or submitted for it, unless it was deleted;
+     * without a card (nothing was due) the next card is looked for again.
+     */
     public void wordsChanged() {
+        boolean cardGone = card != null && !reviewService.isReviewable(card.getId());
+        if (!cardGone && state != State.IDLE && state != State.COMPLETE) {
+            return;
+        }
         try {
             loadNextCard();
         } finally {

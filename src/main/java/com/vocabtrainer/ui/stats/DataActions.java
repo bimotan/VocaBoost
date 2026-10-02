@@ -20,7 +20,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -91,30 +91,30 @@ final class DataActions {
     }
 
     private void exportWordsCsv() {
-        exportFile("Export words CSV", "vocaboost-words.csv", "CSV", "*.csv",
-            path -> backupService.exportWordsCsv(context.decks().currentId(), path));
+        exportFile("Export words CSV", "vocaboost-words.csv", "CSV", "*.csv", backupService::exportWordsCsv);
     }
 
     private void exportReviewLogsCsv() {
         exportFile("Export review logs CSV", "vocaboost-review-logs.csv", "CSV", "*.csv",
-            path -> backupService.exportReviewLogsCsv(context.decks().currentId(), path));
+            backupService::exportReviewLogsCsv);
     }
 
     private void exportJsonBackup() {
-        exportFile("Export JSON backup", "vocaboost-backup.json", "JSON", "*.json",
-            path -> backupService.exportJsonBackup(context.decks().currentId(), path));
+        exportFile("Export JSON backup", "vocaboost-backup.json", "JSON", "*.json", backupService::exportJsonBackup);
     }
 
+    /** Exports the deck that is current when the user picks the file; the export runs in the background. */
     private void exportFile(String title, String fileName, String extensionName, String extension,
-                            Function<Path, Path> exporter) {
+                            BiFunction<Long, Path, Path> exporter) {
         Optional<Path> file = context.dialogs().chooseSaveFile(context.window().get(), title, fileName,
             List.of(new FileChooser.ExtensionFilter(extensionName, extension)));
         if (file.isEmpty()) {
             return;
         }
+        long deckId = context.decks().currentId();
         Path output = file.get();
         context.async().run(
-            () -> exporter.apply(output),
+            () -> exporter.apply(deckId, output),
             exported -> context.errors().showInfo("Exported: " + exported.toAbsolutePath()),
             error -> context.errors().showError("Export failed", UiErrors.rootMessage(error)),
             status,

@@ -85,6 +85,7 @@ public record AppServices(
      */
     public static final class Builder {
         private final Path databasePath;
+        private Function<DatabaseManager, WordRepository> wordRepositoryFactory = WordRepository::new;
         private Function<DatabaseManager, ReviewLogRepository> reviewLogRepositoryFactory = ReviewLogRepository::new;
         private BiFunction<DictionaryCacheRepository, SettingsService, DictionaryService> dictionaryServiceFactory =
             DictionaryServiceFactory::create;
@@ -92,6 +93,11 @@ public record AppServices(
 
         private Builder(Path databasePath) {
             this.databasePath = Objects.requireNonNull(databasePath, "databasePath");
+        }
+
+        public Builder wordRepository(Function<DatabaseManager, WordRepository> factory) {
+            this.wordRepositoryFactory = Objects.requireNonNull(factory);
+            return this;
         }
 
         public Builder reviewLogRepository(Function<DatabaseManager, ReviewLogRepository> factory) {
@@ -118,7 +124,7 @@ public record AppServices(
             databaseManager.initialize();
 
             DeckRepository deckRepository = new DeckRepository(databaseManager);
-            WordRepository wordRepository = new WordRepository(databaseManager);
+            WordRepository wordRepository = wordRepositoryFactory.apply(databaseManager);
             ReviewLogRepository reviewLogRepository = reviewLogRepositoryFactory.apply(databaseManager);
             GoalRepository goalRepository = new GoalRepository(databaseManager);
             AchievementRepository achievementRepository = new AchievementRepository(databaseManager);
