@@ -45,7 +45,8 @@ public class MainWindow {
             services.clock());
         AddImportView addImport = new AddImportView(context, services.wordRepository(), services.validationService(),
             services.goalService(), services.achievementService(), services.importExportService(),
-            services.settingsService(), configured);
+            services.settingsService(), services.aiCacheRepository(), services.ecdictImportService(),
+            services.localDictionary(), configured);
         StatisticsView statistics = new StatisticsView(context, services.statsService(), services.goalService(),
             services.backupService(), databasePath);
         WordListView wordList = new WordListView(context, services.wordRepository(), services.validationService(),

@@ -4,7 +4,10 @@ import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DictionaryCacheRepository;
+import com.vocabtrainer.repository.EcdictRepository;
 import com.vocabtrainer.repository.TestDatabases;
+import com.vocabtrainer.service.ecdict.EcdictFixtures;
+import com.vocabtrainer.service.ecdict.EcdictImportService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
@@ -92,14 +95,94 @@ class DictionaryServiceTest {
         Path csv = tempDir.resolve("ecdict.csv");
         Files.writeString(csv, String.join(System.lineSeparator(),
             "word,phonetic,definition,translation,pos,tag",
-            "lucid,ˈluːsɪd,clear,清晰的,adjective,zk"
+            "lucidx,ˈluːsɪd,clear,清晰的,adjective,zk"
         ), StandardCharsets.UTF_8);
+        try (EcdictRepository ecdict = new EcdictRepository(tempDir.resolve("ecdict.db"))) {
+            new EcdictImportService(ecdict).importCsv(csv, progress -> { }, () -> false);
 
-        DictionaryLookupResult result = new LocalDictionaryService(csv.toString()).lookup("lucid");
+            DictionaryLookupResult result = new LocalDictionaryService(ecdict).lookup("lucidx");
 
-        assertTrue(result.success());
-        assertEquals("清晰的", result.entries().get(0).chinese());
-        assertEquals("ˈluːsɪd", result.entries().get(0).phonetic());
+            assertTrue(result.success());
+            assertEquals("清晰的", result.entries().get(0).chinese());
+            assertEquals("ˈluːsɪd", result.entries().get(0).phonetic());
+            assertEquals("clear", result.entries().get(0).definition());
+        }
+    }
+
+    @Test
+    void theImportedDictionaryAnswersBeforeTheCacheSoAStaleRawEntryCannotWin() throws Exception {
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("vocab.db"));
+        DictionaryCacheRepository cache = new DictionaryCacheRepository(databaseManager);
+        // What earlier versions cached for ECDICT words: the raw translation.
+        cache.save("abandon", String.join("\t", b64("abandon"), b64("vt. 放弃, 抛弃\\nn. 放任"), b64(""), b64(""), b64(""),
+            b64("ECDICT/local CSV"), b64("")), "dictionary", LocalDateTime.now());
+        Path csv = EcdictFixtures.write(tempDir.resolve("ecdict.csv"), false, List.of(EcdictFixtures.ABANDON));
+        try (EcdictRepository ecdict = new EcdictRepository(tempDir.resolve("ecdict.db"))) {
+            new EcdictImportService(ecdict).importCsv(csv, progress -> { }, () -> false);
+            DictionaryService service = DictionaryServiceFactory.create(cache, new LocalDictionaryService(ecdict));
+
+            DictionaryLookupResult result = service.lookup("abandon");
+
+            assertEquals("Loaded from local dictionary.", result.message());
+            assertEquals("放弃; 抛弃; 遗弃; 使屈从; 沉溺; 放纵; 放任; 无拘束; 狂热", result.entries().get(0).chinese());
+            assertEquals(result, service.refresh("abandon"));
+        }
+    }
+
+    @Test
+    void aRawEntryAnEarlierVersionCachedFromEcdictIsNotServedWhileNothingIsImported() throws Exception {
+        // During the first import after an upgrade, or after the ECDICT path was cleared.
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("leftover.db"));
+        DictionaryCacheRepository cache = new DictionaryCacheRepository(databaseManager);
+        cache.save("abandon", String.join("\t", b64("abandon"), b64("vt. 放弃, 抛弃\\nn. 放任"), b64(""), b64(""), b64(""),
+            b64("ECDICT/local CSV"), b64("")), "dictionary", LocalDateTime.now());
+        DictionaryService online = new DictionaryService() {
+            @Override
+            public DictionaryLookupResult lookup(String english) {
+                return DictionaryLookupResult.success("online", List.of(new DictionaryEntry(
+                    english, "在线释义", "", "", "", "test")));
+            }
+
+            @Override
+            public boolean isConfigured() {
+                return true;
+            }
+        };
+        try (EcdictRepository ecdict = new EcdictRepository(tempDir.resolve("not-imported.db"))) {
+            DictionaryService service = new CompositeDictionaryService(List.of(new LocalDictionaryService(ecdict),
+                new CachingDictionaryService(online, cache)));
+
+            DictionaryLookupResult result = service.lookup("abandon");
+
+            assertEquals("online", result.message());
+            assertEquals("在线释义", result.entries().get(0).chinese());
+            assertEquals("Loaded from dictionary cache.", service.lookup("abandon").message());
+            assertEquals("在线释义", service.lookup("abandon").entries().get(0).chinese());
+        }
+    }
+
+    @Test
+    void compositeRefreshAsksEachDictionaryToRefresh() throws Exception {
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("composite.db"));
+        AtomicInteger calls = new AtomicInteger();
+        DictionaryService online = new DictionaryService() {
+            @Override
+            public DictionaryLookupResult lookup(String english) {
+                return DictionaryLookupResult.success("ok", List.of(new DictionaryEntry(
+                    english, "释义" + calls.incrementAndGet(), "", "", "", "test")));
+            }
+
+            @Override
+            public boolean isConfigured() {
+                return true;
+            }
+        };
+        DictionaryService service = new CompositeDictionaryService(List.of(new LocalDictionaryService(),
+            new CachingDictionaryService(online, new DictionaryCacheRepository(databaseManager))));
+
+        assertEquals("释义1", service.lookup("petrichor").entries().get(0).chinese());
+        assertEquals("释义1", service.lookup("petrichor").entries().get(0).chinese());
+        assertEquals("释义2", service.refresh("petrichor").entries().get(0).chinese());
     }
 
     @Test

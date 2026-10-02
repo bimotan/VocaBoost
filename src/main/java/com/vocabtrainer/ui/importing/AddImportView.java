@@ -1,11 +1,14 @@
 package com.vocabtrainer.ui.importing;
 
+import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.AchievementService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ImportExportService;
+import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.SettingsService;
 import com.vocabtrainer.service.WordValidationService;
+import com.vocabtrainer.service.ecdict.EcdictImportService;
 import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
@@ -21,11 +24,12 @@ public final class AddImportView {
     public AddImportView(ViewContext context, WordRepository wordRepository, WordValidationService validationService,
                          GoalService goalService, AchievementService achievementService,
                          ImportExportService importExportService, SettingsService settingsService,
+                         AiCacheRepository aiCacheRepository, EcdictImportService ecdictImportService, LocalDictionaryService localDictionary,
                          ConfiguredServices configured) {
         AddWordBox addWord = new AddWordBox(context, wordRepository, validationService, goalService,
             achievementService, configured);
-        EcdictSettingsBox ecdict = new EcdictSettingsBox(context, settingsService, configured);
-        AiSettingsBox ai = new AiSettingsBox(context, settingsService, configured);
+        EcdictSettingsBox ecdict = new EcdictSettingsBox(context, settingsService, ecdictImportService, localDictionary);
+        AiSettingsBox ai = new AiSettingsBox(context, settingsService, aiCacheRepository, configured);
         ImportBox imports = new ImportBox(context, importExportService, goalService, achievementService);
 
         VBox content = new VBox(24, addWord.root(), ecdict.root(), ai.root(), imports.root());

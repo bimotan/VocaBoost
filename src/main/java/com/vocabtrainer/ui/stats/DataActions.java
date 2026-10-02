@@ -6,6 +6,7 @@ import com.vocabtrainer.service.BackupService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.ui.DataChange;
+import com.vocabtrainer.ui.Folders;
 import com.vocabtrainer.ui.UiErrors;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.util.AppLogging;
@@ -15,19 +16,13 @@ import javafx.scene.control.ButtonType;
 import javafx.scene.control.Labeled;
 import javafx.stage.FileChooser;
 
-import java.awt.Desktop;
-import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.BiFunction;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /** Report and CSV exports, JSON backup export and restore, and opening the data and log folders. */
 final class DataActions {
-    private static final Logger LOGGER = Logger.getLogger(DataActions.class.getName());
-
     private final ViewContext context;
     private final StatsService statsService;
     private final GoalService goalService;
@@ -180,19 +175,6 @@ final class DataActions {
     }
 
     private void openFolder(String name, Path folder) {
-        if (folder == null) {
-            context.errors().showInfo(name + " is unavailable.");
-            return;
-        }
-        try {
-            if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
-                context.errors().showInfo(name + ": " + folder);
-                return;
-            }
-            Desktop.getDesktop().open(folder.toFile());
-        } catch (IOException | RuntimeException e) {
-            LOGGER.log(Level.WARNING, "Cannot open " + folder, e);
-            context.errors().showError("Open folder failed", UiErrors.rootMessage(e) + System.lineSeparator() + name + ": " + folder);
-        }
+        Folders.open(context.errors(), name, folder);
     }
 }

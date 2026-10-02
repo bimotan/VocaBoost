@@ -44,6 +44,43 @@ public final class UiAsync implements TaskRunner {
      */
     public <T> void run(Callable<T> work, Consumer<T> onSuccess, Consumer<Throwable> onFailure,
                         Labeled status, String runningMessage, Node... triggers) {
+        launch(work, onSuccess, onFailure, status, runningMessage, triggers);
+    }
+
+    /**
+     * Like {@link #run(Callable, Consumer, Consumer)}, for work that a newer request can make
+     * pointless, such as a lookup of a word the user has since changed. Cancelling (on the JavaFX
+     * thread) interrupts the work's thread, and neither callback runs afterwards, even when the
+     * work had already finished.
+     */
+    public <T> Cancellable start(Callable<T> work, Consumer<T> onSuccess, Consumer<Throwable> onFailure) {
+        boolean[] cancelled = {false};
+        Task<T> task = launch(work,
+            value -> {
+                if (!cancelled[0]) {
+                    onSuccess.accept(value);
+                }
+            },
+            error -> {
+                if (!cancelled[0]) {
+                    onFailure.accept(error);
+                }
+            },
+            null, null);
+        return () -> {
+            cancelled[0] = true;
+            task.cancel(true);
+        };
+    }
+
+    /** Background work started by {@link #start}. */
+    public interface Cancellable {
+        /** Interrupts the work and drops its result; does nothing once the result was delivered. */
+        void cancel();
+    }
+
+    private <T> Task<T> launch(Callable<T> work, Consumer<T> onSuccess, Consumer<Throwable> onFailure,
+                               Labeled status, String runningMessage, Node... triggers) {
         boolean showsProgress = status != null && runningMessage != null;
         String previousStatus = showsProgress ? status.getText() : null;
         if (showsProgress) {
@@ -78,9 +115,16 @@ public final class UiAsync implements TaskRunner {
             disabled.forEach(trigger -> trigger.setDisable(false));
             handleFailure(task.getException(), onFailure, status, runningMessage);
         });
+        task.setOnCancelled(event -> {
+            disabled.forEach(trigger -> trigger.setDisable(false));
+            if (showsProgress && runningMessage.equals(status.getText())) {
+                status.setText(previousStatus);
+            }
+        });
         Thread thread = new Thread(task, THREAD_NAME);
         thread.setDaemon(true);
         thread.start();
+        return task;
     }
 
     private void handleFailure(Throwable error, Consumer<Throwable> onFailure, Labeled status, String runningMessage) {

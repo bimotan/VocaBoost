@@ -2,6 +2,7 @@ package com.vocabtrainer.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.DatabaseManager;
@@ -31,6 +32,7 @@ import java.util.function.BiFunction;
 import java.util.logging.LogRecord;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -105,6 +107,47 @@ class AiServiceFactoryTest {
 
         AiServiceFactory.create(cacheRepository, config("/other/chat/completions", "model-a")).explain(word);
         assertEquals(3, requests.get(), "another endpoint must not reuse the cached explanation");
+    }
+
+    @Test
+    void regenerateAsksTheProviderAgainAndCachesTheNewExplanation() throws Exception {
+        startServer((request, body) -> completion("explanation " + request));
+        AiService service = AiServiceFactory.create(cacheRepository, config("/v1", "model-a"));
+        ExplanationRequest request = new ExplanationRequest(WordCard.createNew(1, "lucid", "清晰的"), "清楚",
+            ReviewMode.EN_TO_ZH);
+
+        assertEquals("explanation 1", service.explain(request));
+        assertEquals("explanation 1", service.explain(request));
+        assertEquals("explanation 2", service.regenerate(request));
+        assertEquals("explanation 2", service.explain(request));
+
+        assertEquals(2, requests.get());
+        assertEquals(List.of("explanation 2"), cachedResponses());
+    }
+
+    @Test
+    void theTemperatureIsSentOnlyWhenAValidOneIsConfigured() throws Exception {
+        List<String> bodies = new ArrayList<>();
+        startServer((request, body) -> {
+            bodies.add(body);
+            return completion("ok");
+        });
+        WordCard word = WordCard.createNew(1, "lucid", "清晰的");
+        Map<String, String> withTemperature = new java.util.HashMap<>(config("/v1", "model-a"));
+        withTemperature.put("VOCABOOST_AI_TEMPERATURE", "0.3");
+        Map<String, String> invalid = new java.util.HashMap<>(config("/v1", "model-a"));
+        invalid.put("VOCABOOST_AI_TEMPERATURE", "warm");
+
+        AiServiceFactory.createUncachedProvider(null, withTemperature).orElseThrow().explain(word);
+        List<LogRecord> warnings;
+        try (LogCapture log = LogCapture.of(AiServiceFactory.class)) {
+            AiServiceFactory.createUncachedProvider(null, invalid).orElseThrow().explain(word);
+            warnings = log.warnings();
+        }
+
+        assertEquals(0.3, JSON.readTree(bodies.get(0)).path("temperature").asDouble());
+        assertFalse(JSON.readTree(bodies.get(1)).has("temperature"), bodies.get(1));
+        assertEquals(1, warnings.size());
     }
 
     @Test

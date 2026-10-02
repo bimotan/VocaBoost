@@ -6,6 +6,7 @@ import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.DictionaryCacheRepository;
+import com.vocabtrainer.repository.EcdictRepository;
 import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.SettingsRepository;
@@ -21,6 +22,7 @@ import com.vocabtrainer.service.DictionaryServiceFactory;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.GoalSettings;
 import com.vocabtrainer.service.ImportExportService;
+import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.ReviewScheduler;
 import com.vocabtrainer.service.ReviewService;
 import com.vocabtrainer.service.ReviewSettings;
@@ -29,6 +31,7 @@ import com.vocabtrainer.service.SimilarityService;
 import com.vocabtrainer.service.StarterImportService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.service.WordValidationService;
+import com.vocabtrainer.service.ecdict.EcdictImportService;
 import com.vocabtrainer.ui.Dialogs;
 import com.vocabtrainer.ui.MainWindow;
 
@@ -46,8 +49,10 @@ import java.util.function.Supplier;
  * {@link VocabTrainerApp} and the UI tests both build the app through {@link #builder(Path)}, so
  * the tests exercise the same wiring as the real app.
  *
- * @param dictionaryServices builds the dictionary service from the saved settings; called again
- *                           when the dictionary settings change
+ * @param ecdictRepository   the imported ECDICT dictionary, in its own file next to the database
+ * @param localDictionary    the offline dictionaries (imported ECDICT, bundled starter words)
+ * @param dictionaryServices builds the dictionary service (offline dictionaries, then online ones,
+ *                           which are skipped while offline mode is on)
  * @param aiServices         builds the AI service from the saved settings; called again when the
  *                           AI settings change
  * @param startupDeck        the deck the main window opens on
@@ -73,6 +78,9 @@ public record AppServices(
     ReviewService reviewService,
     StatsService statsService,
     BackupService backupService,
+    EcdictRepository ecdictRepository,
+    EcdictImportService ecdictImportService,
+    LocalDictionaryService localDictionary,
     Supplier<DictionaryService> dictionaryServices,
     Supplier<AiService> aiServices,
     Deck startupDeck,
@@ -83,9 +91,10 @@ public record AppServices(
         return new Builder(databasePath);
     }
 
-    /** Closes the database so SQLite checkpoints the write-ahead log and releases the file. */
+    /** Closes the databases so SQLite checkpoints the write-ahead log and releases the files. */
     @Override
     public void close() {
+        ecdictRepository.close();
         databaseManager.close();
     }
 
@@ -102,8 +111,8 @@ public record AppServices(
         private final Path databasePath;
         private Function<DatabaseManager, WordRepository> wordRepositoryFactory = WordRepository::new;
         private Function<DatabaseManager, ReviewLogRepository> reviewLogRepositoryFactory = ReviewLogRepository::new;
-        private BiFunction<DictionaryCacheRepository, SettingsService, DictionaryService> dictionaryServiceFactory =
-            DictionaryServiceFactory::create;
+        /** Null for the app's chain, whose online dictionaries follow the saved offline mode. */
+        private BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> dictionaryServiceFactory;
         private BiFunction<AiCacheRepository, SettingsService, AiService> aiServiceFactory = AiServiceFactory::create;
         private Clock clock = Clock.systemDefaultZone();
 
@@ -121,7 +130,8 @@ public record AppServices(
             return this;
         }
 
-        public Builder dictionaryService(BiFunction<DictionaryCacheRepository, SettingsService, DictionaryService> factory) {
+        /** Replaces the dictionary chain; {@code factory} gets the lookup cache and the offline dictionaries. */
+        public Builder dictionaryService(BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> factory) {
             this.dictionaryServiceFactory = Objects.requireNonNull(factory);
             return this;
         }
@@ -186,8 +196,14 @@ public record AppServices(
                 reviewScheduler.studyDay(), reviewSettings);
             BackupService backupService = new BackupService(deckRepository, wordRepository, reviewLogRepository,
                 goalRepository, achievementRepository, databaseManager, validationService, clock, cardStates);
-            BiFunction<DictionaryCacheRepository, SettingsService, DictionaryService> dictionaryFactory =
-                dictionaryServiceFactory;
+            // Only opened by the first lookup; the ECDICT CSV itself is never read here.
+            EcdictRepository ecdictRepository = new EcdictRepository(databasePath.resolveSibling("ecdict.db"));
+            EcdictImportService ecdictImportService = new EcdictImportService(ecdictRepository);
+            LocalDictionaryService localDictionary = new LocalDictionaryService(ecdictRepository);
+            BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> dictionaryFactory =
+                dictionaryServiceFactory != null
+                    ? dictionaryServiceFactory
+                    : (cache, local) -> DictionaryServiceFactory.create(cache, local, settingsService::isOfflineMode);
             BiFunction<AiCacheRepository, SettingsService, AiService> aiFactory = aiServiceFactory;
 
             return new AppServices(
@@ -209,7 +225,10 @@ public record AppServices(
                 reviewService,
                 statsService,
                 backupService,
-                () -> dictionaryFactory.apply(dictionaryCacheRepository, settingsService),
+                ecdictRepository,
+                ecdictImportService,
+                localDictionary,
+                () -> dictionaryFactory.apply(dictionaryCacheRepository, localDictionary),
                 () -> aiFactory.apply(aiCacheRepository, settingsService),
                 startupDeck,
                 reviewScheduler,

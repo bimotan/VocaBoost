@@ -3,26 +3,47 @@ package com.vocabtrainer.service;
 import com.vocabtrainer.domain.ValidatedWord;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.WordRepository;
+import com.vocabtrainer.service.csv.CsvReader;
+import com.vocabtrainer.service.csv.CsvRecord;
+import com.vocabtrainer.service.csv.TextEncoding;
+import com.vocabtrainer.service.csv.WordColumn;
+import com.vocabtrainer.service.csv.WordColumns;
 import com.vocabtrainer.util.DateTimeUtil;
+import com.vocabtrainer.util.ErrorMessages;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
+/**
+ * Imports word lists into a deck: GRE CSV files (read with {@link CsvReader}, so UTF-8 or GBK, any
+ * of comma, tab or semicolon, columns found by header names), the bundled GRE starter words and the
+ * legacy console app's txt files.
+ */
 public class ImportExportService {
     private static final String GRE_STARTER_RESOURCE = "/data/gre_starter_sample.csv";
     private static final int MAX_GRE_IMPORT_WORDS = 2000;
+    /** Row messages beyond this many are only counted, so a large broken file cannot flood the UI. */
+    static final int MAX_LISTED_MESSAGES = 100;
+    /** The column order of a GRE CSV without a header row. */
+    private static final WordColumns GRE_COLUMNS_BY_POSITION = WordColumns.positional(
+        WordColumn.ENGLISH, WordColumn.CHINESE, WordColumn.POS, WordColumn.EXAMPLE, WordColumn.TAGS);
+    /** A line break in a meaning cell (Alt+Enter in Excel) separates two meanings. */
+    private static final Pattern LINE_BREAKS = Pattern.compile("\\s*\\R\\s*");
 
     private final WordRepository wordRepository;
     private final WordValidationService validationService;
@@ -37,141 +58,249 @@ public class ImportExportService {
     }
 
     public ImportResult importLegacyTxt(Path path, long deckId) {
-        try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-            return importLegacyTxt(reader, deckId);
+        try {
+            TextEncoding encoding = TextEncoding.detect(path);
+            try (BufferedReader reader = new BufferedReader(encoding.openReader(path))) {
+                return importLegacyTxt(reader, encoding, deckId);
+            }
         } catch (IOException e) {
-            throw new IllegalStateException("Cannot read import file: " + path, e);
+            throw new IllegalStateException(cannotRead("import file", path, e), e);
         }
     }
 
     public ImportResult importGreCsv(Path path, long deckId) {
-        try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+        try (CsvReader reader = CsvReader.open(path)) {
             return importGreCsv(reader, deckId);
         } catch (IOException e) {
-            throw new IllegalStateException("Cannot read GRE CSV file: " + path, e);
+            throw new IllegalStateException(cannotRead("GRE CSV file", path, e), e);
         }
     }
 
     public ImportPreview previewGreCsv(Path path, long deckId) {
-        try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-            GreCsvAnalysis analysis = analyzeGreCsv(reader, deckId, false);
+        try (CsvReader reader = CsvReader.open(path)) {
+            GreCsvAnalysis analysis = analyzeGreCsv(reader, deckId);
             return new ImportPreview(
                 analysis.totalRows,
                 analysis.words.size(),
                 analysis.duplicates,
                 analysis.skipped - analysis.duplicates,
-                analysis.messages.stream().limit(10).toList()
+                analysis.messages.stream().limit(10).toList(),
+                reader.encoding().map(TextEncoding::displayName).orElse("decoded text"),
+                reader.delimiterName(),
+                analysis.columns
             );
         } catch (IOException e) {
-            throw new IllegalStateException("Cannot read GRE CSV file: " + path, e);
+            throw new IllegalStateException(cannotRead("GRE CSV file", path, e), e);
         }
     }
 
     public ImportResult importBundledGreStarter(long deckId) {
-        var stream = ImportExportService.class.getResourceAsStream(GRE_STARTER_RESOURCE);
+        InputStream stream = ImportExportService.class.getResourceAsStream(GRE_STARTER_RESOURCE);
         if (stream == null) {
             throw new IllegalStateException("Bundled GRE starter deck is missing: " + GRE_STARTER_RESOURCE);
         }
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+        try (InputStream in = stream; CsvReader reader = CsvReader.open(in, StandardCharsets.UTF_8)) {
             return importGreCsv(reader, deckId);
         } catch (IOException e) {
-            throw new IllegalStateException("Cannot read bundled GRE starter deck", e);
+            throw new IllegalStateException("Cannot read bundled GRE starter deck: " + reason(e), e);
         }
     }
 
-    private ImportResult importLegacyTxt(BufferedReader reader, long deckId) throws IOException {
+    private ImportResult importLegacyTxt(BufferedReader reader, TextEncoding encoding, long deckId) throws IOException {
         int imported = 0;
         int skipped = 0;
-        List<String> messages = new ArrayList<>();
-        String line;
+        RowMessages messages = new RowMessages();
+        Set<String> known = existingEnglishKeys(deckId);
         int lineNumber = 0;
-        while ((line = reader.readLine()) != null) {
+        while (true) {
+            String line;
+            try {
+                line = reader.readLine();
+            } catch (CharacterCodingException e) {
+                throw new IOException("Line " + (lineNumber + 1) + ": " + encoding.undecodableMessage(), e);
+            }
+            if (line == null) {
+                break;
+            }
             lineNumber++;
+            if (lineNumber == 1 && line.startsWith("\uFEFF")) {
+                line = line.substring(1);
+            }
             if (line.isBlank()) {
                 continue;
             }
             try {
                 WordCard card = parseLegacyLine(line, deckId);
-                if (wordRepository.findByEnglish(deckId, card.getEnglish()).isPresent()) {
+                if (known.contains(key(card.getEnglish()))) {
                     skipped++;
                     messages.add("Line " + lineNumber + " skipped: duplicate word " + card.getEnglish());
                     continue;
                 }
                 wordRepository.insert(card);
+                known.add(key(card.getEnglish()));
                 imported++;
             } catch (IllegalArgumentException | SQLException e) {
                 skipped++;
                 messages.add("Line " + lineNumber + " skipped: " + e.getMessage());
             }
         }
-        return new ImportResult(imported, skipped, messages);
+        return new ImportResult(imported, skipped, messages.toList());
     }
 
-    private ImportResult importGreCsv(BufferedReader reader, long deckId) throws IOException {
-        GreCsvAnalysis analysis = analyzeGreCsv(reader, deckId, true);
+    private ImportResult importGreCsv(CsvReader reader, long deckId) throws IOException {
+        GreCsvAnalysis analysis = analyzeGreCsv(reader, deckId);
         try {
             int imported = wordRepository.insertAll(analysis.words);
             return new ImportResult(imported, analysis.skipped, analysis.messages);
         } catch (SQLException e) {
-            throw new IllegalStateException("GRE CSV transaction failed: " + e.getMessage(), e);
+            throw new IllegalStateException("GRE CSV transaction failed: " + ErrorMessages.rootMessage(e), e);
         }
     }
 
-    private GreCsvAnalysis analyzeGreCsv(BufferedReader reader, long deckId, boolean includeCards) throws IOException {
+    /**
+     * Reads the whole file and decides, row by row, what an import would do. Nothing is written.
+     * Messages name the line each row starts on, which differs from the row count when a quoted
+     * cell holds line breaks.
+     */
+    private GreCsvAnalysis analyzeGreCsv(CsvReader reader, long deckId) throws IOException {
         int imported = 0;
         int skipped = 0;
         int duplicates = 0;
         int totalRows = 0;
-        List<String> messages = new ArrayList<>();
+        boolean stoppedAtLimit = false;
+        RowMessages messages = new RowMessages();
         List<WordCard> pendingWords = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        String line;
-        int lineNumber = 0;
-        while ((line = reader.readLine()) != null) {
-            lineNumber++;
-            if (line.isBlank()) {
-                continue;
-            }
-            List<String> fields = parseCsvLine(line);
-            if (lineNumber == 1 && !fields.isEmpty() && "english".equalsIgnoreCase(fields.get(0).trim())) {
+        // The deck's words and the rows read so far, by lower-case English word.
+        Set<String> seen = existingEnglishKeys(deckId);
+
+        CsvRecord record = nextNonBlank(reader);
+        WordColumns columns = GRE_COLUMNS_BY_POSITION;
+        Optional<WordColumns> header = record == null ? Optional.empty() : WordColumns.fromHeader(record);
+        String layout = " (by position, no header row)";
+        if (header.isPresent()) {
+            columns = header.get();
+            requireColumn(columns, WordColumn.ENGLISH, record);
+            requireColumn(columns, WordColumn.CHINESE, record);
+            layout = " (header row)";
+            record = reader.read();
+        } else if (record != null && WordColumns.startsWithEnglishColumnName(record)) {
+            // A header such as "english,中文翻译": skip it rather than import "english" as a word.
+            layout = " (by position; header row line " + record.lineNumber() + " skipped)";
+            record = reader.read();
+        }
+        int requiredFields = Math.max(columns.index(WordColumn.ENGLISH), columns.index(WordColumn.CHINESE)) + 1;
+        for (; record != null; record = reader.read()) {
+            if (record.isBlank()) {
                 continue;
             }
             totalRows++;
+            if (imported >= MAX_GRE_IMPORT_WORDS) {
+                stoppedAtLimit = true;
+                break;
+            }
             try {
-                if (imported >= MAX_GRE_IMPORT_WORDS) {
-                    messages.add("GRE import stopped at " + MAX_GRE_IMPORT_WORDS + " imported words.");
-                    break;
-                }
-                if (fields.size() < 2) {
+                if (record.size() < requiredFields) {
                     throw new IllegalArgumentException("CSV row must contain english and chinese");
                 }
-                String pos = fields.size() > 2 ? fields.get(2) : "";
-                String example = fields.size() > 3 ? fields.get(3) : "";
-                String tags = fields.size() > 4 ? fields.get(4) : "";
-                ValidatedWord validated = validationService.validate(fields.get(0), fields.get(1), "", pos, example, "", tags);
-                String key = validated.english().toLowerCase(Locale.ROOT);
-                if (!seen.add(key) || wordRepository.findByEnglish(deckId, validated.english()).isPresent()) {
+                ValidatedWord validated = validationService.validate(
+                    columns.get(record, WordColumn.ENGLISH),
+                    LINE_BREAKS.matcher(columns.get(record, WordColumn.CHINESE).strip()).replaceAll("; "),
+                    columns.get(record, WordColumn.PHONETIC),
+                    columns.get(record, WordColumn.POS),
+                    columns.get(record, WordColumn.EXAMPLE),
+                    columns.get(record, WordColumn.NOTE),
+                    columns.get(record, WordColumn.TAGS)
+                );
+                if (!seen.add(key(validated.english()))) {
                     skipped++;
                     duplicates++;
-                    messages.add("Line " + lineNumber + " skipped: duplicate word " + validated.english());
+                    messages.add("Line " + record.lineNumber() + " skipped: duplicate word " + validated.english());
                     continue;
                 }
                 WordCard word = WordCard.createNew(deckId, validated.english(), validated.chinese());
+                word.setPhonetic(validated.phonetic());
                 word.setPartOfSpeech(validated.partOfSpeech());
                 word.setExampleSentence(validated.exampleSentence());
+                word.setNote(validated.note());
                 word.setTags(validated.tags());
-                if (includeCards) {
-                    pendingWords.add(word);
-                } else {
-                    pendingWords.add(word);
-                }
+                pendingWords.add(word);
                 imported++;
-            } catch (IllegalArgumentException | SQLException e) {
+            } catch (IllegalArgumentException e) {
                 skipped++;
-                messages.add("Line " + lineNumber + " skipped: " + e.getMessage());
+                messages.add("Line " + record.lineNumber() + " skipped: " + e.getMessage());
             }
         }
-        return new GreCsvAnalysis(totalRows, skipped, duplicates, messages, pendingWords);
+        List<String> messageList = new ArrayList<>(messages.toList());
+        if (stoppedAtLimit) {
+            messageList.add("GRE import stopped at " + MAX_GRE_IMPORT_WORDS + " imported words.");
+        }
+        return new GreCsvAnalysis(totalRows, skipped, duplicates, messageList, pendingWords,
+            columns.describe() + layout);
+    }
+
+    private static CsvRecord nextNonBlank(CsvReader reader) throws IOException {
+        CsvRecord record = reader.read();
+        while (record != null && record.isBlank()) {
+            record = reader.read();
+        }
+        return record;
+    }
+
+    private static void requireColumn(WordColumns columns, WordColumn column, CsvRecord header) {
+        if (!columns.has(column)) {
+            throw new IllegalArgumentException("The header row (line " + header.lineNumber() + ") has no "
+                + column.headerName() + " column. Name it one of: " + String.join(", ", column.aliases()) + ".");
+        }
+    }
+
+    private Set<String> existingEnglishKeys(long deckId) {
+        try {
+            return wordRepository.findEnglishKeys(deckId);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot read the deck's words: " + ErrorMessages.rootMessage(e), e);
+        }
+    }
+
+    private static String key(String english) {
+        return english.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String cannotRead(String what, Path path, IOException e) {
+        return "Cannot read " + what + " " + path + ": " + reason(e);
+    }
+
+    private static String reason(IOException e) {
+        if (e instanceof NoSuchFileException) {
+            return "the file does not exist";
+        }
+        if (e instanceof AccessDeniedException) {
+            return "access to the file was denied";
+        }
+        String message = e.getMessage();
+        return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
+    }
+
+    /** Lists the first {@link #MAX_LISTED_MESSAGES} row messages and counts the rest. */
+    private static final class RowMessages {
+        private final List<String> listed = new ArrayList<>();
+        private int unlisted;
+
+        void add(String message) {
+            if (listed.size() < MAX_LISTED_MESSAGES) {
+                listed.add(message);
+            } else {
+                unlisted++;
+            }
+        }
+
+        List<String> toList() {
+            if (unlisted == 0) {
+                return listed;
+            }
+            List<String> all = new ArrayList<>(listed);
+            all.add("... and " + unlisted + " more rows skipped.");
+            return all;
+        }
     }
 
     private record GreCsvAnalysis(
@@ -179,7 +308,8 @@ public class ImportExportService {
         int skipped,
         int duplicates,
         List<String> messages,
-        List<WordCard> words
+        List<WordCard> words,
+        String columns
     ) {
     }
 
@@ -210,33 +340,9 @@ public class ImportExportService {
             }
             return card;
         } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException("date format is invalid");
+            throw new IllegalArgumentException("date format is invalid (" + e.getMessage() + ")", e);
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("review parameters must be numeric");
+            throw new IllegalArgumentException("review parameters must be numeric (" + e.getMessage() + ")", e);
         }
-    }
-
-    private List<String> parseCsvLine(String line) {
-        List<String> fields = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean quoted = false;
-        for (int i = 0; i < line.length(); i++) {
-            char c = line.charAt(i);
-            if (c == '"') {
-                if (quoted && i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                    current.append('"');
-                    i++;
-                } else {
-                    quoted = !quoted;
-                }
-            } else if (c == ',' && !quoted) {
-                fields.add(current.toString());
-                current.setLength(0);
-            } else {
-                current.append(c);
-            }
-        }
-        fields.add(current.toString());
-        return fields;
     }
 }

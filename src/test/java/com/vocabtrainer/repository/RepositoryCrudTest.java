@@ -89,6 +89,7 @@ class RepositoryCrudTest {
         assertEquals(1, achievementRepository.findAll().size());
 
         cacheRepository.save("lucid", "payload", "test", LocalDateTime.of(2026, 5, 28, 9, 0));
-        assertEquals("payload", cacheRepository.findPayload("LUCID").orElseThrow());
+        assertEquals(new DictionaryCacheRepository.CachedLookup("payload", "test", LocalDateTime.of(2026, 5, 28, 9, 0)),
+            cacheRepository.find("LUCID").orElseThrow());
     }
 }

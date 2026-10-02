@@ -30,6 +30,14 @@ public class AiCacheRepository {
         return Optional.empty();
     }
 
+    /** Deletes every cached explanation; returns how many there were. */
+    public int deleteAll() throws SQLException {
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement("DELETE FROM ai_cache")) {
+            return statement.executeUpdate();
+        }
+    }
+
     public void save(String cacheKey, String response, LocalDateTime createdAt) throws SQLException {
         String sql = """
             INSERT INTO ai_cache(cache_key, response, created_at)

@@ -38,7 +38,7 @@ class MainWindowSmokeTest extends MainWindowUiTest {
         assertEquals("0 days", text("streakLabel"));
         assertEquals("0", text("xpLabel"));
         assertEquals("None yet", text("badgesLabel"));
-        assertEquals("SQLite: " + tempDir.resolve("vocab.db").toAbsolutePath(), text("databasePathLabel"));
+        assertTrue(isVisible("dashboardDataFolderButton"), "the data folder is opened, not shown");
 
         selectTab("wordListTab");
         assertEquals(STARTER_WORDS, rowCount("wordTable"));
@@ -75,7 +75,8 @@ class MainWindowSmokeTest extends MainWindowUiTest {
             "reviewResultArea", "completionCard",
             "addDeckSelector", "addEnglishField", "addChineseField", "addPhoneticField", "addPosField", "addTagsField",
             "addExampleArea", "addNoteArea", "addWordButton", "addWordStatusLabel",
-            "ecdictPathField", "chooseEcdictButton", "testEcdictButton", "saveEcdictButton", "clearEcdictButton",
+            "ecdictPathField", "chooseEcdictButton", "testEcdictButton", "saveEcdictButton", "reimportEcdictButton",
+            "clearEcdictButton", "ecdictProgressBar", "cancelEcdictImportButton", "ecdictStatusLabel",
             "importPathField", "chooseImportFileButton", "importLegacyButton", "previewCsvButton", "importCsvButton",
             "importStarterButton", "importStatusLabel",
             "statisticsCharts", "reviewCountChart", "accuracyChart", "memoryChart", "exportBackupButton",

@@ -72,6 +72,7 @@ public final class ReviewView {
     private final TextField answerField = new TextField();
     private final Button submitAnswerButton = new Button("Submit");
     private final TextArea reviewResultArea = new TextArea();
+    private final Button regenerateExplanationButton = new Button("Regenerate explanation");
     private final Label completionTitleLabel = new Label("Review complete");
     private final Label completionMetricsLabel = new Label();
     private final VBox completionCard = new VBox(8, completionTitleLabel, completionMetricsLabel);
@@ -105,6 +106,10 @@ public final class ReviewView {
             }
             if (changes.contains(DataChange.WORDS)) {
                 presenter.wordsChanged();
+            }
+            if (changes.contains(DataChange.SETTINGS)) {
+                // The AI provider or offline mode may have changed.
+                render();
             }
         });
     }
@@ -231,6 +236,14 @@ public final class ReviewView {
         reviewResultArea.setEditable(false);
         reviewResultArea.setWrapText(true);
         reviewResultArea.setPrefRowCount(8);
+        regenerateExplanationButton.setId("regenerateExplanationButton");
+        regenerateExplanationButton.setTooltip(new Tooltip("Ask the AI provider again, ignoring the cached explanation"));
+        regenerateExplanationButton.setOnAction(event -> {
+            context.errors().guard("Regenerate explanation failed", presenter::regenerateExplanation);
+            // The button is disabled while the provider answers, which would pass the focus on to
+            // Again, where Space would rate Again; keep the keyboard on the suggested rating, as after Submit.
+            presenter.suggestedRating().ifPresent(rating -> ratingButtonsByRating.get(rating).requestFocus());
+        });
 
         completionTitleLabel.setId("completionTitleLabel");
         completionTitleLabel.setStyle("-fx-font-size: 22px; -fx-font-weight: 700;");
@@ -256,8 +269,11 @@ public final class ReviewView {
 
         HBox answerBox = new HBox(10, answerField, submitAnswerButton);
         answerBox.setAlignment(Pos.CENTER_LEFT);
+        HBox explanationActions = new HBox(10, regenerateExplanationButton);
+        explanationActions.setAlignment(Pos.CENTER_RIGHT);
+        explanationActions.managedProperty().bind(regenerateExplanationButton.visibleProperty());
         VBox content = new VBox(16, modeBox, sessionBox, reviewWordLabel, reviewMetaLabel, answerBox,
-            completionCard, reviewResultArea, ratingButtons);
+            completionCard, reviewResultArea, explanationActions, ratingButtons);
         content.setPadding(new Insets(28));
         VBox.setVgrow(reviewResultArea, Priority.ALWAYS);
         return content;
@@ -433,6 +449,8 @@ public final class ReviewView {
             ratingButtonText(rating, presenter.ratingCountsAs(rating), presenter.ratingPreview(rating))));
         overrideButton.setDisable(!presenter.canOverride());
         overrideButton.setSelected(presenter.isOverridden());
+        regenerateExplanationButton.setVisible(presenter.usesAiProvider());
+        regenerateExplanationButton.setDisable(!presenter.canRegenerateExplanation());
         if (presenter.cardNumber() != renderedCardNumber && presenter.canSubmit()) {
             renderedCardNumber = presenter.cardNumber();
             answerField.requestFocus();

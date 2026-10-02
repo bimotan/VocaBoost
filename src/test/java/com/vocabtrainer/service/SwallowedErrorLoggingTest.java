@@ -9,6 +9,7 @@ import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.DictionaryCacheRepository;
+import com.vocabtrainer.repository.EcdictRepository;
 import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.TestDatabases;
@@ -17,8 +18,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.nio.charset.Charset;
-import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,22 +39,27 @@ class SwallowedErrorLoggingTest {
     final TestDatabases databases = new TestDatabases();
 
     @Test
-    void localDictionaryLogsWhyConfiguredCsvCouldNotBeRead() throws Exception {
-        Path csv = tempDir.resolve("ecdict-gbk.csv");
-        Files.write(csv, "word,translation\nlucid,清晰的\n".getBytes(Charset.forName("GBK")));
+    void localDictionaryLogsWhyTheImportedDictionaryCannotBeReadAndStillAnswers() throws Exception {
+        Path broken = tempDir.resolve("ecdict.db");
+        Files.writeString(broken, "not a SQLite database, for example a damaged file");
 
-        LocalDictionaryService service;
+        DictionaryLookupResult result;
+        LocalDictionaryStatus status;
         List<LogRecord> warnings;
-        try (LogCapture log = LogCapture.of(LocalDictionaryService.class)) {
-            service = new LocalDictionaryService(csv.toString());
+        try (EcdictRepository ecdict = new EcdictRepository(broken);
+             LogCapture log = LogCapture.of(LocalDictionaryService.class)) {
+            LocalDictionaryService service = new LocalDictionaryService(ecdict);
+            result = service.lookup("abate");
+            status = service.status();
             warnings = log.warnings();
         }
 
-        assertFalse(service.status().configuredPathLoaded());
-        assertTrue(service.status().bundledStarterLoaded());
-        assertEquals(1, warnings.size());
-        assertTrue(warnings.get(0).getMessage().contains(csv.toAbsolutePath().toString()));
-        assertInstanceOf(CharacterCodingException.class, warnings.get(0).getThrown());
+        assertTrue(result.success(), "the bundled starter words still answer");
+        assertFalse(status.ecdictImported());
+        assertEquals(2, warnings.size(), "lookup and status");
+        assertTrue(warnings.get(0).getMessage().contains("'abate'"), warnings.get(0).getMessage());
+        assertTrue(warnings.get(1).getMessage().contains(broken.toAbsolutePath().toString()), warnings.get(1).getMessage());
+        assertTrue(warnings.stream().allMatch(record -> record.getThrown() instanceof SQLException));
     }
 
     @Test
@@ -96,14 +100,17 @@ class SwallowedErrorLoggingTest {
             new DictionaryCacheRepository(brokenDatabase));
 
         DictionaryLookupResult result;
+        DictionaryLookupResult refreshed;
         List<LogRecord> warnings;
         try (LogCapture log = LogCapture.of(CachingDictionaryService.class)) {
-            result = service.refresh("lucid");
+            result = service.lookup("lucid");
+            refreshed = service.refresh("lucid");
             warnings = log.warnings();
         }
 
         assertTrue(result.success());
-        assertEquals(3, warnings.size(), "cache delete, read and write failures");
+        assertTrue(refreshed.success());
+        assertEquals(3, warnings.size(), "cache read and write failures, then the refresh's write failure");
         assertTrue(warnings.stream().allMatch(record -> record.getThrown() instanceof SQLException));
     }
 

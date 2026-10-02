@@ -22,6 +22,9 @@ import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.WordRepository;
+import com.vocabtrainer.service.csv.CsvWriter;
+import com.vocabtrainer.service.csv.WordColumn;
+import com.vocabtrainer.service.csv.WordColumns;
 import com.vocabtrainer.util.DateTimeUtil;
 
 import java.io.IOException;
@@ -35,6 +38,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -104,57 +108,72 @@ public class BackupService {
         this.cardStates = cardStates;
     }
 
+    /**
+     * Writes the deck's words as CSV for spreadsheets ({@link CsvWriter}: UTF-8 with BOM, formula
+     * cells neutralized). The header row uses the names "Import GRE CSV" maps columns by, so the
+     * file imports back with every field in place.
+     */
     public Path exportWordsCsv(long deckId, Path outputPath) {
         try {
+            List<WordCard> words = wordRepository.findAll(deckId);
             ensureParent(outputPath);
-            List<String> rows = new ArrayList<>();
-            rows.add("english,chinese,phonetic,pos,example,note,tags");
-            for (WordCard word : wordRepository.findAll(deckId)) {
-                rows.add(String.join(",",
-                    csv(word.getEnglish()),
-                    csv(word.getChinese()),
-                    csv(word.getPhonetic()),
-                    csv(word.getPartOfSpeech()),
-                    csv(word.getExampleSentence()),
-                    csv(word.getNote()),
-                    csv(word.getTags())
-                ));
+            try (CsvWriter writer = CsvWriter.create(outputPath)) {
+                writer.writeRow(WordColumns.EXPORT_ORDER.stream().map(WordColumn::headerName).toList());
+                for (WordCard word : words) {
+                    writer.writeRow(WordColumns.EXPORT_ORDER.stream().map(column -> wordField(word, column)).toList());
+                }
             }
-            Files.write(outputPath, rows, StandardCharsets.UTF_8);
             return outputPath;
         } catch (IOException | SQLException e) {
             throw new IllegalStateException("无法导出单词 CSV", e);
         }
     }
 
+    private static String wordField(WordCard word, WordColumn column) {
+        return switch (column) {
+            case ENGLISH -> word.getEnglish();
+            case CHINESE -> word.getChinese();
+            case PHONETIC -> word.getPhonetic();
+            case POS -> word.getPartOfSpeech();
+            case EXAMPLE -> word.getExampleSentence();
+            case NOTE -> word.getNote();
+            case TAGS -> word.getTags();
+        };
+    }
+
     public Path exportReviewLogsCsv(long deckId, Path outputPath) {
         try {
             ensureParent(outputPath);
             // One transaction, so every log's word is in the word list read alongside it.
-            List<String> rows = databaseManager.inTransaction(() -> reviewLogCsvRows(deckId));
-            Files.write(outputPath, rows, StandardCharsets.UTF_8);
+            List<List<String>> rows = databaseManager.inTransaction(() -> reviewLogCsvRows(deckId));
+            try (CsvWriter writer = CsvWriter.create(outputPath)) {
+                for (List<String> row : rows) {
+                    writer.writeRow(row);
+                }
+            }
             return outputPath;
         } catch (IOException | SQLException e) {
             throw new IllegalStateException("无法导出复习记录 CSV", e);
         }
     }
 
-    private List<String> reviewLogCsvRows(long deckId) throws SQLException {
+    private List<List<String>> reviewLogCsvRows(long deckId) throws SQLException {
         Map<Long, String> englishById = new HashMap<>();
         for (WordCard word : wordRepository.findAllIncludingArchived(deckId)) {
             englishById.put(word.getId(), word.getEnglish());
         }
-        List<String> rows = new ArrayList<>();
-        rows.add("english,reviewed_at,user_answer,correct_answer,similarity,rating,elapsed_millis");
+        List<List<String>> rows = new ArrayList<>();
+        rows.add(List.of("english", "reviewed_at", "user_answer", "correct_answer", "similarity", "rating",
+            "elapsed_millis"));
         for (ReviewLog log : reviewLogRepository.findByDeck(deckId)) {
-            rows.add(String.join(",",
-                csv(englishById.get(log.getWordId())),
-                csv(DateTimeUtil.toDatabase(log.getReviewedAt())),
-                csv(log.getUserAnswer()),
-                csv(log.getCorrectAnswer()),
-                csv(String.valueOf(log.getSimilarity())),
-                csv(log.getRating().name()),
-                csv(String.valueOf(log.getElapsedMillis()))
+            rows.add(Arrays.asList(
+                englishById.get(log.getWordId()),
+                DateTimeUtil.toDatabase(log.getReviewedAt()),
+                log.getUserAnswer(),
+                log.getCorrectAnswer(),
+                String.valueOf(log.getSimilarity()),
+                log.getRating().name(),
+                String.valueOf(log.getElapsedMillis())
             ));
         }
         return rows;
@@ -620,11 +639,6 @@ public class BackupService {
         if (parent != null) {
             Files.createDirectories(parent);
         }
-    }
-
-    private String csv(String value) {
-        String safe = value == null ? "" : value;
-        return "\"" + safe.replace("\"", "\"\"") + "\"";
     }
 
     @FunctionalInterface

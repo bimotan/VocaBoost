@@ -8,15 +8,20 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
 import java.util.Optional;
 
-/** The window header: app title, deck and service status, and the deck selector with create, rename and archive. */
+/**
+ * The window header: app title, deck and service status, the offline mode switch, and the deck
+ * selector with create, rename and archive.
+ */
 public final class DeckHeader {
     private final ViewContext context;
     private final DeckService deckService;
@@ -24,8 +29,10 @@ public final class DeckHeader {
     private final ConfiguredServices configured;
     private final Label subtitleLabel = new Label();
     private final ComboBox<Deck> deckSelector = Widgets.deckComboBox("deckSelector", 220);
+    private final CheckBox offlineToggle = new CheckBox("Offline mode / 离线模式");
     private final VBox root;
     private boolean showingDecks;
+    private boolean showingOfflineMode;
 
     public DeckHeader(ViewContext context, DeckService deckService, SettingsService settingsService,
                       ConfiguredServices configured) {
@@ -69,7 +76,19 @@ public final class DeckHeader {
 
         HBox deckControls = new HBox(8, new Label("Deck"), deckSelector, newDeckButton, renameDeckButton, archiveDeckButton);
         deckControls.setAlignment(Pos.CENTER_LEFT);
-        HBox headerLine = new HBox(24, new VBox(4, title, subtitleLabel), deckControls);
+        offlineToggle.setId("offlineModeToggle");
+        offlineToggle.setTooltip(new Tooltip("No online dictionary lookups and no AI requests: only the local"
+            + " dictionaries, cached lookups and the offline mock explanation are used."));
+        offlineToggle.setSelected(settingsService.isOfflineMode());
+        offlineToggle.selectedProperty().addListener((observable, wasOffline, offline) -> {
+            if (!showingOfflineMode) {
+                switchOfflineMode(offline);
+            }
+        });
+        HBox titleLine = new HBox(18, title, offlineToggle);
+        titleLine.setAlignment(Pos.CENTER_LEFT);
+
+        HBox headerLine = new HBox(24, new VBox(4, titleLine, subtitleLabel), deckControls);
         headerLine.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(headerLine.getChildren().get(0), Priority.ALWAYS);
         showDecks();
@@ -92,12 +111,30 @@ public final class DeckHeader {
         }
     }
 
+    /** Saves offline mode; the services read it at every request, so it applies at once. */
+    private void switchOfflineMode(boolean offline) {
+        try {
+            settingsService.saveOfflineMode(offline);
+        } catch (RuntimeException e) {
+            context.errors().reportFailure("Switching offline mode failed", e);
+            showingOfflineMode = true;
+            try {
+                offlineToggle.setSelected(settingsService.isOfflineMode());
+            } finally {
+                showingOfflineMode = false;
+            }
+            return;
+        }
+        context.changes().publish(DataChange.SETTINGS);
+    }
+
     private void updateSubtitle() {
-        String dictionaryStatus = settingsService.getEcdictPath().isPresent()
-            ? "ECDICT configured"
-            : "starter/online fallback";
+        boolean offline = settingsService.isOfflineMode();
+        String dictionaryStatus = settingsService.getEcdictPath().isPresent() ? "ECDICT configured"
+            : offline ? "starter words" : "starter/online fallback";
         subtitleLabel.setText("Deck: " + context.decks().current().getName() + " | Dictionary: " + dictionaryStatus
-            + " | AI: " + (configured.ai().isAvailable() ? "configured" : "mock"));
+            + " | AI: " + (configured.ai().isAvailable() ? "configured" : "mock")
+            + (offline ? " | Offline mode" : ""));
     }
 
     private void createDeck() {

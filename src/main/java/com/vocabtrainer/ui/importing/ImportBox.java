@@ -45,7 +45,7 @@ final class ImportBox {
         chooseButton.setId("chooseImportFileButton");
         chooseButton.setOnAction(event -> {
             List<FileChooser.ExtensionFilter> filters = List.of(
-                new FileChooser.ExtensionFilter("Import Files", "*.txt", "*.csv"),
+                new FileChooser.ExtensionFilter("Import Files", "*.txt", "*.csv", "*.tsv"),
                 new FileChooser.ExtensionFilter("All Files", "*.*")
             );
             context.dialogs().chooseOpenFile(context.window().get(), "Choose import file", filters)
@@ -66,7 +66,7 @@ final class ImportBox {
             context.async().run(
                 () -> importExportService.importBundledGreStarter(deck.getId()),
                 result -> afterImport(result, deck),
-                error -> context.errors().showError("Import failed", UiErrors.rootMessage(error)),
+                error -> showFailure("Import failed", error),
                 importStatus,
                 "Importing GRE starter deck...",
                 importButtons()
@@ -104,7 +104,7 @@ final class ImportBox {
                     ? importExportService.importLegacyTxt(path, deck.getId())
                     : importExportService.importGreCsv(path, deck.getId()),
                 result -> afterImport(result, deck),
-                error -> context.errors().showError("Import failed", UiErrors.rootMessage(error)),
+                error -> showFailure("Import failed", error),
                 importStatus,
                 "Importing...",
                 importButtons()
@@ -125,7 +125,7 @@ final class ImportBox {
             context.async().run(
                 () -> importExportService.previewGreCsv(path, deck.getId()),
                 preview -> importStatus.setText("Deck: " + deck.getName() + System.lineSeparator() + preview.toSummary()),
-                error -> context.errors().showError("Preview failed", UiErrors.rootMessage(error)),
+                error -> showFailure("Preview failed", error),
                 importStatus,
                 "Analyzing CSV...",
                 importButtons()
@@ -133,6 +133,18 @@ final class ImportBox {
         } catch (RuntimeException e) {
             context.errors().reportFailure("Preview failed", e);
         }
+    }
+
+    /**
+     * Shows the service's own message, which names the file and line and the reason, rather than
+     * only the innermost cause (for an undecodable file that is just "Input length = 1").
+     */
+    private void showFailure(String title, Throwable error) {
+        String message = error.getMessage() == null || error.getMessage().isBlank()
+            ? UiErrors.rootMessage(error)
+            : error.getMessage();
+        importStatus.setText(title + ": " + message);
+        context.errors().showError(title, message);
     }
 
     /** Shows the summary for {@code deck}, the deck the words went into, whichever deck is current now. */

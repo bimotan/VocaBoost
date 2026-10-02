@@ -4,6 +4,7 @@ import com.vocabtrainer.ui.ErrorDialogs;
 import com.vocabtrainer.ui.JavaFxDialogs;
 import com.vocabtrainer.ui.MainWindow;
 import com.vocabtrainer.util.AppLogging;
+import com.vocabtrainer.util.DataFolder;
 import com.vocabtrainer.util.DateTimeUtil;
 import javafx.application.Application;
 import javafx.scene.Scene;
@@ -21,6 +22,8 @@ public class VocabTrainerApp extends Application {
     public void start(Stage stage) {
         AppLogging.initialize();
         ErrorDialogs.installUncaughtExceptionHandler();
+        // The database can hold the AI API key: keep the folder private where the system allows it.
+        DataFolder.prepare(DateTimeUtil.defaultDatabasePath().toAbsolutePath().getParent());
         try {
             services = AppServices.builder(DateTimeUtil.defaultDatabasePath()).open();
             showMainWindow(stage, services.createMainWindow(new JavaFxDialogs()));
