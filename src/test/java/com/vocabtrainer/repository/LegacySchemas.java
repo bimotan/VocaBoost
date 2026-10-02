@@ -14,19 +14,24 @@ import java.util.List;
  */
 enum LegacySchemas {
     /** c49a7d7, the first SQLite release: decks, words, review logs, settings, AI cache. */
-    FIRST_RELEASE(false, false, false, false, false, false),
+    FIRST_RELEASE(false, false, false, false, false, false, false),
     /** c09856a: adds goals and achievements (one set for the whole app) and the dictionary cache. */
-    GOALS(true, false, false, false, false, false),
+    GOALS(true, false, false, false, false, false, false),
     /** 9c488f6: decks can be archived. */
-    ARCHIVED_DECKS(true, true, false, false, false, false),
+    ARCHIVED_DECKS(true, true, false, false, false, false, false),
     /** 0426f54 up to phase 1: goals and achievements are kept per deck. */
-    DECK_SCOPED_GOALS(true, true, true, false, false, false),
+    DECK_SCOPED_GOALS(true, true, true, false, false, false, false),
     /** 51bf259, schema version 4: the last schema before FSRS, words with only the SM-2 schedule. */
-    SM2_VERSION_4(true, true, true, true, false, false),
+    SM2_VERSION_4(true, true, true, true, false, false, false),
     /** 8febeb5, schema version 5: FSRS card state; review logs without kind or direction. */
-    FSRS_VERSION_5(true, true, true, true, true, false),
+    FSRS_VERSION_5(true, true, true, true, true, false, false),
     /** 7c7c0ce, schema version 6: review logs with kind and direction, but only the chosen rating. */
-    REVIEW_QUEUE_VERSION_6(true, true, true, true, true, true);
+    REVIEW_QUEUE_VERSION_6(true, true, true, true, true, true, false),
+    /**
+     * Schema version 7: review logs with the effective rating and the override. The current schema
+     * as long as no later step exists; then it is the schema the next step upgrades.
+     */
+    EFFECTIVE_RATING_VERSION_7(true, true, true, true, true, true, true);
 
     private final boolean goals;
     private final boolean archivedDecks;
@@ -34,15 +39,17 @@ enum LegacySchemas {
     private final boolean versioned;
     private final boolean fsrs;
     private final boolean reviewKinds;
+    private final boolean effectiveRating;
 
     LegacySchemas(boolean goals, boolean archivedDecks, boolean deckScopedGoals, boolean versioned, boolean fsrs,
-                  boolean reviewKinds) {
+                  boolean reviewKinds, boolean effectiveRating) {
         this.goals = goals;
         this.archivedDecks = archivedDecks;
         this.deckScopedGoals = deckScopedGoals;
         this.versioned = versioned;
         this.fsrs = fsrs;
         this.reviewKinds = reviewKinds;
+        this.effectiveRating = effectiveRating;
     }
 
     /** Creates this schema in a new database file. */
@@ -128,6 +135,11 @@ enum LegacySchemas {
             sql.add("ALTER TABLE review_logs ADD COLUMN direction TEXT");
             sql.add("CREATE INDEX idx_words_queue ON words(deck_id, card_state, next_review_at) WHERE archived = 0");
             sql.add("PRAGMA user_version = 6");
+        }
+        if (effectiveRating) {
+            sql.add("ALTER TABLE review_logs ADD COLUMN effective_rating TEXT");
+            sql.add("ALTER TABLE review_logs ADD COLUMN overridden INTEGER NOT NULL DEFAULT 0");
+            sql.add("PRAGMA user_version = 7");
         }
         return sql;
     }
