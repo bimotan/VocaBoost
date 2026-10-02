@@ -66,6 +66,11 @@ public final class WordListView {
         return tab;
     }
 
+    /** Loads the content now, whether the tab is shown or not. */
+    public void refreshNow() {
+        lazy.refreshNow();
+    }
+
     private VBox createContent() {
         searchField.setId("wordSearchField");
         searchField.setPromptText("Search English, Chinese or tags");

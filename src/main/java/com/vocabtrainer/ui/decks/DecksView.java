@@ -53,6 +53,11 @@ public final class DecksView {
         return tab;
     }
 
+    /** Loads the content now, whether the tab is shown or not. */
+    public void refreshNow() {
+        lazy.refreshNow();
+    }
+
     private VBox createContent() {
         deckTable.setId("deckTable");
         deckTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);

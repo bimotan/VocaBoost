@@ -58,8 +58,11 @@ public class MainWindow {
         root.setTop(header.root());
         root.setCenter(tabs);
 
-        // The selected tab (Dashboard) has loaded itself; the others load when they are first shown.
+        // The selected tab (Dashboard) has loaded itself. The tables are filled before their first
+        // layout too, which sizes their columns to the rows; after that, hidden tabs wait until shown.
         decks.reloadDecks();
+        decksView.refreshNow();
+        wordList.refreshNow();
         review.start();
         Scene scene = new Scene(root, 1120, 780);
         review.installShortcuts(scene);
