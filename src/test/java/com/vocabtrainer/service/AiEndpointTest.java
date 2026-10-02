@@ -17,6 +17,8 @@ class AiEndpointTest {
         "https://api.groq.com/openai/v1, https://api.groq.com/openai/v1/chat/completions",
         "https://open.bigmodel.cn/api/paas/v4/, https://open.bigmodel.cn/api/paas/v4/chat/completions",
         "http://localhost:11434/v1, http://localhost:11434/v1/chat/completions",
+        "https://generativelanguage.googleapis.com/v1beta/openai/,"
+            + " https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "https://example.com/v1beta?key=a, https://example.com/v1beta/chat/completions?key=a",
         "' https://api.openai.com/v1/chat/completions ', https://api.openai.com/v1/chat/completions",
         "https://proxy.example/openai/deployments/gpt/chat/completions?api-version=2024-06-01,"

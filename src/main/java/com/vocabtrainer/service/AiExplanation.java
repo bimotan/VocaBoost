@@ -127,12 +127,15 @@ public record AiExplanation(String meaning, String answerFeedback, String memory
         return key.toLowerCase(Locale.ROOT).replaceAll("[\\s_-]", "");
     }
 
-    /** A value's text: a string, a number, or an array of them joined with "; ". */
+    /**
+     * A value's text: a string or a number, or the texts in an array or object (such as
+     * {"zh": "清晰的", "pos": "adj."}) joined with "; ".
+     */
     private static String text(JsonNode value) {
-        if (value.isArray()) {
+        if (value.isContainerNode()) {
             List<String> parts = new ArrayList<>();
             value.forEach(element -> {
-                String part = element.isValueNode() ? element.asText("").strip() : "";
+                String part = text(element);
                 if (!part.isEmpty()) {
                     parts.add(part);
                 }

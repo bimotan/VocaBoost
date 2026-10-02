@@ -46,6 +46,20 @@ class AiExplanationTest {
     }
 
     @Test
+    void sectionsGivenAsObjectsKeepTheirText() {
+        AiExplanation explanation = AiExplanation.parse("""
+            {"meaning": {"pos": "adj.", "zh": "清晰易懂的"},
+             "memory_tip": [{"root": "luc-", "means": "光"}, "照亮 → 清楚"],
+             "example_en": "A lucid essay."}
+            """);
+
+        assertEquals("adj.; 清晰易懂的", explanation.meaning());
+        assertEquals("luc-; 光; 照亮 → 清楚", explanation.memoryTip());
+        assertEquals("Meaning: adj.; 清晰易懂的" + NL + "Memory tip: luc-; 光; 照亮 → 清楚" + NL
+            + "Example: A lucid essay.", explanation.text());
+    }
+
+    @Test
     void emptySectionsAreLeftOut() {
         AiExplanation explanation = AiExplanation.parse(
             "{\"meaning\": \"清晰的\", \"answer_feedback\": \"\", \"memory_tip\": null, \"example_en\": \"A lucid essay.\"}");

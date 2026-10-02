@@ -2,6 +2,7 @@ package com.vocabtrainer.service;
 
 import com.vocabtrainer.repository.SettingsRepository;
 
+import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.util.Optional;
 import java.util.logging.Level;
@@ -106,17 +107,18 @@ public class SettingsService {
         }
         ApiKeys.requireSafeToSendKey(AiEndpoint.chatCompletions(cleanBaseUrl), "The AI base URL");
         ApiKeys.requireSendable(cleanApiKey, "The API key");
-        if (!cleanTemperature.isEmpty() && parseTemperature(cleanTemperature).isEmpty()) {
+        Optional<Double> parsedTemperature = parseTemperature(cleanTemperature);
+        if (!cleanTemperature.isEmpty() && parsedTemperature.isEmpty()) {
             throw new IllegalArgumentException("Temperature must be a number from 0 to 2, or empty for the provider's default.");
         }
         save(AI_PROVIDER_KEY, cleanProvider);
         save(AI_BASE_URL_KEY, cleanBaseUrl);
         save(AI_API_KEY_KEY, cleanApiKey);
         save(AI_MODEL_KEY, cleanModel);
-        if (cleanTemperature.isEmpty()) {
+        if (parsedTemperature.isEmpty()) {
             delete(AI_TEMPERATURE_KEY);
         } else {
-            save(AI_TEMPERATURE_KEY, cleanTemperature);
+            save(AI_TEMPERATURE_KEY, String.valueOf(parsedTemperature.get()));
         }
     }
 
@@ -128,11 +130,18 @@ public class SettingsService {
         delete(AI_TEMPERATURE_KEY);
     }
 
-    /** A temperature from 0 to {@link #MAX_AI_TEMPERATURE}; empty for anything else. */
+    /**
+     * A temperature from 0 to {@link #MAX_AI_TEMPERATURE} written as a plain decimal number (such as
+     * "0.7" or "1"); empty for anything else, including Java's "NaN", "1d" or hexadecimal forms.
+     */
     static Optional<Double> parseTemperature(String value) {
         try {
-            double parsed = Double.parseDouble(value == null ? "" : value.trim());
-            return parsed >= 0 && parsed <= MAX_AI_TEMPERATURE ? Optional.of(parsed) : Optional.empty();
+            BigDecimal parsed = new BigDecimal(value == null ? "" : value.trim());
+            if (parsed.signum() < 0 || parsed.compareTo(BigDecimal.valueOf(MAX_AI_TEMPERATURE)) > 0) {
+                return Optional.empty();
+            }
+            // BigDecimal has no negative zero, so "-0" is sent as 0.0.
+            return Optional.of(parsed.doubleValue());
         } catch (NumberFormatException e) {
             return Optional.empty();
         }
