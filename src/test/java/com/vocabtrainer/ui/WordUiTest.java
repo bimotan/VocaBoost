@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.WordCard;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Predicate;
@@ -94,30 +95,47 @@ class WordUiTest extends MainWindowUiTest {
 
     @Test
     void theWordListFiltersBySearchTextStatusTagAndPartOfSpeech() throws Exception {
+        // Every starter word is due, weak, not mastered and tagged "gre", so one mastered word with
+        // its own tag is needed to tell whether the status and tag filters filter at all.
+        WordCard mastered = WordCard.createNew(currentDeck().getId(), "petrichor", "雨后泥土的气味");
+        mastered.setPartOfSpeech("noun");
+        mastered.setTags("mine");
+        mastered.setConsecutiveCorrect(3);
+        mastered.setRepetitions(3);
+        mastered.setIntervalDays(10);
+        mastered.setNextReviewAt(LocalDateTime.now().plusDays(10));
+        services.wordRepository().insert(mastered);
         selectTab("wordListTab");
+        click("refreshWordsButton");
         List<WordCard> words = services.wordRepository().findAll(currentDeck().getId());
-        assertEquals(STARTER_WORDS, rowCount("wordTable"));
+        assertEquals(STARTER_WORDS + 1, words.size());
+        assertEquals(STARTER_WORDS + 1, rowCount("wordTable"));
 
         // Typing is debounced, so wait for the table to catch up.
         type("wordSearchField", "abate");
         waitForWordList("search 'abate'", List.of("abate"));
 
         type("wordSearchField", "");
-        waitForRowCount(STARTER_WORDS);
+        waitForRowCount(STARTER_WORDS + 1);
 
         Fx.run(() -> this.<String>comboBox("wordStatusFilter").getSelectionModel().select("Mastered"));
-        assertEquals(0, rowCount("wordTable"));
+        assertEquals(List.of("petrichor"), wordListEnglish());
         Fx.run(() -> this.<String>comboBox("wordStatusFilter").getSelectionModel().select("Due"));
         assertEquals(STARTER_WORDS, rowCount("wordTable"));
+        assertFalse(wordListEnglish().contains("petrichor"));
         Fx.run(() -> this.<String>comboBox("wordStatusFilter").getSelectionModel().select("Weak"));
         assertEquals(STARTER_WORDS, rowCount("wordTable"));
+        assertFalse(wordListEnglish().contains("petrichor"));
         Fx.run(() -> this.<String>comboBox("wordStatusFilter").getSelectionModel().select("All"));
+        assertEquals(STARTER_WORDS + 1, rowCount("wordTable"));
 
         type("wordPosFilterField", "noun");
         waitForWordList("POS filter 'noun'", englishOf(words, word -> contains(word.getPartOfSpeech(), "noun")));
         type("wordPosFilterField", "");
-        waitForRowCount(STARTER_WORDS);
+        waitForRowCount(STARTER_WORDS + 1);
 
+        type("wordTagFilterField", "MINE");
+        waitForWordList("tag filter 'MINE'", List.of("petrichor"));
         type("wordTagFilterField", "GRE");
         waitForWordList("tag filter 'GRE'", englishOf(words, word -> contains(word.getTags(), "gre")));
         type("wordTagFilterField", "no-such-tag");
