@@ -23,7 +23,7 @@ import java.util.logging.Logger;
  */
 final class SchemaMigrations {
     /** The version a fully migrated database has: the last step's. */
-    static final int CURRENT_VERSION = 2;
+    static final int CURRENT_VERSION = 4;
 
     private static final Logger LOGGER = Logger.getLogger(SchemaMigrations.class.getName());
 
@@ -65,7 +65,9 @@ final class SchemaMigrations {
     private final Connection connection;
     private final List<Step> steps = List.of(
         new Step(1, "schema of the unversioned releases", false, this::baseline),
-        new Step(2, "deck names unique among active decks only", true, this::uniqueActiveDeckNames)
+        new Step(2, "deck names unique among active decks only", true, this::uniqueActiveDeckNames),
+        new Step(3, "review logs unique per word, time and rating", false, this::uniqueReviewLogs),
+        new Step(4, "indexes for statistics", false, this::statisticsIndexes)
     );
 
     SchemaMigrations(Connection connection) {
@@ -287,6 +289,47 @@ final class SchemaMigrations {
             }
         }
         execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_decks_active_name ON decks(name) WHERE archived = 0");
+    }
+
+    /**
+     * Version 3: restoring the same backup twice with the old importer inserted every review log
+     * again. Rows that repeat an earlier row's word, time, rating and answer are deleted, keeping
+     * the first. Then a unique index makes a word's (time, rating) pair identify one review; it
+     * also serves lookups by word and the delete cascade from words. If rows remain that share
+     * word, time and rating but differ in the answer, nothing more is deleted and the index is
+     * created without UNIQUE.
+     */
+    private void uniqueReviewLogs() throws SQLException {
+        int removed;
+        try (Statement statement = connection.createStatement()) {
+            removed = statement.executeUpdate("""
+                DELETE FROM review_logs
+                WHERE id NOT IN (
+                    SELECT MIN(id) FROM review_logs
+                    GROUP BY word_id, reviewed_at, rating, COALESCE(user_answer, '')
+                )
+                """);
+        }
+        if (removed > 0) {
+            LOGGER.info("Deleted " + removed + " duplicate review log(s) left by restoring a backup more than once");
+        }
+        String unique = "UNIQUE ";
+        if (queryString("""
+            SELECT 1 FROM review_logs GROUP BY word_id, reviewed_at, rating HAVING COUNT(*) > 1 LIMIT 1
+            """) != null) {
+            LOGGER.warning("Some review logs share word, time and rating but differ otherwise; keeping them all");
+            unique = "";
+        }
+        execute("CREATE " + unique + "INDEX IF NOT EXISTS idx_review_logs_word_time"
+            + " ON review_logs(word_id, reviewed_at, rating)");
+    }
+
+    /**
+     * Version 4: the dashboard, the review curve and today's counts filter review logs by time;
+     * without this index each of them read the whole table.
+     */
+    private void statisticsIndexes() throws SQLException {
+        execute("CREATE INDEX IF NOT EXISTS idx_review_logs_time ON review_logs(reviewed_at)");
     }
 
     /**

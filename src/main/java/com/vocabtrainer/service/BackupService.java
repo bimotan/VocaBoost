@@ -285,11 +285,12 @@ public class BackupService {
         restoreRows(root, "words", "Word", tally,
             row -> restoreWord(row, deckId, policy, deckWords, restoredWords, tally));
 
-        Set<LogKey> knownLogs = new HashSet<>();
-        for (ReviewLog log : reviewLogRepository.findByDeck(deckId)) {
-            knownLogs.add(new LogKey(log.getWordId(), log.getReviewedAt(), log.getRating()));
-        }
-        restoreRows(root, "reviewLogs", "Review log", tally, row -> restoreReviewLog(row, deckWords, knownLogs, tally));
+        List<ReviewLog> logs = new ArrayList<>();
+        restoreRows(root, "reviewLogs", "Review log", tally, row -> logs.add(reviewLog(row, deckWords)));
+        // A log with the same word, time and rating is the same review, already in the deck or earlier in the file.
+        int logsInserted = reviewLogRepository.insertAllIfAbsent(logs);
+        tally.logsInserted += logsInserted;
+        tally.duplicateLogsSkipped += logs.size() - logsInserted;
         restoreRows(root, "dailyGoals", "Daily goal", tally, row -> restoreDailyGoal(row, deckId, tally));
         restoreRows(root, "achievements", "Achievement", tally, row -> restoreAchievement(row, deckId, tally));
         return tally;
@@ -385,8 +386,8 @@ public class BackupService {
         );
     }
 
-    private void restoreReviewLog(JsonNode row, Map<String, WordCard> deckWords, Set<LogKey> knownLogs,
-                                  RestoreTally tally) throws SQLException, JsonProcessingException {
+    /** The backup row as a log of the deck's word, or IllegalArgumentException if the row is unusable. */
+    private ReviewLog reviewLog(JsonNode row, Map<String, WordCard> deckWords) throws JsonProcessingException {
         BackupFile.ReviewLogEntry entry = objectMapper.treeToValue(row, BackupFile.ReviewLogEntry.class);
         String english = validationService.normalizeEnglish(entry.english());
         if (english.isEmpty()) {
@@ -404,11 +405,7 @@ public class BackupService {
         if (entry.similarity() == null || !Double.isFinite(entry.similarity())) {
             throw new IllegalArgumentException("missing or invalid similarity");
         }
-        if (!knownLogs.add(new LogKey(word.getId(), reviewedAt, rating))) {
-            tally.duplicateLogsSkipped++;
-            return;
-        }
-        reviewLogRepository.insert(new ReviewLog(
+        return new ReviewLog(
             0,
             word.getId(),
             reviewedAt,
@@ -417,8 +414,7 @@ public class BackupService {
             entry.similarity(),
             rating,
             entry.elapsedMillis() == null ? 0L : entry.elapsedMillis()
-        ));
-        tally.logsInserted++;
+        );
     }
 
     private void restoreDailyGoal(JsonNode row, long deckId, RestoreTally tally)
@@ -535,10 +531,6 @@ public class BackupService {
     @FunctionalInterface
     private interface RowRestorer {
         void restore(JsonNode row) throws SQLException, JsonProcessingException;
-    }
-
-    /** A review log is the same review when word, time and rating all match. */
-    private record LogKey(long wordId, LocalDateTime reviewedAt, ReviewRating rating) {
     }
 
     /** The review-schedule columns of a card. */

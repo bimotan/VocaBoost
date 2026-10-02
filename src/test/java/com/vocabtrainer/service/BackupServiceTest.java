@@ -521,24 +521,23 @@ class BackupServiceTest {
 
     private static final class FailingReviewLogRepository extends ReviewLogRepository {
         private int failOnInsertNumber;
-        private int inserts;
 
         private FailingReviewLogRepository(DatabaseManager databaseManager) {
             super(databaseManager);
         }
 
+        /** Makes the restore fail at the given log, after the logs before it were written; 0 turns it off. */
         void failOnInsert(int insertNumber) {
             failOnInsertNumber = insertNumber;
-            inserts = 0;
         }
 
         @Override
-        public ReviewLog insert(ReviewLog log) throws SQLException {
-            inserts++;
-            if (failOnInsertNumber > 0 && inserts == failOnInsertNumber) {
+        public int insertAllIfAbsent(List<ReviewLog> logs) throws SQLException {
+            if (failOnInsertNumber > 0 && logs.size() >= failOnInsertNumber) {
+                super.insertAllIfAbsent(logs.subList(0, failOnInsertNumber - 1));
                 throw new SQLException("[SQLITE_IOERR] simulated disk error while restoring a review log");
             }
-            return super.insert(log);
+            return super.insertAllIfAbsent(logs);
         }
     }
 

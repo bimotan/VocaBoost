@@ -1,5 +1,6 @@
 package com.vocabtrainer.repository;
 
+import com.vocabtrainer.domain.ReviewLog;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
@@ -161,6 +162,57 @@ class SchemaMigrationTest {
              Statement statement = connection.createStatement()) {
             assertThrows(SQLException.class, () -> statement.executeUpdate(word(99, "orphan", "孤儿")));
         }
+    }
+
+    @Test
+    void collapsesReviewLogsDuplicatedByRepeatedRestores() throws Exception {
+        Path file = tempDir.resolve("duplicate-logs.db");
+        LegacySchemas.DECK_SCOPED_GOALS.create(file);
+        seedPreMultiDeckData(file);
+        String copyOriginals = "INSERT INTO review_logs(word_id, reviewed_at, user_answer, correct_answer, similarity,"
+            + " rating, elapsed_millis) SELECT word_id, reviewed_at, COALESCE(user_answer, ''), correct_answer,"
+            + " similarity, rating, elapsed_millis FROM review_logs WHERE id <= 4";
+        LegacySchemas.execute(file,
+            // An original without an answer; the old importer wrote it back as ''.
+            "INSERT INTO review_logs(id, word_id, reviewed_at, user_answer, correct_answer, similarity, rating,"
+                + " elapsed_millis) VALUES(4, 2, '2026-04-05T09:00:00', NULL, '减轻', 0.0, 'AGAIN', 0)",
+            // Every restore of the same backup added all logs again.
+            copyOriginals, copyOriginals,
+            // A separate review a second later is not a duplicate.
+            "INSERT INTO review_logs(word_id, reviewed_at, user_answer, correct_answer, similarity, rating,"
+                + " elapsed_millis) VALUES(1, '2026-04-03T09:00:01', '清晰的', '清晰的', 1.0, 'GOOD', 900)");
+        assertEquals(13, intQuery(file, "SELECT COUNT(*) FROM review_logs"));
+
+        DatabaseManager databaseManager = databases.open(file);
+
+        assertEquals(List.of("1", "2", "3", "4", "13"), stringColumn(file, "SELECT id FROM review_logs ORDER BY id"));
+        assertEquals("1", stringColumn(file, "SELECT \"unique\" FROM pragma_index_list('review_logs')"
+            + " WHERE name = 'idx_review_logs_word_time'").get(0));
+        assertThrows(SQLException.class, () -> LegacySchemas.execute(file, copyOriginals));
+        ReviewLogRepository logs = new ReviewLogRepository(databaseManager);
+        ReviewLog again = logs.findByDeck(1).get(0);
+        again.setId(0);
+        assertEquals(0, logs.insertAllIfAbsent(List.of(again)));
+        assertEquals(5, logs.countAll());
+    }
+
+    @Test
+    void keepsReviewLogsThatShareWordTimeAndRatingButDifferInTheAnswer() throws Exception {
+        Path file = tempDir.resolve("same-moment.db");
+        LegacySchemas.DECK_SCOPED_GOALS.create(file);
+        seedPreMultiDeckData(file);
+        LegacySchemas.execute(file, "INSERT INTO review_logs(word_id, reviewed_at, user_answer, correct_answer,"
+            + " similarity, rating, elapsed_millis) VALUES(1, '2026-04-03T09:00:00', '明亮的', '清晰的', 0.4, 'GOOD', 700)");
+
+        DatabaseManager databaseManager = databases.open(file);
+
+        assertEquals(4, intQuery(file, "SELECT COUNT(*) FROM review_logs"));
+        assertEquals("0", stringColumn(file, "SELECT \"unique\" FROM pragma_index_list('review_logs')"
+            + " WHERE name = 'idx_review_logs_word_time'").get(0));
+        ReviewLogRepository logs = new ReviewLogRepository(databaseManager);
+        ReviewLog again = logs.findByDeck(1).get(0);
+        again.setId(0);
+        assertEquals(0, logs.insertAllIfAbsent(List.of(again)), "restores still skip a review that is already there");
     }
 
     @Test

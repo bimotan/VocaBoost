@@ -51,6 +51,44 @@ public class ReviewLogRepository {
         return log;
     }
 
+    /**
+     * Inserts the logs, in order, except those whose word already has a log with the same time and
+     * rating: that is the same review, for example from restoring a backup twice or listed twice in
+     * one file. All or none are written; joins the caller's transaction if there is one. Returns how
+     * many were inserted; the ids of the logs are not set.
+     */
+    public int insertAllIfAbsent(List<ReviewLog> logs) throws SQLException {
+        if (logs == null || logs.isEmpty()) {
+            return 0;
+        }
+        String sql = """
+            INSERT INTO review_logs(word_id, reviewed_at, user_answer, correct_answer, similarity, rating, elapsed_millis)
+            SELECT ?, ?, ?, ?, ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM review_logs WHERE word_id = ? AND reviewed_at = ? AND rating = ?)
+            """;
+        return databaseManager.inTransaction(() -> {
+            try (Connection connection = databaseManager.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(sql)) {
+                int inserted = 0;
+                for (ReviewLog log : logs) {
+                    String reviewedAt = DateTimeUtil.toDatabase(log.getReviewedAt());
+                    statement.setLong(1, log.getWordId());
+                    statement.setString(2, reviewedAt);
+                    statement.setString(3, log.getUserAnswer());
+                    statement.setString(4, log.getCorrectAnswer());
+                    statement.setDouble(5, log.getSimilarity());
+                    statement.setString(6, log.getRating().name());
+                    statement.setLong(7, log.getElapsedMillis());
+                    statement.setLong(8, log.getWordId());
+                    statement.setString(9, reviewedAt);
+                    statement.setString(10, log.getRating().name());
+                    inserted += statement.executeUpdate();
+                }
+                return inserted;
+            }
+        });
+    }
+
     /** Every review log of the deck's words, archived words included, oldest first. */
     public List<ReviewLog> findByDeck(long deckId) throws SQLException {
         String sql = """
