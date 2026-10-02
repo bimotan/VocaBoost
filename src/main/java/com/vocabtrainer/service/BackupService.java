@@ -163,8 +163,9 @@ public class BackupService {
             englishById.put(word.getId(), word.getEnglish());
         }
         List<List<String>> rows = new ArrayList<>();
+        // "rating" is the one the user chose, "effective_rating" what the schedule counted it as.
         rows.add(List.of("english", "reviewed_at", "user_answer", "correct_answer", "similarity", "rating",
-            "elapsed_millis"));
+            "elapsed_millis", "effective_rating", "overridden", "kind", "direction"));
         for (ReviewLog log : reviewLogRepository.findByDeck(deckId)) {
             rows.add(Arrays.asList(
                 englishById.get(log.getWordId()),
@@ -173,7 +174,11 @@ public class BackupService {
                 log.getCorrectAnswer(),
                 String.valueOf(log.getSimilarity()),
                 log.getRating().name(),
-                String.valueOf(log.getElapsedMillis())
+                String.valueOf(log.getElapsedMillis()),
+                log.getEffectiveRating().name(),
+                String.valueOf(log.isOverridden()),
+                log.getKind().name(),
+                log.getDirection() == null ? "" : log.getDirection().name()
             ));
         }
         return rows;

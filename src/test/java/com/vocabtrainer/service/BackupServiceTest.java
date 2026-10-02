@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vocabtrainer.domain.Achievement;
 import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.Deck;
+import com.vocabtrainer.domain.ReviewKind;
 import com.vocabtrainer.domain.ReviewLog;
+import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.AchievementRepository;
@@ -61,6 +63,11 @@ class BackupServiceTest {
         word.setTags("backup");
         db.words.save(word);
         db.logs.insert(new ReviewLog(0, word.getId(), NOW, "清晰的", "清晰的", 1.0, ReviewRating.EASY, 900));
+        // The user overrode the check of a wrong-looking answer: the rating counted as chosen.
+        db.logs.insert(new ReviewLog(0, word.getId(), NOW.plusMinutes(1), "lucid", "lucid", 0.4, ReviewRating.GOOD,
+            1200, ReviewKind.LEARN, ReviewMode.ZH_TO_EN, ReviewRating.GOOD, true));
+        // An older version's log: no recorded effective rating, so it reads as capped by its similarity.
+        db.logs.insert(new ReviewLog(0, word.getId(), NOW.plusMinutes(2), "清", "清晰的", 0.6, ReviewRating.GOOD, 700));
 
         Path wordsCsv = db.backup.exportWordsCsv(deck.getId(), tempDir.resolve("words.csv"));
         Path logsCsv = db.backup.exportReviewLogsCsv(deck.getId(), tempDir.resolve("logs.csv"));
@@ -68,8 +75,11 @@ class BackupServiceTest {
         // UTF-8 with a byte order mark, so Excel on Chinese Windows does not read it as GBK.
         assertEquals("\uFEFFenglish,chinese,phonetic,pos,example,note,tags\r\nlucid,清晰的,,,,,backup\r\n",
             Files.readString(wordsCsv, StandardCharsets.UTF_8));
-        assertEquals("\uFEFFenglish,reviewed_at,user_answer,correct_answer,similarity,rating,elapsed_millis\r\n"
-                + "lucid,2026-05-28T09:00:00,清晰的,清晰的,1.0,EASY,900\r\n",
+        assertEquals("\uFEFFenglish,reviewed_at,user_answer,correct_answer,similarity,rating,elapsed_millis,"
+                + "effective_rating,overridden,kind,direction\r\n"
+                + "lucid,2026-05-28T09:00:00,清晰的,清晰的,1.0,EASY,900,EASY,false,REVIEW,\r\n"
+                + "lucid,2026-05-28T09:01:00,lucid,lucid,0.4,GOOD,1200,GOOD,true,LEARN,ZH_TO_EN\r\n"
+                + "lucid,2026-05-28T09:02:00,清,清晰的,0.6,GOOD,700,HARD,false,REVIEW,\r\n",
             Files.readString(logsCsv, StandardCharsets.UTF_8));
     }
 
