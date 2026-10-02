@@ -52,4 +52,43 @@ class StatsServiceTest {
         assertEquals(1.0, statsService.dashboardStats(defaultDeck.getId()).accuracyToday());
         assertEquals(0.0, statsService.dashboardStats(satDeck.getId()).accuracyToday());
     }
+
+    @Test
+    void deckOverviewsMatchThePerDeckCountsAndLatestReview() throws Exception {
+        DatabaseManager databaseManager = new DatabaseManager(tempDir.resolve("overview.db"));
+        databaseManager.initialize();
+        DeckRepository deckRepository = new DeckRepository(databaseManager);
+        WordRepository wordRepository = new WordRepository(databaseManager);
+        ReviewLogRepository reviewLogRepository = new ReviewLogRepository(databaseManager);
+        StatsService statsService = new StatsService(wordRepository, reviewLogRepository, databaseManager);
+        Deck gre = deckRepository.create("GRE");
+        Deck sat = deckRepository.create("SAT");
+        Deck empty = deckRepository.create("Empty");
+        WordCard due = wordRepository.save(WordCard.createNew(gre.getId(), "abate", "减弱"));
+        WordCard later = WordCard.createNew(gre.getId(), "lucid", "清晰的");
+        later.setNextReviewAt(LocalDateTime.now().plusDays(3));
+        wordRepository.save(later);
+        WordCard archived = WordCard.createNew(gre.getId(), "gone", "消失的");
+        archived.setArchived(true);
+        wordRepository.save(archived);
+        wordRepository.save(WordCard.createNew(sat.getId(), "laud", "赞扬"));
+        LocalDateTime reviewed = LocalDateTime.now().minusHours(2).withNano(0);
+        reviewLogRepository.insert(new ReviewLog(0, due.getId(), reviewed.minusDays(1), "减弱", "减弱", 1,
+            ReviewRating.GOOD, 1000));
+        reviewLogRepository.insert(new ReviewLog(0, archived.getId(), reviewed, "消失的", "消失的", 1,
+            ReviewRating.GOOD, 1000));
+
+        List<DeckOverview> overviews = statsService.deckOverviews(List.of(gre, sat, empty));
+
+        assertEquals(List.of(gre, sat, empty), overviews.stream().map(DeckOverview::deck).toList());
+        for (DeckOverview overview : overviews) {
+            long deckId = overview.deck().getId();
+            assertEquals(wordRepository.countAll(deckId), overview.words(), overview.deck().getName());
+            assertEquals(statsService.overdueCount(deckId), overview.due(), overview.deck().getName());
+            assertEquals(statsService.latestReviewAt(deckId), overview.latestReviewAt(), overview.deck().getName());
+        }
+        assertEquals(new DeckOverview(gre, 2, 1, reviewed), overviews.get(0));
+        assertEquals(new DeckOverview(sat, 1, 1, null), overviews.get(1));
+        assertEquals(new DeckOverview(empty, 0, 0, null), overviews.get(2));
+    }
 }

@@ -11,7 +11,9 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class ReviewLogRepository {
     private final DatabaseManager databaseManager;
@@ -117,6 +119,25 @@ public class ReviewLogRepository {
             try (ResultSet rs = statement.executeQuery()) {
                 return rs.next() ? rs.getInt(1) : 0;
             }
+        }
+    }
+
+    /** The time of the newest review of every deck that has reviews, by deck id, in one query. */
+    public Map<Long, LocalDateTime> latestReviewByDeck() throws SQLException {
+        String sql = """
+            SELECT w.deck_id, MAX(l.reviewed_at) AS latest
+            FROM review_logs l
+            JOIN words w ON w.id = l.word_id
+            GROUP BY w.deck_id
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet rs = statement.executeQuery()) {
+            Map<Long, LocalDateTime> latest = new HashMap<>();
+            while (rs.next()) {
+                latest.put(rs.getLong("deck_id"), DateTimeUtil.fromDatabase(rs.getString("latest")));
+            }
+            return latest;
         }
     }
 

@@ -57,8 +57,17 @@ public class WordCard {
         return !archived && (nextReviewAt == null || !nextReviewAt.isAfter(now));
     }
 
+    /** Mastered words; {@code WordRepository.countMastered} counts the same in SQL. */
     public boolean isMastered() {
         return consecutiveCorrect >= 3 && intervalDays >= 7 && lapses == 0;
+    }
+
+    /**
+     * Weak words: lapsed, not yet recalled three times in a row, or on a short interval. The
+     * weak-words review mode ({@code WordRepository.findWeak}) selects the same words in SQL.
+     */
+    public boolean isWeak() {
+        return lapses > 0 || consecutiveCorrect < 3 || intervalDays <= 3;
     }
 
     public long getId() {

@@ -10,7 +10,9 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public class WordRepository {
@@ -195,6 +197,7 @@ public class WordRepository {
         }
     }
 
+    /** The deck's weak words (see {@link WordCard#isWeak()}), most fragile first. */
     public List<WordCard> findWeak(long deckId, int limit) throws SQLException {
         String sql = """
             SELECT * FROM words
@@ -230,12 +233,38 @@ public class WordRepository {
         return count("SELECT COUNT(*) FROM words WHERE deck_id = ? AND archived = 0 AND next_review_at <= ?", deckId, now);
     }
 
+    /** The deck's mastered words (see {@link WordCard#isMastered()}). */
     public int countMastered(long deckId) throws SQLException {
         String sql = """
             SELECT COUNT(*) FROM words
             WHERE deck_id = ? AND archived = 0 AND consecutive_correct >= 3 AND interval_days >= 7 AND lapses = 0
             """;
         return count(sql, deckId, null);
+    }
+
+    /** Active-word and due-word counts of every deck that has words, by deck id, in one query. */
+    public Map<Long, DeckWordCounts> countByDeck(LocalDateTime now) throws SQLException {
+        String sql = """
+            SELECT deck_id, COUNT(*) AS total, COALESCE(SUM(CASE WHEN next_review_at <= ? THEN 1 ELSE 0 END), 0) AS due
+            FROM words
+            WHERE archived = 0
+            GROUP BY deck_id
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, DateTimeUtil.toDatabase(now));
+            try (ResultSet rs = statement.executeQuery()) {
+                Map<Long, DeckWordCounts> counts = new HashMap<>();
+                while (rs.next()) {
+                    counts.put(rs.getLong("deck_id"), new DeckWordCounts(rs.getInt("total"), rs.getInt("due")));
+                }
+                return counts;
+            }
+        }
+    }
+
+    /** What {@link #countAll} and {@link #countDue} return for one deck. */
+    public record DeckWordCounts(int total, int due) {
     }
 
     private int count(String sql, long deckId, LocalDateTime now) throws SQLException {

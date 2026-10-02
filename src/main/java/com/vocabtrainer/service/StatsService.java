@@ -1,6 +1,7 @@
 package com.vocabtrainer.service;
 
 import com.vocabtrainer.domain.DailyReviewStat;
+import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.DailyGoalProgress;
 import com.vocabtrainer.domain.HardWordStat;
 import com.vocabtrainer.domain.MemoryBucketStat;
@@ -220,6 +221,26 @@ public class StatsService {
             return null;
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read latest review time", e);
+        }
+    }
+
+    /**
+     * Word count, due count and latest review of each deck, read with one query per kind instead
+     * of three queries per deck.
+     */
+    public List<DeckOverview> deckOverviews(List<Deck> decks) {
+        try {
+            Map<Long, WordRepository.DeckWordCounts> counts = wordRepository.countByDeck(LocalDateTime.now(clock));
+            Map<Long, LocalDateTime> latestReviews = reviewLogRepository.latestReviewByDeck();
+            WordRepository.DeckWordCounts none = new WordRepository.DeckWordCounts(0, 0);
+            return decks.stream()
+                .map(deck -> {
+                    WordRepository.DeckWordCounts deckCounts = counts.getOrDefault(deck.getId(), none);
+                    return new DeckOverview(deck, deckCounts.total(), deckCounts.due(), latestReviews.get(deck.getId()));
+                })
+                .toList();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot read deck overview", e);
         }
     }
 

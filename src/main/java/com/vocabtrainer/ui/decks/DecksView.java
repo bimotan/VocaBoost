@@ -1,7 +1,6 @@
 package com.vocabtrainer.ui.decks;
 
-import com.vocabtrainer.domain.Deck;
-import com.vocabtrainer.repository.WordRepository;
+import com.vocabtrainer.service.DeckOverview;
 import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.ui.DataChange;
@@ -20,31 +19,23 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
-import java.sql.SQLException;
-import java.time.LocalDateTime;
 import java.util.List;
 
 /** The Decks tab: active and archived decks with their word, due and latest-review counts. */
 public final class DecksView {
-    private record DeckRow(Deck deck, String name, int words, int due, String latestReview) {
-    }
-
     private final ViewContext context;
     private final DeckService deckService;
     private final StatsService statsService;
-    private final WordRepository wordRepository;
-    private final ObservableList<DeckRow> deckRows = FXCollections.observableArrayList();
-    private final ObservableList<DeckRow> archivedDeckRows = FXCollections.observableArrayList();
-    private final TableView<DeckRow> deckTable = new TableView<>(deckRows);
-    private final TableView<DeckRow> archivedDeckTable = new TableView<>(archivedDeckRows);
+    private final ObservableList<DeckOverview> deckRows = FXCollections.observableArrayList();
+    private final ObservableList<DeckOverview> archivedDeckRows = FXCollections.observableArrayList();
+    private final TableView<DeckOverview> deckTable = new TableView<>(deckRows);
+    private final TableView<DeckOverview> archivedDeckTable = new TableView<>(archivedDeckRows);
     private final Tab tab;
 
-    public DecksView(ViewContext context, DeckService deckService, StatsService statsService,
-                     WordRepository wordRepository) {
+    public DecksView(ViewContext context, DeckService deckService, StatsService statsService) {
         this.context = context;
         this.deckService = deckService;
         this.statsService = statsService;
-        this.wordRepository = wordRepository;
         this.tab = Widgets.tab("decksTab", "Decks", createContent());
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
@@ -72,7 +63,7 @@ public final class DecksView {
         Button switchButton = new Button("Switch selected");
         switchButton.setId("switchDeckButton");
         switchButton.setOnAction(event -> {
-            DeckRow selected = deckTable.getSelectionModel().getSelectedItem();
+            DeckOverview selected = deckTable.getSelectionModel().getSelectedItem();
             if (selected != null) {
                 context.errors().guard("Switch deck failed", () -> context.decks().switchTo(selected.deck()));
             }
@@ -96,20 +87,21 @@ public final class DecksView {
         return content;
     }
 
-    private static void configureDeckTable(TableView<DeckRow> table) {
-        TableColumn<DeckRow, String> nameCol = new TableColumn<>("Deck");
-        nameCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().name()));
-        TableColumn<DeckRow, String> wordsCol = new TableColumn<>("Words");
+    private static void configureDeckTable(TableView<DeckOverview> table) {
+        TableColumn<DeckOverview, String> nameCol = new TableColumn<>("Deck");
+        nameCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().deck().getName()));
+        TableColumn<DeckOverview, String> wordsCol = new TableColumn<>("Words");
         wordsCol.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().words())));
-        TableColumn<DeckRow, String> dueCol = new TableColumn<>("Due");
+        TableColumn<DeckOverview, String> dueCol = new TableColumn<>("Due");
         dueCol.setCellValueFactory(data -> new SimpleStringProperty(String.valueOf(data.getValue().due())));
-        TableColumn<DeckRow, String> latestCol = new TableColumn<>("Latest review");
-        latestCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().latestReview()));
+        TableColumn<DeckOverview, String> latestCol = new TableColumn<>("Latest review");
+        latestCol.setCellValueFactory(data ->
+            new SimpleStringProperty(DateTimeUtil.toDisplay(data.getValue().latestReviewAt())));
         table.getColumns().addAll(List.of(nameCol, wordsCol, dueCol, latestCol));
     }
 
     private void restoreSelectedArchivedDeck() {
-        DeckRow selected = archivedDeckTable.getSelectionModel().getSelectedItem();
+        DeckOverview selected = archivedDeckTable.getSelectionModel().getSelectedItem();
         if (selected == null) {
             context.errors().showInfo("Please select an archived deck to restore.");
             return;
@@ -122,30 +114,10 @@ public final class DecksView {
 
     public void refresh() {
         try {
-            LocalDateTime now = LocalDateTime.now();
-            deckRows.setAll(deckRowsFor(deckService.activeDecks(), now));
-            archivedDeckRows.setAll(deckRowsFor(deckService.archivedDecks(), now));
+            deckRows.setAll(statsService.deckOverviews(deckService.activeDecks()));
+            archivedDeckRows.setAll(statsService.deckOverviews(deckService.archivedDecks()));
         } catch (RuntimeException e) {
             context.errors().reportFailure("Refresh decks failed", e);
         }
-    }
-
-    private List<DeckRow> deckRowsFor(List<Deck> decks, LocalDateTime now) {
-        return decks.stream()
-            .map(deck -> {
-                try {
-                    LocalDateTime latest = statsService.latestReviewAt(deck.getId());
-                    return new DeckRow(
-                        deck,
-                        deck.getName(),
-                        wordRepository.countAll(deck.getId()),
-                        wordRepository.countDue(deck.getId(), now),
-                        latest == null ? "-" : DateTimeUtil.toDisplay(latest)
-                    );
-                } catch (SQLException e) {
-                    throw new IllegalStateException(e);
-                }
-            })
-            .toList();
     }
 }

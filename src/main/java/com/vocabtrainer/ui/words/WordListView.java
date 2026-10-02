@@ -25,14 +25,15 @@ import javafx.scene.layout.VBox;
 import javafx.util.Duration;
 
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Locale;
 
 /** The Word List tab: search and filter the current deck's words, edit or delete one. */
 public final class WordListView {
     private final ViewContext context;
     private final WordRepository wordRepository;
+    private final Clock clock;
     private final WordEditDialog editDialog;
     private final ObservableList<WordCard> wordItems = FXCollections.observableArrayList();
     private final TableView<WordCard> wordTable = new TableView<>(wordItems);
@@ -42,9 +43,12 @@ public final class WordListView {
     private final TextField posFilterField = new TextField();
     private final Tab tab;
 
-    public WordListView(ViewContext context, WordRepository wordRepository, WordValidationService validationService) {
+    /** {@code clock} decides which words are due and how strong their memory is. */
+    public WordListView(ViewContext context, WordRepository wordRepository, WordValidationService validationService,
+                        Clock clock) {
         this.context = context;
         this.wordRepository = wordRepository;
+        this.clock = clock;
         this.editDialog = new WordEditDialog(context, wordRepository, validationService);
         this.tab = Widgets.tab("wordListTab", "Word List", createContent());
         context.changes().subscribe(changes -> {
@@ -63,7 +67,7 @@ public final class WordListView {
         searchField.setId("wordSearchField");
         searchField.setPromptText("Search English, Chinese or tags");
         wordStatusFilter.setId("wordStatusFilter");
-        wordStatusFilter.getItems().setAll("All", "Due", "Weak", "Mastered", "Unverified");
+        wordStatusFilter.getItems().setAll(WordListFilter.STATUSES);
         wordStatusFilter.getSelectionModel().select("All");
         tagFilterField.setId("wordTagFilterField");
         tagFilterField.setPromptText("Tag");
@@ -103,9 +107,10 @@ public final class WordListView {
         intervalCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getIntervalDays() + " days"));
         TableColumn<WordCard, String> strengthCol = new TableColumn<>("Memory");
         strengthCol.setCellValueFactory(data -> new SimpleStringProperty(
-            Formats.percent(data.getValue().calculateMemoryStrength(LocalDateTime.now()))));
+            Formats.percent(data.getValue().calculateMemoryStrength(LocalDateTime.now(clock)))));
         TableColumn<WordCard, String> statusCol = new TableColumn<>("Status");
-        statusCol.setCellValueFactory(data -> new SimpleStringProperty(statusText(data.getValue())));
+        statusCol.setCellValueFactory(data -> new SimpleStringProperty(
+            WordListFilter.statusOf(data.getValue(), LocalDateTime.now(clock))));
         wordTable.getColumns().addAll(List.of(englishCol, chineseCol, nextCol, intervalCol, strengthCol, statusCol));
 
         VBox content = new VBox(12, controls, wordTable);
@@ -117,54 +122,13 @@ public final class WordListView {
     public void refresh() {
         try {
             List<WordCard> words = wordRepository.search(context.decks().currentId(), searchField.getText());
-            wordItems.setAll(words.stream().filter(this::matchesWordFilters).toList());
+            WordListFilter filter = new WordListFilter(wordStatusFilter.getValue(), tagFilterField.getText(),
+                posFilterField.getText());
+            LocalDateTime now = LocalDateTime.now(clock);
+            wordItems.setAll(words.stream().filter(word -> filter.matches(word, now)).toList());
         } catch (SQLException e) {
             context.errors().reportFailure("Refresh failed", e);
         }
-    }
-
-    private boolean matchesWordFilters(WordCard word) {
-        String status = wordStatusFilter.getValue();
-        if ("Due".equals(status) && !word.isDue(LocalDateTime.now())) {
-            return false;
-        }
-        if ("Weak".equals(status) && !isWeak(word)) {
-            return false;
-        }
-        if ("Mastered".equals(status) && !word.isMastered()) {
-            return false;
-        }
-        if ("Unverified".equals(status) && !containsIgnoreCase(word.getTags(), "UNVERIFIED")) {
-            return false;
-        }
-        String tag = tagFilterField.getText();
-        if (tag != null && !tag.isBlank() && !containsIgnoreCase(word.getTags(), tag.trim())) {
-            return false;
-        }
-        String pos = posFilterField.getText();
-        return pos == null || pos.isBlank() || containsIgnoreCase(word.getPartOfSpeech(), pos.trim());
-    }
-
-    private static boolean isWeak(WordCard word) {
-        return word.getLapses() > 0 || word.getConsecutiveCorrect() < 3 || word.getIntervalDays() <= 3;
-    }
-
-    private static boolean containsIgnoreCase(String value, String needle) {
-        return value != null && needle != null
-            && value.toLowerCase(Locale.ROOT).contains(needle.toLowerCase(Locale.ROOT));
-    }
-
-    private static String statusText(WordCard word) {
-        if (word.isMastered()) {
-            return "Mastered";
-        }
-        if (word.isDue(LocalDateTime.now())) {
-            return "Due";
-        }
-        if (word.getRepetitions() == 0) {
-            return "New";
-        }
-        return "Learning";
     }
 
     private void editSelectedWord() {
