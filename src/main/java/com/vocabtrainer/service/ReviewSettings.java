@@ -56,6 +56,11 @@ public class ReviewSettings {
         return settings.get(NEW_CARDS_PER_DAY_KEY_PREFIX + deckId).filter(text -> !text.isBlank()).isPresent();
     }
 
+    /** Drops the deck's own limit: the deck follows the {@linkplain #defaultNewCardsPerDay() default} again. */
+    public void clearNewCardsPerDay(long deckId) {
+        settings.delete(NEW_CARDS_PER_DAY_KEY_PREFIX + deckId);
+    }
+
     /** The new-cards-per-day limit of every deck that has none of its own; {@value #DEFAULT_NEW_CARDS_PER_DAY} until changed. */
     public int defaultNewCardsPerDay() {
         return intSetting(DEFAULT_NEW_CARDS_PER_DAY_KEY, DEFAULT_NEW_CARDS_PER_DAY, 0, MAX_NEW_CARDS_PER_DAY);

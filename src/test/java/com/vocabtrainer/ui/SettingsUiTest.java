@@ -144,6 +144,21 @@ class SettingsUiTest extends MainWindowUiTest {
         assertEquals("12", text("newAvailableTodayLabel"));
         selectTab("reviewTab");
         assertEquals(12, spinnerValue("newCardsPerDaySpinner"));
+
+        // The deck can go back to following the default.
+        selectTab("settingsTab");
+        assertTrue(isVisible("useDefaultNewCardsPerDayButton"));
+        click("useDefaultNewCardsPerDayButton");
+        assertFalse(isVisible("useDefaultNewCardsPerDayButton"));
+        assertFalse(text("newCardsPerDayHintLabel").contains("own limit"), text("newCardsPerDayHintLabel"));
+        selectTab("dashboardTab");
+        assertEquals("5", text("newAvailableTodayLabel"));
+        selectTab("reviewTab");
+        assertEquals(5, spinnerValue("newCardsPerDaySpinner"));
+        selectTab("settingsTab");
+        typeIntoSpinner("defaultNewCardsPerDaySpinner", "8");
+        selectTab("reviewTab");
+        assertEquals(8, spinnerValue("newCardsPerDaySpinner"), "follows the default again");
     }
 
     @Test

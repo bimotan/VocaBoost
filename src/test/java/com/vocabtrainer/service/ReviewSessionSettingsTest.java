@@ -91,6 +91,12 @@ class ReviewSessionSettingsTest {
             () -> settings.saveDefaultNewCardsPerDay(ReviewSettings.MAX_NEW_CARDS_PER_DAY + 1));
         assertThrows(IllegalArgumentException.class, () -> settings.saveDefaultNewCardsPerDay(-1));
         assertEquals(2, settings.defaultNewCardsPerDay());
+
+        settings.clearNewCardsPerDay(other.getId());
+        assertFalse(settings.hasOwnNewCardsPerDay(other.getId()));
+        assertEquals(2, service.newCardsPerDay(other.getId()), "follows the default again");
+        settings.saveDefaultNewCardsPerDay(4);
+        assertEquals(4, service.newCardsPerDay(other.getId()));
     }
 
     @Test

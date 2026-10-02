@@ -57,6 +57,8 @@ final class StudySettingsBox {
     private final ComboBox<Integer> rolloverSelector = new ComboBox<>();
     private final Spinner<Integer> newCardsSpinner = new Spinner<>();
     private final Label newCardsHint = hint("newCardsPerDayHintLabel");
+    /** Shown while the current deck has a limit of its own: drops it, so the deck follows the default. */
+    private final Button useDefaultNewCardsButton = new Button("Use the default for this deck");
     private final Label goalsSummary = hint("goalsSummaryLabel");
     private final VBox root;
     /** Set while the controls are made to show the saved settings, so those are not saved again. */
@@ -88,7 +90,9 @@ final class StudySettingsBox {
         addRow(form, 2, "New study day starts at", rolloverSelector,
             hint("dayRolloverHintLabel", "Reviews before this hour count for the day before. What is due today"
                 + " and the daily goals follow the study day."));
-        addRow(form, 4, "New words per day", newCardsSpinner, newCardsHint);
+        HBox newCardsRow = new HBox(10, newCardsSpinner, useDefaultNewCardsButton);
+        newCardsRow.setAlignment(Pos.CENTER_LEFT);
+        addRow(form, 4, "New words per day", newCardsRow, newCardsHint);
         addRow(form, 6, "Daily goals", editGoalsButton, goalsSummary);
         GridPane.setHgrow(retentionRow, Priority.ALWAYS);
 
@@ -212,6 +216,11 @@ final class StudySettingsBox {
                 saveNewCardsPerDay(value);
             }
         });
+        useDefaultNewCardsButton.setId("useDefaultNewCardsPerDayButton");
+        useDefaultNewCardsButton.setOnAction(event -> {
+            long deckId = context.decks().currentId();
+            apply("New words per day not saved", () -> reviewSettings.clearNewCardsPerDay(deckId));
+        });
     }
 
     private void commitEditorText() {
@@ -305,10 +314,13 @@ final class StudySettingsBox {
         long deckId = deck.getId();
         String newCards = "The most new words a deck introduces per study day, unless the Review tab set a"
             + " limit for that deck.";
-        if (reviewSettings.hasOwnNewCardsPerDay(deckId)) {
+        boolean ownLimit = reviewSettings.hasOwnNewCardsPerDay(deckId);
+        if (ownLimit) {
             newCards += " " + deck.getName() + " has its own limit: " + reviewSettings.newCardsPerDay(deckId) + ".";
         }
         newCardsHint.setText(newCards);
+        useDefaultNewCardsButton.setVisible(ownLimit);
+        useDefaultNewCardsButton.setManaged(ownLimit);
 
         GoalTargets defaults = goalSettings.defaults();
         int session = goalSettings.sessionGoal();
