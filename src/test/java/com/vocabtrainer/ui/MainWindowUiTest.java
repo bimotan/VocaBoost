@@ -166,7 +166,7 @@ abstract class MainWindowUiTest {
         public DictionaryLookupResult lookup(String english) {
             DictionaryEntry entry = ENTRIES.get(english == null ? "" : english.trim().toLowerCase(Locale.ROOT));
             return entry == null
-                ? DictionaryLookupResult.failure("词条未找到：测试词典没有该词条。")
+                ? DictionaryLookupResult.notFound("词条未找到：测试词典没有该词条。")
                 : DictionaryLookupResult.success("Loaded from the test dictionary.", List.of(entry));
         }
 

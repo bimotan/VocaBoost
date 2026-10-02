@@ -68,7 +68,7 @@ public class LocalDictionaryService implements DictionaryService {
     public DictionaryLookupResult lookup(String english) {
         String key = normalizeKey(english);
         if (key.isBlank()) {
-            return DictionaryLookupResult.failure("Please enter an English word first.");
+            return DictionaryLookupResult.notFound("Please enter an English word first.");
         }
         Optional<DictionaryEntry> entry = find(key);
         if (entry.isPresent()) {
@@ -86,7 +86,7 @@ public class LocalDictionaryService implements DictionaryService {
                 + String.join(" ", explanations) + (entries.size() == 1 ? " Showing the base form." : " Showing the base forms."),
                 entries);
         }
-        return DictionaryLookupResult.failure(NOT_FOUND);
+        return DictionaryLookupResult.notFound(NOT_FOUND);
     }
 
     @Override

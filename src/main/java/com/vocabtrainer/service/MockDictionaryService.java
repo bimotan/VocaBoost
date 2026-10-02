@@ -23,7 +23,7 @@ public class MockDictionaryService implements DictionaryService {
     public DictionaryLookupResult lookup(String english) {
         String key = english == null ? "" : english.trim().toLowerCase(Locale.ROOT);
         if (key.isBlank()) {
-            return DictionaryLookupResult.failure("Please enter an English word first.");
+            return DictionaryLookupResult.notFound("Please enter an English word first.");
         }
         DictionaryEntry entry = ENTRIES.getOrDefault(key, new DictionaryEntry(
             english.trim(),
@@ -34,7 +34,7 @@ public class MockDictionaryService implements DictionaryService {
             "Mock fallback"
         ));
         if (entry.chinese().isBlank()) {
-            return DictionaryLookupResult.failure("词条未找到：Mock 离线词典没有该词条。");
+            return DictionaryLookupResult.notFound("词条未找到：Mock 离线词典没有该词条。");
         }
         return DictionaryLookupResult.success("Using offline mock dictionary.", List.of(entry));
     }

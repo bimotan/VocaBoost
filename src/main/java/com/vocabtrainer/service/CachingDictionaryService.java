@@ -2,7 +2,6 @@ package com.vocabtrainer.service;
 
 import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.DictionaryLookupResult;
-import com.vocabtrainer.domain.WordVerificationResult;
 import com.vocabtrainer.repository.DictionaryCacheRepository;
 
 import java.nio.charset.StandardCharsets;
@@ -36,7 +35,7 @@ public class CachingDictionaryService implements DictionaryService {
     public DictionaryLookupResult lookup(String english) {
         String key = english == null ? "" : english.trim();
         if (key.isBlank()) {
-            return DictionaryLookupResult.failure("Please enter an English word first.");
+            return DictionaryLookupResult.notFound("Please enter an English word first.");
         }
         try {
             var cached = cacheRepository.findPayload(key);
@@ -68,7 +67,7 @@ public class CachingDictionaryService implements DictionaryService {
     public DictionaryLookupResult refresh(String english) {
         String key = english == null ? "" : english.trim();
         if (key.isBlank()) {
-            return DictionaryLookupResult.failure("Please enter an English word first.");
+            return DictionaryLookupResult.notFound("Please enter an English word first.");
         }
         try {
             cacheRepository.delete(key);
@@ -82,15 +81,6 @@ public class CachingDictionaryService implements DictionaryService {
     @Override
     public boolean isConfigured() {
         return delegate.isConfigured();
-    }
-
-    @Override
-    public WordVerificationResult verify(String english) {
-        DictionaryLookupResult result = lookup(english);
-        if (result.success() && !result.entries().isEmpty()) {
-            return WordVerificationResult.found(result.entries().get(0).source(), result.message());
-        }
-        return WordVerificationResult.missing(result.message());
     }
 
     /**
