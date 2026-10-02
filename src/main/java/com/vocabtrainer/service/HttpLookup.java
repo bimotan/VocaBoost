@@ -43,9 +43,22 @@ final class HttpLookup {
      * pool and worker threads are created once.
      */
     static HttpClient newClient() {
+        return newClient(HttpClient.Redirect.NORMAL);
+    }
+
+    /**
+     * A client for requests that carry an API key, which never follows a redirect: the JDK drops
+     * {@code Authorization} when a redirect leads to another server, but passes other headers such
+     * as {@code X-API-Key} on, also to plain http. A redirect then ends the lookup with a message.
+     */
+    static HttpClient newKeyClient() {
+        return newClient(HttpClient.Redirect.NEVER);
+    }
+
+    private static HttpClient newClient(HttpClient.Redirect redirect) {
         return HttpClient.newBuilder()
             .connectTimeout(CONNECT_TIMEOUT)
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(redirect)
             .build();
     }
 
@@ -85,6 +98,10 @@ final class HttpLookup {
         LOGGER.warning(dictionary + " answered HTTP " + status + " for " + request.uri());
         if (status == 401 || status == 403) {
             return failed(LookupOutcome.AUTH_ERROR, dictionary + "：拒绝了请求（HTTP " + status + "）。");
+        }
+        if (status >= 300 && status < 400) {
+            return failed(LookupOutcome.SERVICE_ERROR, dictionary + "：服务器把请求转到了另一个地址（HTTP " + status
+                + "），没有跟随。");
         }
         if (status == 429) {
             return failed(LookupOutcome.RATE_LIMITED, dictionary + "：查询次数受限（HTTP 429）"

@@ -41,7 +41,8 @@ public final class DictionaryServiceFactory {
 
     /**
      * The app's dictionary chain, with the configured API taken from {@code env}
-     * ({@link #API_BASE_URL}, {@link #API_KEY}). The online dictionaries share one HTTP client.
+     * ({@link #API_BASE_URL}, {@link #API_KEY}). The online dictionaries share one HTTP client, except
+     * a configured API with a key, whose client never follows redirects.
      */
     public static DictionaryService create(DictionaryCacheRepository cacheRepository, LocalDictionaryService local,
                                            Map<String, String> env, Clock clock, BooleanSupplier offline) {
@@ -49,7 +50,8 @@ public final class DictionaryServiceFactory {
         String baseUrl = env.get(API_BASE_URL);
         DictionaryService configuredApi = baseUrl == null || baseUrl.isBlank()
             ? null
-            : new HttpDictionaryService(baseUrl, env.get(API_KEY), httpClient);
+            : new HttpDictionaryService(baseUrl, env.get(API_KEY),
+                HttpDictionaryService.clientFor(env.get(API_KEY), httpClient));
         return compose(local, configuredApi, new PublicOnlineDictionaryService(httpClient), cacheRepository, clock,
             offline);
     }

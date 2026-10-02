@@ -164,6 +164,27 @@ class ApiKeyPrivacyTest {
     }
 
     @Test
+    void theDictionaryKeyIsNotPassedOnByARedirect() {
+        // The JDK drops Authorization when a redirect leads to another server, but passes X-API-Key on.
+        server.answer("/lookup", StubHttpServer.Answer.json(302, "")
+            .withHeader("Location", server.uri("/moved").toString()));
+        server.answer("/moved", 200, "[{\"word\":\"lucid\",\"chinese\":\"清晰的\"}]");
+
+        DictionaryLookupResult result = new HttpDictionaryService(server.uri("/lookup").toString(), KEY).lookup("lucid");
+
+        assertEquals(List.of("/lookup"), server.paths(), "the redirect is not followed");
+        assertEquals(LookupOutcome.SERVICE_ERROR, result.outcome());
+        assertTrue(result.message().contains("HTTP 302"), result.message());
+        assertEquals(HttpClient.Redirect.NEVER, HttpDictionaryService.clientFor(KEY, null).followRedirects());
+
+        // Without a key the app's shared client, which follows redirects, is used.
+        HttpClient shared = StubHttpServer.client();
+        assertEquals(shared, HttpDictionaryService.clientFor("", shared));
+        assertTrue(new HttpDictionaryService(server.uri("/lookup").toString(), "").lookup("lucid").success());
+        assertEquals(List.of("/lookup", "/lookup", "/moved"), server.paths());
+    }
+
+    @Test
     void anEmptyKeyFieldKeepsTheSavedKeyWhichIsOnlyShownByItsLastCharacters() {
         SettingsService settings = services.settingsService();
         IllegalArgumentException missing = assertThrows(IllegalArgumentException.class,

@@ -32,7 +32,8 @@ import java.util.logging.Logger;
  * there; other failures say why the API could not be asked.
  *
  * <p>The key is sent only over https, or over http to this computer; a plain-http address
- * elsewhere is not asked at all while a key is set. The key never appears in a message or log.
+ * elsewhere is not asked at all while a key is set, and a redirect is not followed (see
+ * {@link #clientFor}). The key never appears in a message or log.
  */
 public class HttpDictionaryService implements DictionaryService {
     public static final String SOURCE = "Configured API";
@@ -51,7 +52,19 @@ public class HttpDictionaryService implements DictionaryService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public HttpDictionaryService(String baseUrl, String apiKey) {
-        this(baseUrl, apiKey, HttpLookup.newClient());
+        this(baseUrl, apiKey, clientFor(apiKey, null));
+    }
+
+    /**
+     * The client to send requests with: {@code shared} (or a new client) without a key, and with a
+     * key one that never follows redirects ({@link HttpLookup#newKeyClient()}), so the key does not
+     * reach another server.
+     */
+    static HttpClient clientFor(String apiKey, HttpClient shared) {
+        if (apiKey != null && !apiKey.isBlank()) {
+            return HttpLookup.newKeyClient();
+        }
+        return shared != null ? shared : HttpLookup.newClient();
     }
 
     public HttpDictionaryService(String baseUrl, String apiKey, HttpClient httpClient) {
