@@ -285,5 +285,27 @@
                 </plugins>
             </build>
         </profile>
+        <profile>
+            <!-- Retakes docs/screenshots from the real window: xvfb-run -a -s "-screen 0 1400x900x24" ./mvnw test -Pscreenshots -->
+            <id>screenshots</id>
+            <properties>
+                <surefire.excludedGroups />
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <test>DocsScreenshotsUiTest</test>
+                            <systemPropertyVariables>
+                                <prism.order>sw</prism.order>
+                                <vocaboost.screenshots.dir>${project.basedir}/docs/screenshots</vocaboost.screenshots.dir>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
     </profiles>
 </project>
