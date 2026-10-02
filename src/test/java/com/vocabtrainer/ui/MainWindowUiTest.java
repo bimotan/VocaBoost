@@ -26,6 +26,8 @@ import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.image.PixelFormat;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.image.WritableImage;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
@@ -270,6 +272,23 @@ abstract class MainWindowUiTest {
         });
     }
 
+    /**
+     * Presses and releases a key the way the keyboard does: the event goes to {@code targetId}, or to
+     * the window's focus owner when it is null, through the scene's event filters.
+     */
+    void pressKey(String targetId, KeyCode code) {
+        Fx.run(() -> {
+            Node target = targetId != null ? find(targetId, Node.class)
+                : stage.getScene().getFocusOwner() != null ? stage.getScene().getFocusOwner()
+                : stage.getScene().getRoot();
+            String text = code.isDigitKey() || code == KeyCode.SPACE ? code.getChar() : "";
+            target.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, KeyEvent.CHAR_UNDEFINED, text, code,
+                false, false, false, false));
+            target.fireEvent(new KeyEvent(KeyEvent.KEY_RELEASED, KeyEvent.CHAR_UNDEFINED, text, code,
+                false, false, false, false));
+        });
+    }
+
     <T> void select(String comboBoxId, Predicate<T> matcher) {
         Fx.run(() -> {
             ComboBox<T> comboBox = comboBox(comboBoxId);
@@ -297,6 +316,14 @@ abstract class MainWindowUiTest {
                 return input.getText();
             }
             throw new AssertionError("#" + id + " has no text: " + node);
+        });
+    }
+
+    /** The id of the node that has the keyboard focus in the window, or null. */
+    String focusOwnerId() {
+        return Fx.call(() -> {
+            Node owner = stage.getScene().getFocusOwner();
+            return owner == null ? null : owner.getId();
         });
     }
 

@@ -8,8 +8,10 @@ import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
+import javafx.event.EventTarget;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
@@ -17,15 +19,26 @@ import javafx.scene.control.ListCell;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextInputControl;
+import javafx.scene.control.Tooltip;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
+import java.util.EnumMap;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * The Review tab. It only shows the state of a {@link ReviewSessionPresenter} and forwards the
  * user's input to it; the review flow itself lives in the presenter.
+ *
+ * <p>Keyboard: Enter in the answer field submits. Once the answer is checked, 1, 2, 3 and 4 rate
+ * Again, Hard, Good and Easy and Space rates Good, while the Review tab is shown and the user is
+ * not typing in another field.
  */
 public final class ReviewView {
     private final ViewContext context;
@@ -44,8 +57,10 @@ public final class ReviewView {
     private final Label completionMetricsLabel = new Label();
     private final VBox completionCard = new VBox(8, completionTitleLabel, completionMetricsLabel);
     private final HBox ratingButtons = new HBox(10);
+    private final Map<ReviewRating, Button> ratingButtonsByRating = new EnumMap<>(ReviewRating.class);
     private final Tab tab;
     private long renderedCardNumber = -1;
+    private boolean renderedCanRate;
 
     public ReviewView(ViewContext context, ReviewService reviewService, GoalService goalService,
                       ConfiguredServices configured) {
@@ -69,6 +84,49 @@ public final class ReviewView {
     /** Shows the first card of the current deck. */
     public void start() {
         presenter.showDeck(context.decks().currentId());
+    }
+
+    /** Lets {@code scene} rate the answered card with the keyboard; see the class comment. */
+    public void installShortcuts(Scene scene) {
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, this::rateWithKey);
+    }
+
+    /** The digit key that gives {@code rating}; {@link #ratingForKey} maps it back. */
+    static String shortcutKey(ReviewRating rating) {
+        return switch (rating) {
+            case AGAIN -> "1";
+            case HARD -> "2";
+            case GOOD -> "3";
+            case EASY -> "4";
+        };
+    }
+
+    /** The rating a key gives once an answer is checked: 1-4 (main row or keypad), or Space for Good. */
+    static Optional<ReviewRating> ratingForKey(KeyCode code) {
+        return switch (code) {
+            case DIGIT1, NUMPAD1 -> Optional.of(ReviewRating.AGAIN);
+            case DIGIT2, NUMPAD2 -> Optional.of(ReviewRating.HARD);
+            case DIGIT3, NUMPAD3, SPACE -> Optional.of(ReviewRating.GOOD);
+            case DIGIT4, NUMPAD4 -> Optional.of(ReviewRating.EASY);
+            default -> Optional.empty();
+        };
+    }
+
+    private void rateWithKey(KeyEvent event) {
+        if (!tab.isSelected() || !presenter.canRate() || event.isShortcutDown() || event.isControlDown()
+            || event.isAltDown() || event.isMetaDown() || isTypingIn(event.getTarget())) {
+            return;
+        }
+        Optional<ReviewRating> rating = ratingForKey(event.getCode());
+        if (rating.isPresent()) {
+            event.consume();
+            presenter.rate(rating.get());
+        }
+    }
+
+    /** Digits typed into a field, such as the custom session size, are text, not ratings. */
+    private static boolean isTypingIn(EventTarget target) {
+        return target instanceof TextInputControl input && input.isEditable() && !input.isDisabled();
     }
 
     private VBox createContent() {
@@ -112,6 +170,7 @@ public final class ReviewView {
         answerField.setPrefWidth(420);
         answerField.textProperty().addListener((observable, oldText, newText) -> presenter.setAnswer(newText));
         submitAnswerButton.setId("submitAnswerButton");
+        submitAnswerButton.setTooltip(new Tooltip("Press Enter in the answer field"));
         submitAnswerButton.setOnAction(event -> context.errors().guard("Submit answer failed", presenter::submit));
         answerField.setOnAction(event -> context.errors().guard("Submit answer failed", presenter::submit));
 
@@ -162,10 +221,13 @@ public final class ReviewView {
     }
 
     private Button ratingButton(ReviewRating rating) {
-        Button button = new Button(rating.getLabel());
+        String key = shortcutKey(rating);
+        Button button = new Button(rating.getLabel() + " (" + key + ")");
         button.setId(ratingButtonId(rating));
         button.setMinWidth(90);
+        button.setTooltip(new Tooltip(rating == ReviewRating.GOOD ? "Press " + key + " or Space" : "Press " + key));
         button.setOnAction(event -> presenter.rate(rating));
+        ratingButtonsByRating.put(rating, button);
         return button;
     }
 
@@ -189,5 +251,10 @@ public final class ReviewView {
             renderedCardNumber = presenter.cardNumber();
             answerField.requestFocus();
         }
+        if (presenter.canRate() && !renderedCanRate) {
+            // The answer field is disabled now; keep the keyboard on the rating buttons.
+            ratingButtonsByRating.get(ReviewRating.GOOD).requestFocus();
+        }
+        renderedCanRate = presenter.canRate();
     }
 }

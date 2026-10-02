@@ -61,6 +61,8 @@ public class MainWindow {
         // The selected tab (Dashboard) has loaded itself; the others load when they are first shown.
         decks.reloadDecks();
         review.start();
-        return new Scene(root, 1120, 780);
+        Scene scene = new Scene(root, 1120, 780);
+        review.installShortcuts(scene);
+        return scene;
     }
 }
