@@ -8,6 +8,7 @@ import javafx.stage.Window;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 
 /**
  * Every modal dialog and file chooser the main window opens. {@link JavaFxDialogs} shows the real
@@ -34,7 +35,17 @@ public interface Dialogs {
     Optional<String> askText(String title, String header, String content, String initialValue);
 
     /** An OK / Cancel dialog around {@code form}; true only when OK is chosen. */
-    boolean showForm(String title, Node form);
+    default boolean showForm(String title, Node form) {
+        return showForm(title, form, () -> true);
+    }
+
+    /**
+     * An OK / Cancel dialog around {@code form} that OK only closes once {@code onOk} returns true.
+     * {@code onOk} runs while the dialog is open, so it can check and save the input and, when that
+     * fails, show why in the form and return false: the dialog stays open with everything typed, to be
+     * corrected or cancelled. True when OK closed the dialog, false when it was cancelled.
+     */
+    boolean showForm(String title, Node form, BooleanSupplier onOk);
 
     /** A file-open chooser; empty when it is cancelled. */
     Optional<Path> chooseOpenFile(Window owner, String title, List<FileChooser.ExtensionFilter> filters);

@@ -1,5 +1,6 @@
 package com.vocabtrainer.ui;
 
+import javafx.event.ActionEvent;
 import javafx.scene.Node;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
@@ -13,6 +14,7 @@ import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 
 /** The dialogs the desktop app shows: JavaFX alerts, prompts and file choosers that block until closed. */
 public class JavaFxDialogs implements Dialogs {
@@ -76,11 +78,18 @@ public class JavaFxDialogs implements Dialogs {
     }
 
     @Override
-    public boolean showForm(String title, Node form) {
+    public boolean showForm(String title, Node form, BooleanSupplier onOk) {
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle(title);
         dialog.getDialogPane().setContent(form);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        // OK closes the dialog only when onOk accepts the input; otherwise it stays open as it is.
+        Node okButton = dialog.getDialogPane().lookupButton(ButtonType.OK);
+        okButton.addEventFilter(ActionEvent.ACTION, event -> {
+            if (!onOk.getAsBoolean()) {
+                event.consume();
+            }
+        });
         Optional<ButtonType> result = dialog.showAndWait();
         return result.isPresent() && result.get() == ButtonType.OK;
     }

@@ -1,6 +1,7 @@
 package com.vocabtrainer.repository;
 
 import com.vocabtrainer.domain.CardState;
+import com.vocabtrainer.domain.ValidatedWord;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.util.DateTimeUtil;
 
@@ -111,6 +112,31 @@ public class WordRepository {
             bindWord(statement, word);
             statement.setLong(BOUND_COLUMNS + 1, word.getId());
             statement.executeUpdate();
+        }
+    }
+
+    /**
+     * Saves the word's text: English, Chinese, phonetic, part of speech, example, note and tags. Its
+     * deck and review schedule are not written, so an edit can never put back a schedule older than
+     * the one stored. Returns false when there is no word with this id.
+     */
+    public boolean updateText(long id, ValidatedWord text) throws SQLException {
+        String sql = """
+            UPDATE words
+            SET english = ?, chinese = ?, phonetic = ?, part_of_speech = ?, example_sentence = ?, note = ?, tags = ?
+            WHERE id = ?
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, normalized(text.english()));
+            statement.setString(2, normalized(text.chinese()));
+            statement.setString(3, nullable(text.phonetic()));
+            statement.setString(4, nullable(text.partOfSpeech()));
+            statement.setString(5, nullable(text.exampleSentence()));
+            statement.setString(6, nullable(text.note()));
+            statement.setString(7, nullable(text.tags()));
+            statement.setLong(8, id);
+            return statement.executeUpdate() == 1;
         }
     }
 
