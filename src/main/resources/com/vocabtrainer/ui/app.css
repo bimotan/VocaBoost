@@ -4,7 +4,7 @@
  * 1em is the system's text size (13px on Linux and macOS, 12px on Windows at 100%).
  *
  * Every text colour keeps a contrast of at least 4.5:1 (WCAG AA) on the window background (#f4f4f4),
- * the cards (#f8fafc, #ecfdf5) and white fields; AppStyleContrastTest checks it.
+ * the cards (#f8fafc, #ecfdf5, #fffbeb) and white fields; AppStyleContrastTest checks it.
  */
 .root {
     -vb-text-secondary: #4b5563;
@@ -17,6 +17,11 @@
     -vb-header-border: #e5e7eb;
     -vb-success-surface: #ecfdf5;
     -vb-success-border: #10b981;
+    -vb-warning-text: #92400e;
+    -vb-warning-surface: #fffbeb;
+    -vb-warning-border: #f59e0b;
+    -vb-chart-reviews: #2563eb;
+    -vb-chart-new-words: #f59e0b;
 }
 
 .root.text-size-115 {
@@ -117,6 +122,19 @@
     -fx-text-fill: -vb-text-hint;
 }
 
+/* A rating made the card a leech: the notice under the result. */
+.leech-box {
+    -fx-background-color: -vb-warning-surface;
+    -fx-border-color: -vb-warning-border;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.leech-notice {
+    -fx-font-weight: 600;
+    -fx-text-fill: -vb-warning-text;
+}
+
 .completion-card {
     -fx-background-color: -vb-success-surface;
     -fx-border-color: -vb-success-border;
@@ -150,4 +168,16 @@
 .example-target {
     -fx-font-weight: bold;
     -fx-fill: -vb-accent;
+}
+
+/* The Dashboard's exam box. */
+.exam-countdown {
+    -fx-font-size: 1.692em;
+    -fx-font-weight: bold;
+}
+
+/* The Statistics tab's workload forecast: the series take the chart's first two colours. */
+.workload-chart {
+    CHART_COLOR_1: -vb-chart-reviews;
+    CHART_COLOR_2: -vb-chart-new-words;
 }

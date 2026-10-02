@@ -7,6 +7,7 @@ import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.UiAsync;
 import com.vocabtrainer.ui.UiErrors;
 import com.vocabtrainer.ui.ViewContext;
+import com.vocabtrainer.ui.Widgets;
 import javafx.collections.FXCollections;
 import javafx.concurrent.Task;
 import javafx.geometry.Pos;
@@ -113,25 +114,23 @@ final class EcdictDeckBox {
         alphabetical.setId("ecdictOrderAlphabetical");
         alphabetical.setToggleGroup(order);
 
-        Label hint = new Label("A new deck is created; when an active deck has this name, the words are added to it."
+        Label hint = Widgets.hint("A new deck is created; when an active deck has this name, the words are added to it."
             + " Words already in the deck are skipped, and the limit counts the words added. Meanings, parts of"
             + " speech and phonetics come from ECDICT, cleaned like a lookup.");
-        hint.setWrapText(true);
+        // A fixed width lets the grid give the wrapped lines their height.
         hint.setPrefWidth(400);
-        hint.setMinHeight(Region.USE_PREF_SIZE);
-        hint.setStyle("-fx-text-fill: #6b7280; -fx-font-size: 12px;");
 
         GridPane form = new GridPane();
         form.setId("ecdictDeckForm");
         form.setHgap(10);
         form.setVgap(10);
-        form.add(new Label("Exam tag"), 0, 0);
+        form.add(Widgets.formLabel("Exam _tag", tagSelector), 0, 0);
         form.add(tagSelector, 1, 0);
-        form.add(new Label("Deck"), 0, 1);
+        form.add(Widgets.formLabel("_Deck", deckName), 0, 1);
         form.add(deckName, 1, 1);
-        form.add(new Label("Limit"), 0, 2);
+        form.add(Widgets.formLabel("_Limit", limitField), 0, 2);
         form.add(new HBox(8, limitField, new Label("words (empty for all)")), 1, 2);
-        form.add(new Label("Order"), 0, 3);
+        form.add(Widgets.formLabel("_Order", byFrequency), 0, 3);
         form.add(new HBox(16, byFrequency, alphabetical), 1, 3);
         form.add(hint, 1, 4);
 

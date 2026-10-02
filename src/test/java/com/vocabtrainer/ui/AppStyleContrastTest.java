@@ -23,8 +23,9 @@ class AppStyleContrastTest {
     private static final String WINDOW_BACKGROUND = "#f4f4f4";
     private static final String FIELD_BACKGROUND = "#ffffff";
     private static final List<String> TEXT_COLOURS =
-        List.of("-vb-text-secondary", "-vb-text-muted", "-vb-text-hint", "-vb-accent", "-vb-error");
-    private static final List<String> CARD_BACKGROUNDS = List.of("-vb-surface", "-vb-success-surface");
+        List.of("-vb-text-secondary", "-vb-text-muted", "-vb-text-hint", "-vb-accent", "-vb-error", "-vb-warning-text");
+    private static final List<String> CARD_BACKGROUNDS =
+        List.of("-vb-surface", "-vb-success-surface", "-vb-warning-surface");
 
     @Test
     void everyTextColourHasAContrastOfAtLeast4point5OnEveryBackground() throws IOException {

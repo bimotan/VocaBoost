@@ -385,7 +385,7 @@ public final class ReviewView {
     private void configureLeechNotice() {
         leechNoticeLabel.setId("leechNoticeLabel");
         leechNoticeLabel.setWrapText(true);
-        leechNoticeLabel.setStyle("-fx-font-weight: 600; -fx-text-fill: #92400e;");
+        leechNoticeLabel.getStyleClass().add("leech-notice");
         suspendLeechButton.setId("suspendLeechButton");
         suspendLeechButton.setTooltip(new Tooltip("暂停: stop reviewing this leech for now, keeping its history"));
         suspendLeechButton.setOnAction(event -> context.errors().guard("Suspend failed", presenter::suspendLeech));
@@ -403,8 +403,7 @@ public final class ReviewView {
         leechBox.getChildren().setAll(actions, memoryAidLabel);
         leechBox.setId("leechBox");
         leechBox.setPadding(new Insets(10));
-        leechBox.setStyle("-fx-background-color: #fffbeb; -fx-border-color: #f59e0b; -fx-border-radius: 6;"
-            + " -fx-background-radius: 6;");
+        leechBox.getStyleClass().add("leech-box");
         showIf(leechBox, false);
     }
 

@@ -38,10 +38,10 @@ final class ExamPlanBox {
         this.context = context;
         this.planService = planService;
         countdownLabel.setId("examCountdownLabel");
-        countdownLabel.setStyle("-fx-font-size: 22px; -fx-font-weight: 700;");
+        countdownLabel.getStyleClass().add("exam-countdown");
         countdownLabel.setWrapText(true);
         dateLabel.setId("examDateLabel");
-        dateLabel.setStyle("-fx-text-fill: #6b7280;");
+        dateLabel.getStyleClass().add("muted-text");
         dateLabel.setWrapText(true);
         Button editButton = new Button("Set exam date");
         editButton.setId("editExamButton");
@@ -54,7 +54,7 @@ final class ExamPlanBox {
         statusLabel.setId("examStatusLabel");
         statusLabel.setWrapText(true);
         statusLabel.setMinHeight(Region.USE_PREF_SIZE);
-        statusLabel.setStyle("-fx-text-fill: #4b5563; -fx-font-size: 12px;");
+        statusLabel.getStyleClass().add("hint-text");
         root = new VBox(10, Widgets.sectionTitle("Exam"), countdownLabel, dateLabel, editButton, planLabel,
             applyPlanButton, statusLabel);
         root.setId("examPlanBox");

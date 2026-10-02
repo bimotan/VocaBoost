@@ -57,9 +57,8 @@ final class WorkloadForecastChart {
         chart = new StackedBarChart<>(dayAxis, countAxis);
         chart.setId("workloadForecastChart");
         chart.setAnimated(false);
-        // Reviews blue and new words orange, which stay apart for colour-blind eyes too; the series
-        // take the chart's first two colours.
-        chart.setStyle("CHART_COLOR_1: #2563eb; CHART_COLOR_2: #f59e0b;");
+        // Reviews blue and new words orange (app.css), which stay apart for colour-blind eyes too.
+        chart.getStyleClass().add("workload-chart");
         chart.setCategoryGap(4);
         chart.setPrefHeight(300);
         chart.setMinHeight(300);
