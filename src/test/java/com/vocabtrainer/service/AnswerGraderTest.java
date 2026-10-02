@@ -167,6 +167,41 @@ class AnswerGraderTest {
         assertEquals(AnswerGrade.Verdict.MATCH, grade.verdict());
     }
 
+    @Test
+    void aClozeAcceptsTheWordAndTheFormItsSentenceHas() throws SQLException {
+        WordCard admonish = deckWord("admonish", "告诫; 责备");
+        List<String> blanked = List.of("admonished");
+
+        AnswerGrade inflected = grader.gradeCloze(admonish, blanked, " Admonished ", deckWords);
+        assertEquals(AnswerGrade.Verdict.MATCH, inflected.verdict());
+        assertEquals(ReviewRating.EASY, inflected.maxRating());
+        assertEquals(1.0, inflected.similarity());
+        assertEquals(AnswerGrade.Verdict.MATCH, grader.gradeCloze(admonish, blanked, "admonish", deckWords).verdict());
+
+        AnswerGrade typo = grader.gradeCloze(admonish, blanked, "admonishd", deckWords);
+        assertEquals(AnswerGrade.Verdict.MISSPELLED, typo.verdict(), "one letter off the form in the sentence");
+        assertEquals(ReviewRating.HARD, typo.maxRating());
+
+        AnswerGrade otherForm = grader.gradeCloze(admonish, blanked, "admonishing", deckWords);
+        assertEquals(ReviewRating.AGAIN, otherForm.maxRating(), "only the forms the blanks held count");
+
+        assertEquals(ReviewRating.AGAIN, grader.gradeCloze(admonish, blanked, "", deckWords).maxRating());
+        assertEquals(AnswerGrade.Verdict.MATCH, grader.grade(admonish, ReviewMode.CLOZE, "admonish", deckWords).verdict(),
+            "without the sentence a cloze is graded as Chinese to English");
+    }
+
+    @Test
+    void aClozeStillRejectsAConfusableAndAcceptsASynonym() throws SQLException {
+        WordCard effect = deckWord("effect", "效果; 影响");
+        deckWord("influence", "影响; 感化");
+
+        assertEquals(AnswerGrade.Verdict.CONFUSABLE,
+            grader.gradeCloze(effect, List.of("effects"), "affect", deckWords).verdict());
+        AnswerGrade synonym = grader.gradeCloze(effect, List.of("effects"), "influence", deckWords);
+        assertEquals(AnswerGrade.Verdict.SYNONYM, synonym.verdict());
+        assertEquals(ReviewRating.EASY, synonym.maxRating());
+    }
+
     private WordCard deckWord(String english, String chinese) {
         WordCard word = word(english, chinese);
         deck.add(word);

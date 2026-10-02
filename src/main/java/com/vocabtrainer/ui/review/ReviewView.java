@@ -62,6 +62,10 @@ import java.util.Optional;
  * and the user is not typing in another field.
  */
 public final class ReviewView {
+    private static final String WORD_QUESTION_STYLE = "-fx-font-size: 34px; -fx-font-weight: 700;";
+    /** A cloze's sentence is longer than a word: smaller, so it fits on a line or two. */
+    private static final String SENTENCE_QUESTION_STYLE = "-fx-font-size: 24px; -fx-font-weight: 600;";
+
     private final ViewContext context;
     private final ReviewSessionPresenter presenter;
 
@@ -225,7 +229,8 @@ public final class ReviewView {
         sessionBox.setAlignment(Pos.CENTER_LEFT);
 
         reviewWordLabel.setId("reviewWordLabel");
-        reviewWordLabel.setStyle("-fx-font-size: 34px; -fx-font-weight: 700;");
+        reviewWordLabel.setWrapText(true);
+        reviewWordLabel.setStyle(WORD_QUESTION_STYLE);
         reviewHintLabel.setId("reviewHintLabel");
         reviewHintLabel.setWrapText(true);
         reviewHintLabel.setStyle("-fx-font-size: 15px; -fx-text-fill: #374151;");
@@ -446,6 +451,7 @@ public final class ReviewView {
             rendering = false;
         }
         reviewWordLabel.setText(presenter.question());
+        reviewWordLabel.setStyle(presenter.isSentenceQuestion() ? SENTENCE_QUESTION_STYLE : WORD_QUESTION_STYLE);
         reviewHintLabel.setText(presenter.hint());
         showIf(reviewHintLabel, !presenter.hint().isEmpty());
         Optional<WordDetails> revealed = presenter.revealedDetails().filter(details -> !details.isEmpty());

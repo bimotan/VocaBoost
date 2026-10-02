@@ -212,12 +212,17 @@ public class ReviewLogRepository {
         }
     }
 
-    /** The stored direction, or null when unknown. */
+    /** The stored direction, or null when unknown (or one this version does not know). */
     private static ReviewMode direction(String value) {
-        if (ReviewMode.EN_TO_ZH.name().equals(value)) {
-            return ReviewMode.EN_TO_ZH;
+        if (value == null) {
+            return null;
         }
-        return ReviewMode.ZH_TO_EN.name().equals(value) ? ReviewMode.ZH_TO_EN : null;
+        try {
+            ReviewMode direction = ReviewMode.valueOf(value);
+            return direction.isDirection() ? direction : null;
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /**

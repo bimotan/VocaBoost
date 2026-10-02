@@ -16,6 +16,7 @@ import com.vocabtrainer.service.ReviewQueueCounts;
 import com.vocabtrainer.service.ReviewScheduler;
 import com.vocabtrainer.service.ReviewService;
 import com.vocabtrainer.service.ReviewSettings;
+import com.vocabtrainer.service.cloze.Cloze;
 import com.vocabtrainer.service.scheduling.IntervalPreview;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.DataChanges;
@@ -62,6 +63,9 @@ import java.util.regex.Pattern;
  * Before the answer is submitted, only what cannot give the answer away is shown with the question
  * ({@link #hint()}); once it is checked, the card's phonetic, part of speech, example (the word in
  * bold), note and tags are shown too ({@link #revealedDetails()}).
+ *
+ * In Cloze mode the question is the card's example with the word blanked out and the hint its
+ * Chinese meaning; the session progress counts the cards skipped for want of a usable example.
  *
  * Call it on the UI thread only.
  */
@@ -146,6 +150,8 @@ public final class ReviewSessionPresenter {
     private String details = "";
     private String answerPrompt = ReviewMode.EN_TO_ZH.getPrompt();
     private String hint = "";
+    /** The cloze of the card on screen in Cloze mode; null otherwise. */
+    private Cloze cloze;
     /** The answered card's details; null until its answer is checked. */
     private WordDetails revealed;
     private String result = "";
@@ -324,7 +330,7 @@ public final class ReviewSessionPresenter {
         overridden = false;
         revealed = WordDetails.of(answered, reviewService.exampleSpans(answered));
         previewRatings();
-        checkedText = "Correct answer: " + checked.correctAnswer()
+        checkedText = "Correct answer: " + checked.correctAnswer() + formsInSentence(checked, cloze)
             + System.lineSeparator() + "Your answer: " + checked.userAnswer()
             + System.lineSeparator() + "Answer similarity: " + Formats.percent(checked.similarity())
             + verdict(checked);
@@ -660,6 +666,7 @@ public final class ReviewSessionPresenter {
         checked = null;
         revealed = null;
         hint = "";
+        cloze = null;
         overridden = false;
         cardNumber++;
         Optional<WordCard> next;
@@ -681,7 +688,13 @@ public final class ReviewSessionPresenter {
             return;
         }
         state = State.AWAITING_ANSWER;
-        question = questionMode == ReviewMode.ZH_TO_EN ? card.getChinese() : card.getEnglish();
+        cloze = questionMode == ReviewMode.CLOZE ? reviewService.currentCloze().orElse(null) : null;
+        question = switch (questionMode) {
+            case ZH_TO_EN -> card.getChinese();
+            // The service only shows cards whose example makes a cloze; never show the English word.
+            case CLOZE -> cloze == null ? card.getChinese() : cloze.masked();
+            default -> card.getEnglish();
+        };
         hint = hint(card, questionMode);
         details = questionMode.getLabel() + " | " + cardDetails(card, now);
     }
@@ -690,13 +703,17 @@ public final class ReviewSessionPresenter {
      * What may be shown with a question asked in {@code direction} before it is answered. English to
      * Chinese: the phonetic and part of speech and, on a line of its own, the example sentence unless
      * it has Chinese in it (a translation would give the meaning away). Chinese to English: only the
-     * part of speech, since the phonetic and the example give the word away. Never the note or tags,
+     * part of speech, since the phonetic and the example give the word away. Cloze: the Chinese
+     * meaning and the part of speech (the question is the example, blanked). Never the note or tags,
      * which often hold the meaning or a definition.
      */
     static String hint(WordCard card, ReviewMode direction) {
         String partOfSpeech = clean(card.getPartOfSpeech());
         if (direction == ReviewMode.ZH_TO_EN) {
             return partOfSpeech;
+        }
+        if (direction == ReviewMode.CLOZE) {
+            return String.join(" · ", nonEmpty("Hint: " + clean(card.getChinese()), partOfSpeech));
         }
         String line = String.join(" · ", nonEmpty(clean(card.getPhonetic()), partOfSpeech));
         String example = clean(card.getExampleSentence());
@@ -717,10 +734,36 @@ public final class ReviewSessionPresenter {
     private ReviewSessionSummary updateSessionProgress() {
         ReviewSessionSummary session = reviewService.sessionSummary();
         String target = session.sessionGoal() > 0 ? String.valueOf(session.sessionGoal()) : ALL_DUE;
+        int skipped = reviewService.clozeSkippedCount();
         sessionProgress = "Session " + session.cardsReviewed() + "/" + target
             + " | Accuracy " + Formats.percent(session.accuracy())
-            + " | XP " + session.xpEarned();
+            + " | XP " + session.xpEarned()
+            + (skipped > 0 ? " | " + skippedWithoutExamples(skipped) : "");
         return session;
+    }
+
+    /** "12 cards without examples skipped", for the cards a Cloze session could not ask. */
+    static String skippedWithoutExamples(int count) {
+        return count == 1 ? "1 card without an example skipped" : count + " cards without examples skipped";
+    }
+
+    /** Whether the question is a sentence (a cloze) rather than a word or a meaning. */
+    public boolean isSentenceQuestion() {
+        return cloze != null && card != null;
+    }
+
+    /**
+     * For a cloze whose blank held another form of the word, " (in the sentence: admonished)";
+     * otherwise nothing.
+     */
+    private static String formsInSentence(ReviewAnswer checked, Cloze cloze) {
+        if (cloze == null || checked.direction() != ReviewMode.CLOZE) {
+            return "";
+        }
+        List<String> others = cloze.blankedForms().stream()
+            .filter(form -> !form.equalsIgnoreCase(checked.correctAnswer()))
+            .toList();
+        return others.isEmpty() ? "" : " (in the sentence: " + String.join(", ", others) + ")";
     }
 
     /**
@@ -822,6 +865,11 @@ public final class ReviewSessionPresenter {
             + System.lineSeparator() + "Today review goal: " + progress.reviewedCount() + "/" + progress.reviewGoal()
             + " | New words: " + progress.newWordsCount() + "/" + progress.newWordGoal()
             + System.lineSeparator() + "Unlocked: " + Formats.achievementNames(session.unlockedAchievements());
+        int skipped = reviewService.clozeSkippedCount();
+        if (skipped > 0) {
+            completionMetrics += System.lineSeparator() + skippedWithoutExamples(skipped)
+                + ": an example sentence that contains the word lets Cloze mode ask them.";
+        }
         result = mode == ReviewMode.WEAK_WORDS
             ? "Reset Session to go through the weak words again, or switch deck from the header."
             : "Use Weak Words mode to keep working on your most fragile cards, or switch deck from the header.";
@@ -831,6 +879,10 @@ public final class ReviewSessionPresenter {
     private String nothingLeft() {
         if (mode == ReviewMode.WEAK_WORDS) {
             return "Every weak word was shown in this session.";
+        }
+        int skipped = reviewService.clozeSkippedCount();
+        if (skipped > 0) {
+            return "No due words with a usable example right now; " + skippedWithoutExamples(skipped) + ".";
         }
         ReviewQueueCounts queue = reviewService.queueCounts(deckId);
         if (queue.newCardsDue() > 0 && queue.newAvailableToday() == 0) {

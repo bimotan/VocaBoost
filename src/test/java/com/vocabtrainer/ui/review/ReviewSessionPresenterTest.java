@@ -847,6 +847,61 @@ class ReviewSessionPresenterTest {
     }
 
     @Test
+    void clozeModeAsksTheBlankedExampleWithTheMeaningAsAHintAndCountsSkippedCards() throws SQLException {
+        List<WordCard> firstNew = services.wordRepository().findNewCards(deckId, LocalDateTime.now().plusDays(1), 3);
+        for (WordCard withoutExample : firstNew.subList(0, 2)) {
+            withoutExample.setExampleSentence(withoutExample == firstNew.get(0) ? "" : "No such word here.");
+            services.wordRepository().update(withoutExample);
+        }
+        WordCard card = firstNew.get(2);
+        card.setExampleSentence("Yesterday the " + card.getEnglish() + "s were everywhere.");
+        services.wordRepository().update(card);
+        presenter.showDeck(deckId);
+
+        presenter.changeMode(ReviewMode.CLOZE);
+
+        assertEquals(card.getId(), presenter.card().orElseThrow().getId());
+        assertEquals("Yesterday the _____ were everywhere.", presenter.question());
+        assertTrue(presenter.isSentenceQuestion());
+        assertEquals("Hint: " + card.getChinese() + " · " + card.getPartOfSpeech(), presenter.hint());
+        assertEquals("Type the missing word", presenter.answerPrompt());
+        assertEquals("Cloze / 例句填空 | New | Lapses 0", presenter.details());
+        assertEquals("Session 0/20 | Accuracy 0% | XP 0 | 2 cards without examples skipped", presenter.sessionProgress());
+
+        presenter.setAnswer(card.getEnglish() + "s");
+        presenter.submit();
+
+        assertTrue(presenter.result().startsWith("Correct answer: " + card.getEnglish() + " (in the sentence: "
+            + card.getEnglish() + "s)" + nl() + "Your answer: " + card.getEnglish() + "s" + nl()
+            + "Answer similarity: 100%"), presenter.result());
+        assertEquals(List.of(card.getEnglish() + "s"), presenter.revealedDetails().orElseThrow().example().stream()
+            .filter(SentenceSpan::target).map(SentenceSpan::text).toList());
+        presenter.rate(ReviewRating.GOOD);
+        ReviewLog log = reviewLogs.findByWord(card.getId()).get(0);
+        assertEquals(ReviewMode.CLOZE, log.getDirection());
+        assertEquals(ReviewRating.GOOD, log.getEffectiveRating());
+    }
+
+    @Test
+    void aClozeSessionWithoutUsableExamplesSaysWhyItIsComplete() throws SQLException {
+        long empty = services.deckService().createDeck("No examples").getId();
+        services.wordRepository().insert(WordCard.createNew(empty, "petrichor", "雨后泥土的气味"));
+        services.wordRepository().insert(WordCard.createNew(empty, "sonder", "旁人皆有故事之感"));
+        presenter.showDeck(empty);
+
+        presenter.changeMode(ReviewMode.CLOZE);
+
+        assertEquals(State.COMPLETE, presenter.state());
+        assertFalse(presenter.isSentenceQuestion());
+        assertEquals("", presenter.hint());
+        assertEquals("No due words with a usable example right now; 2 cards without examples skipped.",
+            presenter.details());
+        assertTrue(presenter.completionMetrics().endsWith(nl() + "2 cards without examples skipped: an example"
+            + " sentence that contains the word lets Cloze mode ask them."), presenter.completionMetrics());
+        assertEquals("1 card without an example skipped", ReviewSessionPresenter.skippedWithoutExamples(1));
+    }
+
+    @Test
     void anEasyRecognitionInMixedModeShowsAndCountsAsGood() throws SQLException {
         ReviewSessionPresenter mixed = presenterAsking(ReviewMode.EN_TO_ZH);
         mixed.showDeck(deckId);

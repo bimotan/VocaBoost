@@ -14,6 +14,7 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.TransactionRunner;
 import com.vocabtrainer.repository.WordRepository;
+import com.vocabtrainer.service.cloze.Cloze;
 import com.vocabtrainer.service.cloze.ClozeMaker;
 import com.vocabtrainer.service.cloze.SentenceSpan;
 import com.vocabtrainer.service.cloze.WordForms;
@@ -35,6 +36,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -69,6 +71,14 @@ import java.util.logging.Logger;
  * (production) and logs the direction. Both directions share one schedule. Producing the word is the
  * harder skill, so a failure counts fully in either direction; a recognition success counts at most
  * as Good, so an easy recognition never grows the shared interval more than a normal Good review.
+ *
+ * <p><b>Cloze mode</b> asks each card with its example sentence, the word and its inflected forms
+ * blanked out ({@link ClozeMaker#make}), and its Chinese meaning as a hint; the learner types the
+ * English word, and the word as the sentence has it ("admonished") counts too. A card whose example
+ * makes no cloze (there is none, or the word is not in it) is skipped for the rest of the session
+ * and counted ({@link #clozeSkippedCount()}); the queues otherwise stay as they are. Like Mixed mode,
+ * a cloze shares the card's one schedule; typing the word is production, so its ratings count as
+ * they are, as Chinese to English ones do.
  *
  * <p><b>Answers</b> are graded by {@link AnswerGrader}, which caps the rating an answer can count as.
  * The user may override the cap ("I was right"): the chosen rating then counts as it is. Each log
@@ -106,6 +116,10 @@ public class ReviewService {
     private long activeSessionDeckId;
     private ReviewMode activeSessionMode;
     private ReviewMode currentQuestionMode = ReviewMode.EN_TO_ZH;
+    /** The cloze of the card shown last in Cloze mode; null otherwise. */
+    private Cloze currentCloze;
+    /** In Cloze mode, the cards of the session whose example makes no cloze; they are not shown. */
+    private final Set<Long> clozeSkipped = new HashSet<>();
     private int sessionTarget;
     private int sessionReviewed;
     private int sessionCorrect;
@@ -190,7 +204,13 @@ public class ReviewService {
             Optional<WordCard> selected = isSessionTargetReached()
                 ? sessionCardStillLearning(deckId, now)
                 : nextCandidate(deckId, now);
-            selected.ifPresent(word -> currentQuestionMode = questionModeFor(activeSessionMode));
+            currentCloze = null;
+            selected.ifPresent(word -> {
+                currentQuestionMode = questionModeFor(activeSessionMode);
+                if (currentQuestionMode == ReviewMode.CLOZE) {
+                    currentCloze = clozeMaker.make(word).orElse(null);
+                }
+            });
             return selected;
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read review words", e);
@@ -204,14 +224,15 @@ public class ReviewService {
             return weak.isPresent() ? weak : sessionCardStillLearning(deckId, now);
         }
         // Learning cards come first and soonest first, so their steps keep their length.
-        Optional<WordCard> learning = wordRepository.findLearningDueBy(deckId, now, 1).stream().findFirst();
+        Optional<WordCard> learning = first(limit -> wordRepository.findLearningDueBy(deckId, now, limit),
+            word -> true, 0);
         if (learning.isPresent()) {
             return learning;
         }
-        Optional<WordCard> review =
-            notShownYet(wordRepository.findDueReviews(deckId, now, dayEnd, sessionWords.size() + 1));
+        Optional<WordCard> review = first(limit -> wordRepository.findDueReviews(deckId, now, dayEnd, limit),
+            this::notShownYet, sessionWords.size());
         Optional<WordCard> newCard = newCardsLeftToday(deckId, now) > 0
-            ? notShownYet(wordRepository.findNewCards(deckId, dayEnd, sessionWords.size() + 1))
+            ? first(limit -> wordRepository.findNewCards(deckId, dayEnd, limit), this::notShownYet, sessionWords.size())
             : Optional.empty();
         if (review.isPresent() && newCard.isPresent()) {
             return introducesNewCard(deckId, now, dayEnd) ? newCard : review;
@@ -220,7 +241,55 @@ public class ReviewService {
         if (either.isPresent()) {
             return either;
         }
-        return wordRepository.findLearningDueBy(deckId, learnAheadLimit(now), 1).stream().findFirst();
+        return first(limit -> wordRepository.findLearningDueBy(deckId, learnAheadLimit(now), limit), word -> true, 0);
+    }
+
+    /** Reads the first {@code limit} cards of a queue, in its order. */
+    @FunctionalInterface
+    private interface Queue {
+        List<WordCard> read(int limit) throws SQLException;
+    }
+
+    /**
+     * The first card of {@code queue} that {@code wanted} accepts and that can be asked in the
+     * session's mode ({@link #canAsk}). Outside Cloze mode one read is enough; in Cloze mode the
+     * queue is read further, twice as far each time, while its head holds only cards that cannot be
+     * asked, so a deck where most cards have no example takes a few reads, not one per card.
+     *
+     * @param rejected at most how many cards {@code wanted} rejects at the head of the queue
+     */
+    private Optional<WordCard> first(Queue queue, Predicate<WordCard> wanted, int rejected) throws SQLException {
+        int limit = rejected + clozeSkipped.size() + 1;
+        while (true) {
+            List<WordCard> cards = queue.read(limit);
+            for (WordCard card : cards) {
+                if (wanted.test(card) && canAsk(card)) {
+                    return Optional.of(card);
+                }
+            }
+            if (cards.size() < limit || limit > Integer.MAX_VALUE / 2) {
+                return Optional.empty();
+            }
+            limit *= 2;
+        }
+    }
+
+    /**
+     * Whether the card can be asked in the session's mode: in Cloze mode only when its example makes
+     * a cloze. A card that cannot is skipped for the rest of the session and counted.
+     */
+    private boolean canAsk(WordCard word) {
+        if (activeSessionMode != ReviewMode.CLOZE) {
+            return true;
+        }
+        if (clozeSkipped.contains(word.getId())) {
+            return false;
+        }
+        if (clozeMaker.make(word).isPresent()) {
+            return true;
+        }
+        clozeSkipped.add(word.getId());
+        return false;
     }
 
     /**
@@ -257,8 +326,8 @@ public class ReviewService {
         return scheduler.selectNext(fresh.stream().filter(word -> word.getState() == CardState.REVIEW).toList(), now);
     }
 
-    private Optional<WordCard> notShownYet(List<WordCard> words) {
-        return words.stream().filter(word -> !sessionWords.contains(word.getId())).findFirst();
+    private boolean notShownYet(WordCard word) {
+        return !sessionWords.contains(word.getId());
     }
 
     /**
@@ -268,6 +337,7 @@ public class ReviewService {
     private Optional<WordCard> sessionCardStillLearning(long deckId, LocalDateTime now) throws SQLException {
         return wordRepository.findLearningDueBy(deckId, learnAheadLimit(now), CANDIDATES + sessionWords.size()).stream()
             .filter(word -> sessionWords.contains(word.getId()))
+            .filter(this::canAsk)
             .findFirst();
     }
 
@@ -294,6 +364,8 @@ public class ReviewService {
         sessionWords.clear();
         sessionAchievements.clear();
         pendingAnswers.clear();
+        clozeSkipped.clear();
+        currentCloze = null;
         currentQuestionMode = questionModeFor(activeSessionMode);
         remember(() -> {
             settings.saveMode(activeSessionMode);
@@ -327,6 +399,19 @@ public class ReviewService {
 
     public ReviewMode currentQuestionMode() {
         return currentQuestionMode;
+    }
+
+    /** The cloze of the card {@link #nextWord} returned last, in Cloze mode; empty otherwise. */
+    public Optional<Cloze> currentCloze() {
+        return Optional.ofNullable(currentCloze);
+    }
+
+    /**
+     * How many cards this Cloze session skipped so far because their example makes no cloze: there
+     * is none, or the word is not in it. 0 in other modes.
+     */
+    public int clozeSkippedCount() {
+        return clozeSkipped.size();
     }
 
     /** Whether the session rated as many different cards as its target; never for All Due. */
@@ -398,9 +483,14 @@ public class ReviewService {
                 .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
             ReviewMode askedIn = mode == null ? ReviewMode.EN_TO_ZH : mode;
             ReviewMode direction = askedIn == ReviewMode.MIXED ? currentQuestionMode : questionModeFor(askedIn);
-            String correctAnswer = direction == ReviewMode.ZH_TO_EN ? word.getEnglish() : word.getChinese();
-            AnswerGrade grade = grader.grade(word, direction, userAnswer,
-                english -> wordRepository.findByEnglish(word.getDeckId(), english));
+            boolean english = direction == ReviewMode.ZH_TO_EN || direction == ReviewMode.CLOZE;
+            String correctAnswer = english ? word.getEnglish() : word.getChinese();
+            AnswerGrader.DeckWords deckWords = typed -> wordRepository.findByEnglish(word.getDeckId(), typed);
+            // A cloze accepts the word as its sentence has it; the sentence is read again in case it was edited.
+            AnswerGrade grade = direction == ReviewMode.CLOZE
+                ? grader.gradeCloze(word, clozeMaker.make(word).map(Cloze::blankedForms).orElse(List.of()), userAnswer,
+                    deckWords)
+                : grader.grade(word, direction, userAnswer, deckWords);
             LocalDateTime submittedAt = LocalDateTime.now(clock);
             long responseMillis = shownAt == null ? 0L : Math.max(0L, Duration.between(shownAt, submittedAt).toMillis());
             ReviewAnswer answer = new ReviewAnswer(
@@ -694,8 +784,8 @@ public class ReviewService {
     }
 
     private ReviewMode questionModeFor(ReviewMode mode) {
-        if (mode == ReviewMode.ZH_TO_EN) {
-            return ReviewMode.ZH_TO_EN;
+        if (mode == ReviewMode.ZH_TO_EN || mode == ReviewMode.CLOZE) {
+            return mode;
         }
         if (mode == ReviewMode.MIXED) {
             return random.nextBoolean() ? ReviewMode.EN_TO_ZH : ReviewMode.ZH_TO_EN;

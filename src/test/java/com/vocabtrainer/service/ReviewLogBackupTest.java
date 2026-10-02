@@ -72,6 +72,7 @@ class ReviewLogBackupTest {
         logs.insert(log(word, FIRST, ReviewKind.LEARN, ReviewMode.EN_TO_ZH));
         logs.insert(log(word, FIRST.plusDays(1), ReviewKind.REVIEW, ReviewMode.ZH_TO_EN));
         logs.insert(log(word, FIRST.plusDays(2), ReviewKind.PRACTICE, null));
+        logs.insert(log(word, FIRST.plusDays(3), ReviewKind.REVIEW, ReviewMode.CLOZE));
         Path file = backups.exportJsonBackup(source.getId(), tempDir.resolve("source.json"));
         Deck target = decks.create("Target");
 
@@ -80,11 +81,12 @@ class ReviewLogBackupTest {
         assertTrue(result.invalidRows().isEmpty(), result.invalidRows().toString());
         WordCard restored = words.findByEnglish(target.getId(), "lucid").orElseThrow();
         List<ReviewLog> history = logs.findByWord(restored.getId());
-        assertEquals(List.of(ReviewKind.LEARN, ReviewKind.REVIEW, ReviewKind.PRACTICE),
+        assertEquals(List.of(ReviewKind.LEARN, ReviewKind.REVIEW, ReviewKind.PRACTICE, ReviewKind.REVIEW),
             history.stream().map(ReviewLog::getKind).toList());
         assertEquals(ReviewMode.EN_TO_ZH, history.get(0).getDirection());
         assertEquals(ReviewMode.ZH_TO_EN, history.get(1).getDirection());
         assertNull(history.get(2).getDirection());
+        assertEquals(ReviewMode.CLOZE, history.get(3).getDirection());
     }
 
     @Test

@@ -28,8 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The data a word has beyond its meaning (phonetic, part of speech, example, note, tags) is shown
- * once the answer is checked and in the Word List, and never gives an answer away before it is
- * submitted (review finding G2).
+ * once the answer is checked and in the Word List, and no mode gives an answer away before it is
+ * submitted (review findings G2 and G1).
  */
 @Tag("ui")
 class WordDetailsUiTest extends MainWindowUiTest {
@@ -73,6 +73,12 @@ class WordDetailsUiTest extends MainWindowUiTest {
             assertEquals("减弱; 减少", text("reviewWordLabel"));
             assertNoEnglishShown("Mixed, Chinese to English", "abate");
         }
+
+        selectMode(ReviewMode.CLOZE);
+        assertEquals("The storm began to _____.", text("reviewWordLabel"));
+        assertEquals("Hint: 减弱; 减少 · verb", text("reviewHintLabel"));
+        assertNoEnglishShown("Cloze", "abate");
+        snapshot("cloze");
 
         // A relearning card is weak, and its step is due: Weak Words asks it first, English to Chinese.
         abate.setState(CardState.RELEARNING);

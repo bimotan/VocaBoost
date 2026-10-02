@@ -525,8 +525,10 @@ public class BackupService {
             return null;
         }
         String name = value.trim().toUpperCase(Locale.ROOT);
-        if (name.equals(ReviewMode.EN_TO_ZH.name()) || name.equals(ReviewMode.ZH_TO_EN.name())) {
-            return ReviewMode.valueOf(name);
+        for (ReviewMode direction : ReviewMode.values()) {
+            if (direction.isDirection() && direction.name().equals(name)) {
+                return direction;
+            }
         }
         throw new IllegalArgumentException("unknown direction \"" + value + "\"");
     }

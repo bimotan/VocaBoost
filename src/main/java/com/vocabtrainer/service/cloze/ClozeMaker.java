@@ -1,11 +1,14 @@
 package com.vocabtrainer.service.cloze;
 
+import com.vocabtrainer.domain.WordCard;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -20,6 +23,9 @@ import java.util.stream.Collectors;
  * <p>In an expression of several words ("give up", "red herring") the first or the last word may
  * be inflected ("gave up", "red herrings"), and the words may be separated by any spaces or a
  * hyphen.
+ *
+ * <p>The same matching marks the word in its example ({@link #highlight}) and blanks it out for a
+ * cloze question ({@link #make}).
  */
 public class ClozeMaker {
     private static final Pattern WORD_SEPARATOR = Pattern.compile("[\\s\\-\\u2010-\\u2015]+");
@@ -63,6 +69,25 @@ public class ClozeMaker {
             spans.add(new SentenceSpan(text.substring(end), false));
         }
         return List.copyOf(spans);
+    }
+
+    /** The cloze of the word's example sentence; see {@link #make(String, String)}. */
+    public Optional<Cloze> make(WordCard word) {
+        return make(word.getExampleSentence(), word.getEnglish());
+    }
+
+    /**
+     * {@code sentence} with every occurrence of {@code english} blanked out; empty when there is no
+     * sentence, the word does not occur in it, or nothing but the word is left (no context to fill
+     * the blank from).
+     */
+    public Optional<Cloze> make(String sentence, String english) {
+        List<SentenceSpan> spans = highlight(sentence, english);
+        boolean hasBlank = spans.stream().anyMatch(SentenceSpan::target);
+        boolean hasContext = spans.stream()
+            .filter(span -> !span.target())
+            .anyMatch(span -> span.text().codePoints().anyMatch(Character::isLetter));
+        return hasBlank && hasContext ? Optional.of(new Cloze(spans)) : Optional.empty();
     }
 
     /**

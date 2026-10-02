@@ -61,7 +61,7 @@ record BackupFile(
     /**
      * @param kind            {@code LEARN}, {@code REVIEW} or {@code PRACTICE}; absent in backups written
      *                        before it was logged, which restore as {@code REVIEW}
-     * @param direction       {@code EN_TO_ZH} or {@code ZH_TO_EN}; absent when unknown
+     * @param direction       {@code EN_TO_ZH}, {@code ZH_TO_EN} or {@code CLOZE}; absent when unknown
      * @param effectiveRating the rating the schedule used; absent when the log did not record it,
      *                        which reads as the rating capped by the similarity
      * @param overridden      whether the user overrode the answer check; absent reads as false

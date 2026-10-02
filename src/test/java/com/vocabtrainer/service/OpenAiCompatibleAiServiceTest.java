@@ -80,6 +80,17 @@ class OpenAiCompatibleAiServiceTest {
     }
 
     @Test
+    void aClozeQuestionIsSaidSo() throws Exception {
+        server.answer("/v1/chat/completions", 200, completion(STRUCTURED_REPLY));
+
+        provider("/v1", null).explain(new ExplanationRequest(abandon, "abandoned", ReviewMode.CLOZE));
+
+        String user = onlyRequestBody().path("messages").get(1).path("content").asText();
+        assertTrue(user.endsWith("Question: the learner saw the existing example with the word blanked out and the"
+            + " Chinese meaning, and typed the missing English word.\nLearner's answer: abandoned"), user);
+    }
+
+    @Test
     void withoutAnAnswerOnlyTheWordIsExplained() throws Exception {
         server.answer("/v1/chat/completions", 200, completion("lucid 指清晰易懂的。"));
 

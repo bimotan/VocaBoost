@@ -158,9 +158,12 @@ public class OpenAiCompatibleAiService implements AiService {
             prompt.append("\nThere is no learner answer; explain the word.");
             return prompt.toString();
         }
-        prompt.append(request.direction() == ReviewMode.ZH_TO_EN
-            ? "\nQuestion: the learner saw the Chinese meaning and typed the English word."
-            : "\nQuestion: the learner saw the English word and typed its Chinese meaning.");
+        prompt.append(switch (request.direction()) {
+            case ZH_TO_EN -> "\nQuestion: the learner saw the Chinese meaning and typed the English word.";
+            case CLOZE -> "\nQuestion: the learner saw the existing example with the word blanked out and the"
+                + " Chinese meaning, and typed the missing English word.";
+            default -> "\nQuestion: the learner saw the English word and typed its Chinese meaning.";
+        });
         String answer = clean(request.typedAnswer());
         prompt.append("\nLearner's answer: ").append(answer.isEmpty() ? "(left blank)" : answer);
         return prompt.toString();

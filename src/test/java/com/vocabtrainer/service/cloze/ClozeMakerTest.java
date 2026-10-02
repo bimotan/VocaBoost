@@ -90,6 +90,37 @@ class ClozeMakerTest {
     }
 
     @Test
+    void aClozeBlanksEveryFormOfTheWordAndKnowsWhatWasBlanked() {
+        Cloze cloze = rulesOnly.make("The mentor admonished him, then admonished her too.", "admonish").orElseThrow();
+
+        assertEquals("The mentor _____ him, then _____ her too.", cloze.masked());
+        assertEquals("The mentor admonished him, then admonished her too.", cloze.sentence());
+        assertEquals(List.of("admonished"), cloze.blankedForms());
+
+        Cloze mixed = rulesOnly.make("Abate it now and it abates later.", "abate").orElseThrow();
+        assertEquals("_____ it now and it _____ later.", mixed.masked());
+        assertEquals(List.of("Abate", "abates"), mixed.blankedForms());
+
+        WordForms ecdict = english -> english.equals("forgo") ? Set.of("forwent", "forgone") : Set.of();
+        Cloze irregular = new ClozeMaker(ecdict).make("She forwent the bonus.", "forgo").orElseThrow();
+        assertEquals("She _____ the bonus.", irregular.masked());
+        assertEquals(List.of("forwent"), irregular.blankedForms());
+
+        Cloze expression = rulesOnly.make("The clues were red herrings.", "red herring").orElseThrow();
+        assertEquals("The clues were _____.", expression.masked());
+        assertEquals(List.of("red herrings"), expression.blankedForms());
+    }
+
+    @Test
+    void noClozeWithoutASentenceTheWordOrAnythingAroundIt() {
+        assertTrue(rulesOnly.make(null, "abate").isEmpty());
+        assertTrue(rulesOnly.make("  ", "abate").isEmpty());
+        assertTrue(rulesOnly.make("The abatement was small.", "abate").isEmpty(), "the word is not in it");
+        assertTrue(rulesOnly.make("Abate!", "abate").isEmpty(), "nothing to fill the blank from");
+        assertTrue(rulesOnly.make("She forwent the bonus.", "forgo").isEmpty(), "irregular, and no dictionary");
+    }
+
+    @Test
     void simpleRulesGiveTheUsualForms() {
         assertTrue(Inflections.of("abate").containsAll(Set.of("abate", "abates", "abated", "abating")));
         assertTrue(Inflections.of("decry").containsAll(Set.of("decries", "decried", "decrying")));

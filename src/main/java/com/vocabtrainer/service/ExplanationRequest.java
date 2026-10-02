@@ -11,14 +11,16 @@ import java.util.Objects;
  * and in which direction the question was asked.
  *
  * @param typedAnswer the learner's answer; null when there is none (an explanation of the word only)
- * @param direction   {@link ReviewMode#EN_TO_ZH} (the English word was shown) or
- *                    {@link ReviewMode#ZH_TO_EN} (the Chinese meaning was shown); null without an answer
+ * @param direction   {@link ReviewMode#EN_TO_ZH} (the English word was shown),
+ *                    {@link ReviewMode#ZH_TO_EN} (the Chinese meaning was shown) or
+ *                    {@link ReviewMode#CLOZE} (the example with the word blanked out and the Chinese
+ *                    meaning were shown); null without an answer
  */
 public record ExplanationRequest(WordCard word, String typedAnswer, ReviewMode direction) {
     public ExplanationRequest {
         Objects.requireNonNull(word, "word");
-        if (direction != null && direction != ReviewMode.EN_TO_ZH && direction != ReviewMode.ZH_TO_EN) {
-            throw new IllegalArgumentException("A question is asked EN_TO_ZH or ZH_TO_EN, not " + direction);
+        if (direction != null && !direction.isDirection()) {
+            throw new IllegalArgumentException("A question is asked EN_TO_ZH, ZH_TO_EN or CLOZE, not " + direction);
         }
     }
 

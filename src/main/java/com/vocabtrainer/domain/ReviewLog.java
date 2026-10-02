@@ -33,8 +33,9 @@ public class ReviewLog {
 
     /**
      * @param kind      what the review was; null reads as {@link ReviewKind#REVIEW}
-     * @param direction {@link ReviewMode#EN_TO_ZH} or {@link ReviewMode#ZH_TO_EN}, the way the
-     *                  question was asked; null if unknown (logs of older versions)
+     * @param direction {@link ReviewMode#EN_TO_ZH}, {@link ReviewMode#ZH_TO_EN} or
+     *                  {@link ReviewMode#CLOZE}, the way the question was asked; null if unknown
+     *                  (logs of older versions)
      */
     public ReviewLog(long id, long wordId, LocalDateTime reviewedAt, String userAnswer,
                      String correctAnswer, double similarity, ReviewRating rating, long elapsedMillis,
@@ -52,8 +53,8 @@ public class ReviewLog {
     public ReviewLog(long id, long wordId, LocalDateTime reviewedAt, String userAnswer,
                      String correctAnswer, double similarity, ReviewRating rating, long elapsedMillis,
                      ReviewKind kind, ReviewMode direction, ReviewRating effectiveRating, boolean overridden) {
-        if (direction != null && direction != ReviewMode.EN_TO_ZH && direction != ReviewMode.ZH_TO_EN) {
-            throw new IllegalArgumentException("A question direction is EN_TO_ZH or ZH_TO_EN, not " + direction);
+        if (direction != null && !direction.isDirection()) {
+            throw new IllegalArgumentException("A question direction is EN_TO_ZH, ZH_TO_EN or CLOZE, not " + direction);
         }
         this.id = id;
         this.wordId = wordId;
@@ -137,7 +138,7 @@ public class ReviewLog {
         return kind;
     }
 
-    /** How the question was asked (English to Chinese or Chinese to English); null if unknown. */
+    /** How the question was asked (English to Chinese, Chinese to English or cloze); null if unknown. */
     public ReviewMode getDirection() {
         return direction;
     }

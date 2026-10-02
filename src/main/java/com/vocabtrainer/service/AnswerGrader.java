@@ -29,6 +29,10 @@ import java.util.Set;
  * (one letter wrong, missing, extra or swapped with its neighbour) per {@value #LETTERS_PER_TYPO}
  * letters of the word counts at most as Hard, so "lucud" for lucid is Hard; anything further off,
  * and any slip in a shorter word, is Again.
+ *
+ * <p><b>Cloze.</b> Graded as Chinese to English, except that the word as the sentence has it
+ * ("admonished" for admonish) counts as the word itself, and a typo is measured against whichever of
+ * the two is closer.
  */
 public class AnswerGrader {
     /** A word gets one typo for this many letters: none below 5 letters, one up to 9, two up to 14. */
@@ -85,15 +89,45 @@ public class AnswerGrader {
 
     /**
      * Grades {@code typed} as the answer to {@code word} asked in {@code direction}
-     * ({@link ReviewMode#ZH_TO_EN} expects the English word, anything else the Chinese meaning).
+     * ({@link ReviewMode#ZH_TO_EN} and {@link ReviewMode#CLOZE} expect the English word, anything
+     * else the Chinese meaning). A cloze is graded as Chinese to English here; see
+     * {@link #gradeCloze} for one whose blank holds an inflected form.
      *
      * @param deckWords the words of the deck, to tell another word or a synonym from a typo
      */
     public AnswerGrade grade(WordCard word, ReviewMode direction, String typed, DeckWords deckWords)
         throws SQLException {
-        return direction == ReviewMode.ZH_TO_EN
+        return direction == ReviewMode.ZH_TO_EN || direction == ReviewMode.CLOZE
             ? gradeEnglish(word, typed, deckWords)
             : gradeMeaning(typed, word.getChinese());
+    }
+
+    /**
+     * Grades a typed English word for the blank of a cloze question about {@code word}: like
+     * {@link #gradeEnglish}, but any of {@code blankedForms}, the word as the sentence has it
+     * ("admonished"), counts as the word itself, and a misspelling is graded against the closest of
+     * the word and those forms.
+     */
+    public AnswerGrade gradeCloze(WordCard word, List<String> blankedForms, String typed, DeckWords deckWords)
+        throws SQLException {
+        AnswerGrade best = gradeEnglish(word, typed, deckWords);
+        for (String form : blankedForms) {
+            AnswerGrade grade = gradeSpelling(word, form, typed, deckWords);
+            if (isBetter(grade, best)) {
+                best = grade;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * A higher cap wins, then the closer of two misspellings. A wrong answer keeps its grade against
+     * the word itself, which says when it is a confusable ("affect" for effect).
+     */
+    private static boolean isBetter(AnswerGrade grade, AnswerGrade than) {
+        int rating = grade.maxRating().compareTo(than.maxRating());
+        return rating > 0
+            || (rating == 0 && grade.maxRating() != ReviewRating.AGAIN && grade.similarity() > than.similarity());
     }
 
     /** Grades a typed Chinese meaning against {@code gloss}; see the class comment. */
@@ -103,7 +137,12 @@ public class AnswerGrader {
 
     /** Grades a typed English word for {@code word}; see the class comment. */
     public AnswerGrade gradeEnglish(WordCard word, String typed, DeckWords deckWords) throws SQLException {
-        String expected = word.getEnglish();
+        return gradeSpelling(word, word.getEnglish(), typed, deckWords);
+    }
+
+    /** Grades a typed English word that should be {@code expected}, {@code word} or a form of it. */
+    private AnswerGrade gradeSpelling(WordCard word, String expected, String typed, DeckWords deckWords)
+        throws SQLException {
         String answer = typed == null ? "" : typed.trim();
         if (similarity.letters(answer).isEmpty()) {
             return new AnswerGrade(0.0, ReviewRating.AGAIN, AnswerGrade.Verdict.WRONG, null, null);

@@ -10,7 +10,8 @@ import java.time.LocalDateTime;
  *
  * @param grade          how the answer was graded: its similarity and the best rating it can count as
  * @param responseMillis the time from showing the card to submitting the answer; 0 if unknown
- * @param direction      how the question was asked: {@link ReviewMode#EN_TO_ZH} or {@link ReviewMode#ZH_TO_EN}
+ * @param direction      how the question was asked: {@link ReviewMode#EN_TO_ZH}, {@link ReviewMode#ZH_TO_EN}
+ *                       or {@link ReviewMode#CLOZE}
  * @param mode           the review mode the answer was given in
  */
 public record ReviewAnswer(
