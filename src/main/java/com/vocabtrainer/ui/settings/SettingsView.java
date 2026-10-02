@@ -2,6 +2,7 @@ package com.vocabtrainer.ui.settings;
 
 import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.service.DisplaySettings;
+import com.vocabtrainer.service.ExamPlanService;
 import com.vocabtrainer.service.GoalSettings;
 import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.ReviewSettings;
@@ -35,7 +36,7 @@ import java.util.Optional;
 import java.util.function.IntConsumer;
 
 /**
- * The Settings tab: study settings (scheduler, new words per day, goals), offline mode (the same
+ * The Settings tab: study settings (scheduler, new words per day, goals, exam date), offline mode (the same
  * switch as the header's), the ECDICT dictionary, the AI provider, the data and log folders, the
  * text size and the language. Every setting is saved in the {@code settings} table when it is
  * changed and applies at once.
@@ -55,7 +56,8 @@ public final class SettingsView {
      * {@code applyTextSize} shows the window's text at a saved text size.
      */
     public SettingsView(ViewContext context, SettingsService settingsService, SchedulingSettings scheduling,
-                        ReviewSettings reviewSettings, GoalSettings goalSettings, AiCacheRepository aiCacheRepository,
+                        ReviewSettings reviewSettings, GoalSettings goalSettings, ExamPlanService examPlans,
+                        AiCacheRepository aiCacheRepository,
                         EcdictImportService ecdictImportService, LocalDictionaryService localDictionary,
                         ConfiguredServices configured, OfflineMode offlineMode, Path databasePath,
                         DisplaySettings display, IntConsumer applyTextSize) {
@@ -64,7 +66,7 @@ public final class SettingsView {
         this.display = display;
         this.applyTextSize = applyTextSize;
 
-        StudySettingsBox study = new StudySettingsBox(context, scheduling, reviewSettings, goalSettings);
+        StudySettingsBox study = new StudySettingsBox(context, scheduling, reviewSettings, goalSettings, examPlans);
         EcdictSettingsBox ecdict = new EcdictSettingsBox(context, settingsService, ecdictImportService, localDictionary);
         AiSettingsBox ai = new AiSettingsBox(context, settingsService, aiCacheRepository, configured);
 

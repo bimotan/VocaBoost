@@ -1,6 +1,5 @@
 package com.vocabtrainer.ui.dashboard;
 
-import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.service.ExamCountdown;
 import com.vocabtrainer.service.ExamPlanService;
 import com.vocabtrainer.service.NewCardPlan;
@@ -93,8 +92,7 @@ final class ExamPlanBox {
     }
 
     private void editExam() {
-        Deck deck = context.decks().current();
-        OptionalInt moved = new ExamDialog(context, planService).edit(deck);
+        OptionalInt moved = ExamDialog.open(context, planService);
         if (moved.isEmpty()) {
             return;
         }
@@ -102,13 +100,6 @@ final class ExamPlanBox {
         statusLabel.setText(count == 0 ? "Saved."
             : count == 1 ? "Saved. 1 review due on or after the exam now comes before it."
             : "Saved. " + count + " reviews due on or after the exam now come before it.");
-        context.errors().guard("Exam date saved, but refreshing the views failed", () -> {
-            if (count > 0) {
-                context.changes().publish(DataChange.REVIEW_SETTINGS, DataChange.WORDS);
-            } else {
-                context.changes().publish(DataChange.REVIEW_SETTINGS);
-            }
-        });
     }
 
     private void applyPlan() {

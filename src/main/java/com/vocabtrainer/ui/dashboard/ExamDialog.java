@@ -4,7 +4,9 @@ import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.Exam;
 import com.vocabtrainer.service.ExamPlanService;
 import com.vocabtrainer.service.ExamSettings;
+import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.ViewContext;
+import com.vocabtrainer.ui.Widgets;
 import javafx.scene.control.DatePicker;
 import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
@@ -12,7 +14,6 @@ import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Region;
 import javafx.util.StringConverter;
 
 import java.time.LocalDate;
@@ -23,22 +24,43 @@ import java.util.OptionalInt;
 /**
  * Edits the exam date in a modal form: the exam of every deck or the current deck's own, its name
  * and its date (empty for none). Saving brings the reviews scheduled on or after the exam forward
- * into the last days before it.
+ * into the last days before it. The Dashboard and the Settings tab open it.
  */
-final class ExamDialog {
+public final class ExamDialog {
     private final ViewContext context;
     private final ExamPlanService planService;
 
-    ExamDialog(ViewContext context, ExamPlanService planService) {
+    private ExamDialog(ViewContext context, ExamPlanService planService) {
         this.context = context;
         this.planService = planService;
+    }
+
+    /**
+     * Shows the form for the current deck; once the exam is saved, publishes
+     * {@link DataChange#REVIEW_SETTINGS} (and {@link DataChange#WORDS} when reviews were brought
+     * forward). Returns how many reviews were brought forward, empty when the form was cancelled or
+     * the exam not saved, which is reported.
+     */
+    public static OptionalInt open(ViewContext context, ExamPlanService planService) {
+        OptionalInt moved = new ExamDialog(context, planService).edit(context.decks().current());
+        if (moved.isPresent()) {
+            boolean reviewsMoved = moved.getAsInt() > 0;
+            context.errors().guard("Exam date saved, but refreshing the views failed", () -> {
+                if (reviewsMoved) {
+                    context.changes().publish(DataChange.REVIEW_SETTINGS, DataChange.WORDS);
+                } else {
+                    context.changes().publish(DataChange.REVIEW_SETTINGS);
+                }
+            });
+        }
+        return moved;
     }
 
     /**
      * Shows the form for {@code deck} and saves it on OK; how many reviews were brought forward when
      * it was saved, empty when it was cancelled or not saved.
      */
-    OptionalInt edit(Deck deck) {
+    private OptionalInt edit(Deck deck) {
         ExamSettings settings = planService.settings();
         boolean ownExam = settings.deckExam(deck.getId()).isPresent();
 
@@ -69,11 +91,11 @@ final class ExamDialog {
         form.setId("examForm");
         form.setHgap(10);
         form.setVgap(10);
-        form.add(new Label("Exam for"), 0, 0);
+        form.add(Widgets.formLabel("Exam _for", everyDeck), 0, 0);
         form.add(new HBox(16, everyDeck, thisDeck), 1, 0);
-        form.add(new Label("Exam"), 0, 1);
+        form.add(Widgets.formLabel("_Exam", nameField), 0, 1);
         form.add(nameField, 1, 1);
-        form.add(new Label("Date"), 0, 2);
+        form.add(Widgets.formLabel("_Date", datePicker), 0, 2);
         form.add(datePicker, 1, 2);
         form.add(hint("Reviews that would fall on or after the exam day come in the last week before it instead."
             + " Leave the date empty for no exam; for " + deck.getName() + " only, an empty date means it has"
@@ -115,12 +137,9 @@ final class ExamDialog {
     }
 
     private static Label hint(String text) {
-        Label label = new Label(text);
-        label.setWrapText(true);
+        Label label = Widgets.hint(text);
         // A fixed width lets the grid give the wrapped lines their height.
         label.setPrefWidth(380);
-        label.setMinHeight(Region.USE_PREF_SIZE);
-        label.setStyle("-fx-text-fill: #6b7280; -fx-font-size: 12px;");
         return label;
     }
 

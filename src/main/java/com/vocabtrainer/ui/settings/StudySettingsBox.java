@@ -2,7 +2,10 @@ package com.vocabtrainer.ui.settings;
 
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.GoalTargets;
+import com.vocabtrainer.service.ExamCountdown;
+import com.vocabtrainer.service.ExamPlanService;
 import com.vocabtrainer.service.GoalSettings;
+import com.vocabtrainer.service.NewCardPlan;
 import com.vocabtrainer.service.ReviewSettings;
 import com.vocabtrainer.service.SchedulingSettings;
 import com.vocabtrainer.service.scheduling.Fsrs;
@@ -12,6 +15,7 @@ import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.Formats;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
+import com.vocabtrainer.ui.dashboard.ExamDialog;
 import com.vocabtrainer.ui.dashboard.GoalsDialog;
 import com.vocabtrainer.util.DateTimeUtil;
 import javafx.event.ActionEvent;
@@ -32,13 +36,15 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.util.StringConverter;
 
+import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.stream.IntStream;
 
 /**
  * How the user studies: the desired retention and the hour a study day starts (the scheduler), the
- * new-words-per-day limit of every deck, and the daily goals (through the Dashboard's "Edit goals"
- * form). A change is saved and applied at once: the next rating, interval preview and due count use
+ * new-words-per-day limit of every deck, the daily goals (through the Dashboard's "Edit goals"
+ * form) and the exam date with its new-word plan (through the Dashboard's "Set exam date" form). A change is saved and applied at once: the next rating, interval preview and due count use
  * it, and {@link DataChange#REVIEW_SETTINGS} tells the views that what is due today may have changed.
  */
 final class StudySettingsBox {
@@ -46,11 +52,13 @@ final class StudySettingsBox {
     private static final double MIN_OFFERED_RETENTION = 0.80;
     /** The stability the retention hint compares intervals for: 10 days, the interval it gives at 90%. */
     private static final double HINT_STABILITY_DAYS = 10;
+    private static final DateTimeFormatter EXAM_DATE = DateTimeFormatter.ofPattern("EEE yyyy-MM-dd", Locale.ENGLISH);
 
     private final ViewContext context;
     private final SchedulingSettings scheduling;
     private final ReviewSettings reviewSettings;
     private final GoalSettings goalSettings;
+    private final ExamPlanService examPlans;
     private final Slider retentionSlider = new Slider();
     private final Label retentionLabel = new Label();
     private final Label retentionHint = hint("desiredRetentionHintLabel");
@@ -60,6 +68,7 @@ final class StudySettingsBox {
     /** Shown while the current deck has a limit of its own: drops it, so the deck follows the default. */
     private final Button useDefaultNewCardsButton = new Button("Use the default for this deck");
     private final Label goalsSummary = hint("goalsSummaryLabel");
+    private final Label examSummary = hint("examSummaryLabel");
     private final VBox root;
     /** Set while the controls are made to show the saved settings, so those are not saved again. */
     private boolean showingSaved;
@@ -67,11 +76,12 @@ final class StudySettingsBox {
     private int savedNewCardsPerDay;
 
     StudySettingsBox(ViewContext context, SchedulingSettings scheduling, ReviewSettings reviewSettings,
-                     GoalSettings goalSettings) {
+                     GoalSettings goalSettings, ExamPlanService examPlans) {
         this.context = context;
         this.scheduling = scheduling;
         this.reviewSettings = reviewSettings;
         this.goalSettings = goalSettings;
+        this.examPlans = examPlans;
 
         configureRetention();
         configureRollover();
@@ -79,6 +89,10 @@ final class StudySettingsBox {
         Button editGoalsButton = new Button("Edit goals");
         editGoalsButton.setId("settingsEditGoalsButton");
         editGoalsButton.setOnAction(event -> GoalsDialog.open(context, goalSettings));
+        Button editExamButton = new Button("Set exam date");
+        editExamButton.setId("settingsEditExamButton");
+        editExamButton.setOnAction(event ->
+            context.errors().guard("Exam date not saved", () -> ExamDialog.open(context, examPlans)));
 
         GridPane form = new GridPane();
         form.setHgap(12);
@@ -94,6 +108,7 @@ final class StudySettingsBox {
         newCardsRow.setAlignment(Pos.CENTER_LEFT);
         addRow(form, 4, Widgets.formLabel("New _words per day", newCardsSpinner), newCardsRow, newCardsHint);
         addRow(form, 6, new Label("Daily goals"), editGoalsButton, goalsSummary);
+        addRow(form, 8, new Label("Exam"), editExamButton, examSummary);
         GridPane.setHgrow(retentionRow, Priority.ALWAYS);
 
         showSaved();
@@ -312,8 +327,8 @@ final class StudySettingsBox {
     private void showDeckSettings() {
         Deck deck = context.decks().current();
         long deckId = deck.getId();
-        String newCards = "The most new words a deck introduces per study day, unless the Review tab set a"
-            + " limit for that deck.";
+        String newCards = "The most new words a deck introduces per study day, unless the Review tab or the"
+            + " Dashboard's new-word plan set a limit for that deck.";
         boolean ownLimit = reviewSettings.hasOwnNewCardsPerDay(deckId);
         if (ownLimit) {
             newCards += " " + deck.getName() + " has its own limit: " + reviewSettings.newCardsPerDay(deckId) + ".";
@@ -330,6 +345,24 @@ final class StudySettingsBox {
             .map(own -> " " + deck.getName() + " has its own goals: " + goalText(own) + ".")
             .orElse("");
         goalsSummary.setText(goals);
+        examSummary.setText(examText(deck.getName(), examPlans.countdown(deckId),
+            examPlans.settings().deckExam(deckId).isPresent(), examPlans.newCardPlan(deckId)));
+    }
+
+    /**
+     * The current deck's exam, whose it is, and the new words a day it takes to start every new word
+     * before it; or what an exam date does.
+     */
+    static String examText(String deckName, Optional<ExamCountdown> countdown, boolean ownExam,
+                           Optional<NewCardPlan> plan) {
+        if (countdown.isEmpty()) {
+            return "No exam date. With one, reviews that would fall on or after it come in the last week before"
+                + " it, and the Dashboard counts down and plans the new words.";
+        }
+        ExamCountdown exam = countdown.get();
+        String text = exam.toDisplayText() + ": " + EXAM_DATE.format(exam.exam().date()) + ", "
+            + (ownExam ? deckName + "'s own exam." : "every deck's exam.");
+        return plan.map(found -> text + " " + found.toDisplayText()).orElse(text);
     }
 
     private static String goalText(GoalTargets goals) {

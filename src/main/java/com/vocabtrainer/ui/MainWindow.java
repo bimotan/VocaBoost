@@ -66,7 +66,7 @@ public class MainWindow {
         SettingsView settings = new SettingsView(context, services.settingsService(),
             new SchedulingSettings(services.settingsService(), services.reviewScheduler()),
             new ReviewSettings(services.settingsService()), services.goalService().settings(),
-            services.aiCacheRepository(), services.ecdictImportService(), services.localDictionary(), configured,
+            services.examPlanService(), services.aiCacheRepository(), services.ecdictImportService(), services.localDictionary(), configured,
             offlineMode, databasePath, display, percent -> AppStyle.applyTextSize(root, percent));
 
         TabPane tabs = new TabPane();

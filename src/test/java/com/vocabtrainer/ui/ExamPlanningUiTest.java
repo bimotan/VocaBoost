@@ -15,7 +15,9 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -82,6 +84,28 @@ class ExamPlanningUiTest extends MainWindowUiTest {
         restartApp();
         selectTab("dashboardTab");
         assertEquals("GRE in 10 days", text("examCountdownLabel"));
+    }
+
+    @Test
+    void theSettingsTabSetsTheSameExamAndShowsItsPlan() {
+        selectTab("settingsTab");
+        assertTrue(text("examSummaryLabel").startsWith("No exam date."), text("examSummaryLabel"));
+
+        LocalDate exam = today().plusDays(10);
+        dialogs.submitForm(form -> datePicker(form).getEditor().setText(exam.toString()));
+        click("settingsEditExamButton");
+
+        assertEquals("Exam date", dialogs.last(ScriptedDialogs.Kind.FORM).title());
+        assertEquals("GRE in 10 days: " + DateTimeFormatter.ofPattern("EEE yyyy-MM-dd", Locale.ENGLISH).format(exam) + ", every deck's exam. To finish 215 new words before the"
+                + " exam you need ~22 new words/day (now 20).", text("examSummaryLabel"));
+        selectTab("dashboardTab");
+        assertEquals("GRE in 10 days", text("examCountdownLabel"), "the Dashboard shows the same exam");
+
+        click("applyNewWordPlanButton");
+        selectTab("settingsTab");
+        assertTrue(text("newCardsPerDayHintLabel").endsWith("has its own limit: 22."), text("newCardsPerDayHintLabel"));
+        assertTrue(text("examSummaryLabel").endsWith("the limit of 22/day is enough."), text("examSummaryLabel"));
+        assertTrue(isVisible("useDefaultNewCardsPerDayButton"), "the plan's limit can be dropped again");
     }
 
     @Test
