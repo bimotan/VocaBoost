@@ -204,6 +204,10 @@ public class ImportExportService {
             card.setConsecutiveCorrect(Math.max(0, consecutiveCorrect));
             card.setRepetitions(Math.max(0, consecutiveCorrect));
             card.setNextReviewAt(intervalDays <= 0 ? LocalDateTime.now() : lastReviewedAt.plusDays(intervalDays));
+            if (intervalDays > 0 || consecutiveCorrect > 0) {
+                // Reviewed before; a row without progress stays a new word.
+                card.estimateStateFromLegacySchedule();
+            }
             return card;
         } catch (DateTimeParseException e) {
             throw new IllegalArgumentException("date format is invalid");

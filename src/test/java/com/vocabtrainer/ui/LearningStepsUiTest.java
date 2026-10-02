@@ -99,4 +99,26 @@ class LearningStepsUiTest extends MainWindowUiTest {
         assertEquals(1, logs.size());
         assertEquals(7_000, logs.get(0).getElapsedMillis());
     }
+
+    @Test
+    void timeSpentOnOtherTabsIsNotPartOfTheResponseTime() throws SQLException {
+        // The first card was loaded at startup, behind the Dashboard.
+        clock.advance(Duration.ofMinutes(15));
+        selectTab("reviewTab");
+        WordCard word = questionWord();
+        clock.advance(Duration.ofSeconds(5));
+        selectTab("wordListTab");
+        clock.advance(Duration.ofMinutes(30));
+        selectTab("reviewTab");
+        clock.advance(Duration.ofSeconds(2));
+
+        type("answerField", correctAnswer(word));
+        click("submitAnswerButton");
+        waitForBackgroundTasks();
+        click("rateGoodButton");
+
+        List<ReviewLog> logs = services.reviewLogRepository().findByWord(word.getId());
+        assertEquals(1, logs.size());
+        assertEquals(7_000, logs.get(0).getElapsedMillis());
+    }
 }

@@ -77,6 +77,9 @@ public final class ReviewView {
             context.changes(), context.errors()::reportFailure, clock);
         this.tab = Widgets.tab("reviewTab", "Review", createContent());
         presenter.addListener(this::render);
+        // Answers are only timed while the tab is shown; the first card is loaded behind the Dashboard.
+        presenter.setOnScreen(tab.isSelected());
+        tab.selectedProperty().addListener((observable, wasSelected, selected) -> presenter.setOnScreen(selected));
         context.decks().onSwitch(deck -> presenter.showDeck(deck.getId()));
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.WORDS)) {

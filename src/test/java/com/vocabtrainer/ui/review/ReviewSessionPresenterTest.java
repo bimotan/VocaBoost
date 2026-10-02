@@ -442,6 +442,34 @@ class ReviewSessionPresenterTest {
     }
 
     @Test
+    void theResponseTimeOnlyCountsTheTimeTheCardWasOnScreen() throws SQLException {
+        TestClock clock = new TestClock(LocalDateTime.now().plusSeconds(1));
+        AppServices clocked = AppServices.builder(tempDir.resolve("clocked.db")).clock(clock).open();
+        databases.track(clocked.databaseManager());
+        ReviewSessionPresenter timed = new ReviewSessionPresenter(clocked.reviewService(), clocked.goalService(),
+            () -> ai, tasks, changes, (title, error) -> failures.add(title), clock);
+        // The card is loaded while the user is on another tab, as at startup.
+        timed.setOnScreen(false);
+        timed.showDeck(clocked.startupDeck().getId());
+        WordCard card = timed.card().orElseThrow();
+
+        clock.advance(Duration.ofMinutes(10));
+        timed.setOnScreen(true);
+        clock.advance(Duration.ofSeconds(4));
+        timed.setOnScreen(false);
+        clock.advance(Duration.ofHours(1));
+        timed.setOnScreen(true);
+        clock.advance(Duration.ofSeconds(3));
+        timed.setAnswer(firstMeaning(card));
+        timed.submit();
+        timed.rate(ReviewRating.GOOD);
+
+        List<ReviewLog> logs = clocked.reviewLogRepository().findByWord(card.getId());
+        assertEquals(1, logs.size());
+        assertEquals(7_000, logs.get(0).getElapsedMillis());
+    }
+
+    @Test
     void theEighthLapseSaysTheWordIsNowALeech() throws SQLException {
         Deck deck = services.deckService().createDeck("Leech");
         WordCard card = WordCard.createNew(deck.getId(), "cavil", "挑剔");

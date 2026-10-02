@@ -74,6 +74,8 @@ public class CardStateBackfill {
     private boolean derive(WordCard word, List<ReviewLog> history) {
         if (history.isEmpty()) {
             word.estimateStateFromLegacySchedule();
+            // The SM-2 lapse count is kept, so a word that lapsed often is a leech like a replayed one.
+            ReviewScheduler.tagIfLeech(word);
             return false;
         }
         scheduler.replay(word, history);

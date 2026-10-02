@@ -113,6 +113,23 @@ class FsrsMigrationTest {
         assertEquals("REVIEW", SchemaMigrationTest.stringColumn(file, "SELECT card_state FROM words").get(0));
     }
 
+    @Test
+    void aWordWithoutLogsThatLapsedEightTimesIsTaggedAsALeech() throws Exception {
+        Path file = tempDir.resolve("leech.db");
+        LegacySchemas.SM2_VERSION_4.create(file);
+        LegacySchemas.execute(file,
+            "INSERT INTO decks(id, name, created_at) VALUES(1, 'GRE', '2026-03-01T08:00:00')",
+            word(1, "cavil", "2026-04-20T09:00:00", "2026-04-21T09:00:00", 1.3, 1, 12, 0, WordCard.LEECH_LAPSES),
+            word(2, "laud", "2026-04-20T09:00:00", "2026-04-21T09:00:00", 1.3, 1, 12, 0, WordCard.LEECH_LAPSES - 1));
+        DatabaseManager databaseManager = databases.open(file);
+        WordRepository words = new WordRepository(databaseManager);
+
+        new CardStateBackfill(words, new ReviewLogRepository(databaseManager), new ReviewScheduler()).run();
+
+        assertTrue(words.findById(1).orElseThrow().isLeech(), "the SM-2 lapses count, as replayed lapses do");
+        assertFalse(words.findById(2).orElseThrow().isLeech());
+    }
+
     private static String word(long id, String english, String lastReviewedAt, String nextReviewAt, double easiness,
                                int intervalDays, int repetitions, int consecutiveCorrect, int lapses) {
         return "INSERT INTO words(id, deck_id, english, chinese, added_at, last_reviewed_at, next_review_at,"

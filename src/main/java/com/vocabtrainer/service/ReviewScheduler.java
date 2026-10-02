@@ -81,6 +81,15 @@ public class ReviewScheduler {
     private static boolean applyRating(CardScheduler scheduler, WordCard word, ReviewRating rating, double similarity,
                                        LocalDateTime reviewedAt) {
         scheduler.apply(word, effectiveRating(rating, similarity), reviewedAt);
+        return tagIfLeech(word);
+    }
+
+    /**
+     * Tags {@code word} {@value WordCard#LEECH_TAG} (and logs it) if it lapsed
+     * {@value WordCard#LEECH_LAPSES} times or more and is not tagged yet; returns whether it was
+     * tagged now.
+     */
+    public static boolean tagIfLeech(WordCard word) {
         if (word.getLapses() >= WordCard.LEECH_LAPSES && !word.isLeech()) {
             word.addTag(WordCard.LEECH_TAG);
             LOGGER.info("\"" + word.getEnglish() + "\" lapsed " + word.getLapses() + " times and is tagged as a leech");

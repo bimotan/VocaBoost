@@ -21,6 +21,7 @@ import com.vocabtrainer.ui.TaskRunner;
 import com.vocabtrainer.util.ErrorMessages;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.EnumMap;
 import java.util.List;
@@ -92,8 +93,15 @@ public final class ReviewSessionPresenter {
     private State state = State.IDLE;
     private WordCard card;
     private long cardNumber;
-    /** When the card on screen was shown; the response time runs from here to the submit. */
+    /**
+     * Whether the Review tab is on screen. The response time only runs while it is: a card loaded
+     * while the user is on another tab (at startup, or after a deck switch) is not being answered.
+     */
+    private boolean onScreen = true;
+    /** Since when the card has been on screen without a break; null while the tab is hidden. */
     private LocalDateTime shownAt;
+    /** How long the card was on screen before the tab was last hidden. */
+    private Duration shownBefore = Duration.ZERO;
     private String answer = "";
     private String question = LOADING;
     private String details = "";
@@ -185,7 +193,10 @@ public final class ReviewSessionPresenter {
             return;
         }
         WordCard answered = card;
-        ReviewAnswer checked = reviewService.submitAnswer(answered.getId(), answer, questionMode, shownAt);
+        // The service times the answer from "shown at" to now: count only the time it was on screen.
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDateTime effectivelyShownAt = now.minus(timeOnScreen(now));
+        ReviewAnswer checked = reviewService.submitAnswer(answered.getId(), answer, questionMode, effectivelyShownAt);
         ratingPreviews.clear();
         try {
             ratingPreviews.putAll(reviewService.previewRatings(answered.getId()));
@@ -277,6 +288,24 @@ public final class ReviewSessionPresenter {
         } finally {
             fireChanged();
         }
+    }
+
+    /**
+     * The Review tab was shown or hidden. The response time of the card on screen only counts the
+     * time the tab was shown.
+     */
+    public void setOnScreen(boolean visible) {
+        if (visible == onScreen) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        if (visible) {
+            shownAt = now;
+        } else {
+            shownBefore = timeOnScreen(now);
+            shownAt = null;
+        }
+        onScreen = visible;
     }
 
     // ---- State ----
@@ -373,6 +402,15 @@ public final class ReviewSessionPresenter {
 
     // ---- Internals ----
 
+    /** How long the card has been on screen by {@code now}. */
+    private Duration timeOnScreen(LocalDateTime now) {
+        if (shownAt == null) {
+            return shownBefore;
+        }
+        Duration since = Duration.between(shownAt, now);
+        return since.isNegative() ? shownBefore : shownBefore.plus(since);
+    }
+
     private void loadNextCard() {
         explanations.invalidate();
         card = null;
@@ -388,7 +426,9 @@ public final class ReviewSessionPresenter {
             throw e;
         }
         card = next.orElse(null);
-        shownAt = LocalDateTime.now(clock);
+        LocalDateTime now = LocalDateTime.now(clock);
+        shownAt = onScreen ? now : null;
+        shownBefore = Duration.ZERO;
         questionMode = reviewService.currentQuestionMode();
         answerPrompt = questionMode.getPrompt();
         ReviewSessionSummary session = reviewService.sessionSummary();
@@ -402,7 +442,7 @@ public final class ReviewSessionPresenter {
         }
         state = State.AWAITING_ANSWER;
         question = questionMode == ReviewMode.ZH_TO_EN ? card.getChinese() : card.getEnglish();
-        details = questionMode.getLabel() + " | " + cardDetails(card, shownAt);
+        details = questionMode.getLabel() + " | " + cardDetails(card, now);
     }
 
     /**
