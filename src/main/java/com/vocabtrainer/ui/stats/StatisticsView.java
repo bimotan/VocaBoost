@@ -2,6 +2,7 @@ package com.vocabtrainer.ui.stats;
 
 import com.vocabtrainer.domain.DailyReviewStat;
 import com.vocabtrainer.service.BackupService;
+import com.vocabtrainer.service.ExamPlanService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.ui.DataChange;
@@ -30,10 +31,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/** The Statistics tab: review charts, memory distribution, hardest words, exports and backups. */
+/**
+ * The Statistics tab: the workload forecast, review charts, memory distribution, hardest words,
+ * exports and backups.
+ */
 public final class StatisticsView {
     private final ViewContext context;
     private final StatsService statsService;
+    private final WorkloadForecastChart forecast;
     private final BarChart<String, Number> reviewCountChart;
     private final LineChart<String, Number> accuracyChart;
     private final PieChart memoryChart = new PieChart();
@@ -44,9 +49,10 @@ public final class StatisticsView {
     private final LazyRefresh lazy;
 
     public StatisticsView(ViewContext context, StatsService statsService, GoalService goalService,
-                          BackupService backupService, Path databasePath) {
+                          BackupService backupService, ExamPlanService examPlanService, Path databasePath) {
         this.context = context;
         this.statsService = statsService;
+        this.forecast = new WorkloadForecastChart(context, statsService, examPlanService);
 
         CategoryAxis reviewDateAxis = new CategoryAxis();
         reviewDateAxis.setTickLabelRotation(-35);
@@ -97,7 +103,7 @@ public final class StatisticsView {
         buttons.getChildren().setAll(exportButtons);
         HBox folderButtons = new HBox(10);
         folderButtons.getChildren().setAll(actions.folderButtons());
-        VBox charts = new VBox(16, reviewCountChart, accuracyChart, memoryChart, overdueStatsLabel,
+        VBox charts = new VBox(16, forecast.root(), reviewCountChart, accuracyChart, memoryChart, overdueStatsLabel,
             Widgets.sectionTitle("Hardest Words"), hardestWordsArea,
             Widgets.sectionTitle("Portfolio Summary"), analyticsArea, buttons, folderButtons);
         charts.setId("statisticsCharts");
@@ -108,7 +114,8 @@ public final class StatisticsView {
         // The charts depend on the clock (a 7-day window, due counts), so every visit recomputes them.
         lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh statistics failed", true);
         context.changes().subscribe(changes -> {
-            if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)) {
+            if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
+                || changes.contains(DataChange.REVIEW_SETTINGS)) {
                 lazy.markStale();
             }
         });
@@ -125,6 +132,7 @@ public final class StatisticsView {
 
     private void refresh() {
         long deckId = context.decks().currentId();
+        forecast.refresh(deckId);
         List<DailyReviewStat> dailyStats = statsService.dailyReviewStats(deckId, 7);
         List<String> dayCategories = dailyStats.stream()
             .map(stat -> stat.date().getMonthValue() + "/" + stat.date().getDayOfMonth())

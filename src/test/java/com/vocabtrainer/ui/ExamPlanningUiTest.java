@@ -5,6 +5,7 @@ import com.vocabtrainer.app.AppServices;
 import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.WordCard;
 import javafx.scene.Node;
+import javafx.scene.chart.XYChart;
 import javafx.scene.control.DatePicker;
 import javafx.scene.control.RadioButton;
 import javafx.scene.control.Spinner;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,8 +23,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Planning for the exam (review finding G5): the exam date and its countdown on the Dashboard, the
- * new-word plan and its button, a deck's own exam, and the rating buttons keeping reviews before the
- * exam.
+ * new-word plan and its button, a deck's own exam, the rating buttons keeping reviews before the
+ * exam, and the workload forecast on the Statistics tab.
  */
 class ExamPlanningUiTest extends MainWindowUiTest {
     private final TestClock clock = new TestClock(LocalDateTime.now().plusSeconds(1));
@@ -177,6 +179,38 @@ class ExamPlanningUiTest extends MainWindowUiTest {
         assertTrue(due.isBefore(today().plusDays(30)) && due.isAfter(today().plusDays(22)), due.toString());
     }
 
+    @Test
+    void theStatisticsTabForecastsTheWorkloadForTheNextTwoOrFourWeeks() throws Exception {
+        review(true, "rateGoodButton");
+        selectTab("dashboardTab");
+        saveExam(form -> datePicker(form).getEditor().setText(today().plusDays(10).toString()));
+        selectTab("statisticsTab");
+
+        assertEquals(14, Fx.call(() -> this.<Integer>comboBox("forecastRangeSelector").getValue()));
+        List<ChartPoint> reviews = series("workloadForecastChart", "Reviews due");
+        List<ChartPoint> newWords = series("workloadForecastChart", "New words");
+        assertEquals(14, reviews.size());
+        assertEquals("Today", reviews.get(0).x());
+        assertEquals(1.0, reviews.get(0).y(), "the card in its learning step");
+        assertEquals(19.0, newWords.get(0).y(), "what is left of today's 20");
+        assertEquals(20.0, newWords.get(1).y());
+        assertEquals(15.0, newWords.get(10).y(), "the last of the 214 new words");
+        assertEquals(0.0, newWords.get(11).y());
+        LocalDate exam = today().plusDays(10);
+        assertEquals(exam.getMonthValue() + "/" + exam.getDayOfMonth() + " GRE", reviews.get(10).x(), "the exam day");
+        assertTrue(text("forecastSummaryLabel").startsWith("Next 14 days: 1 review due and 214 new words planned."),
+            text("forecastSummaryLabel"));
+        assertTrue(text("forecastSummaryLabel").contains(" GRE on "), text("forecastSummaryLabel"));
+        snapshot("forecast");
+
+        this.<Integer>select("forecastRangeSelector", days -> days == 30);
+        List<ChartPoint> month = series("workloadForecastChart", "Reviews due");
+        assertEquals(30, month.size());
+        assertEquals(1.0, month.stream().mapToDouble(ChartPoint::y).sum());
+        assertTrue(text("forecastSummaryLabel").startsWith("Next 30 days: 1 review due and 214 new words planned."),
+            text("forecastSummaryLabel"));
+    }
+
     private void saveExam(Consumer<Node> fill) {
         dialogs.submitForm(fill);
         click("editExamButton");
@@ -184,6 +218,21 @@ class ExamPlanningUiTest extends MainWindowUiTest {
 
     private LocalDate today() {
         return services.reviewScheduler().studyDay().of(clock.now());
+    }
+
+    /** The points of the series called {@code name} in a chart with several. */
+    @SuppressWarnings("unchecked")
+    private List<ChartPoint> series(String chartId, String name) {
+        return Fx.call(() -> {
+            XYChart<String, Number> chart = find(chartId, XYChart.class);
+            return chart.getData().stream()
+                .filter(series -> name.equals(series.getName()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("#" + chartId + " has no series " + name))
+                .getData().stream()
+                .map(point -> new ChartPoint(point.getXValue(), point.getYValue().doubleValue()))
+                .toList();
+        });
     }
 
     private static DatePicker datePicker(Node form) {

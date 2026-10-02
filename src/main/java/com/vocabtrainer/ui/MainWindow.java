@@ -48,7 +48,7 @@ public class MainWindow {
             services.settingsService(), services.aiCacheRepository(), services.ecdictImportService(),
             services.localDictionary(), configured);
         StatisticsView statistics = new StatisticsView(context, services.statsService(), services.goalService(),
-            services.backupService(), databasePath);
+            services.backupService(), services.examPlanService(), databasePath);
         WordListView wordList = new WordListView(context, services.wordRepository(), services.validationService(),
             services.clock(), services.reviewScheduler().studyDay());
 

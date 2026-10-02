@@ -9,6 +9,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -426,6 +427,39 @@ public class WordRepository {
             statement.setString(1, DateTimeUtil.toDatabase(from));
             try (ResultSet rs = statement.executeQuery()) {
                 return mapList(rs);
+            }
+        }
+    }
+
+    /**
+     * How many of the deck's learning, relearning and review cards are due on each study day from
+     * {@code today} until {@code until}, in one query grouped by study day: a study day starts at
+     * {@code rolloverHour}, and cards due before today (overdue) count for today. Days without due
+     * cards are missing; new cards are not counted.
+     *
+     * @param until the start of the study day after the last one counted
+     */
+    public Map<LocalDate, Integer> countDueByStudyDay(long deckId, LocalDate today, int rolloverHour,
+                                                     LocalDateTime until) throws SQLException {
+        String sql = """
+            SELECT MAX(date(next_review_at, ?), ?) AS study_day, COUNT(*) AS due
+            FROM words
+            WHERE deck_id = ? AND archived = 0 AND card_state IN ('LEARNING', 'RELEARNING', 'REVIEW')
+              AND next_review_at < ?
+            GROUP BY study_day
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, "-" + rolloverHour + " hours");
+            statement.setString(2, DateTimeUtil.toDatabaseDate(today));
+            statement.setLong(3, deckId);
+            statement.setString(4, DateTimeUtil.toDatabase(until));
+            try (ResultSet rs = statement.executeQuery()) {
+                Map<LocalDate, Integer> counts = new HashMap<>();
+                while (rs.next()) {
+                    counts.put(DateTimeUtil.dateFromDatabase(rs.getString("study_day")), rs.getInt("due"));
+                }
+                return counts;
             }
         }
     }

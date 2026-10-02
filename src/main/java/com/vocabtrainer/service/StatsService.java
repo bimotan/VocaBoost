@@ -6,6 +6,7 @@ import com.vocabtrainer.domain.DailyGoalProgress;
 import com.vocabtrainer.domain.HardWordStat;
 import com.vocabtrainer.domain.MemoryBucketStat;
 import com.vocabtrainer.domain.WordCard;
+import com.vocabtrainer.domain.WorkloadDay;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.WordRepository;
@@ -20,6 +21,7 @@ import java.sql.SQLException;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -111,6 +113,35 @@ public class StatsService {
                 .toList();
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read daily review stats", e);
+        }
+    }
+
+    /**
+     * The deck's workload for the next {@code days} study days, today first: the reviews already
+     * scheduled on each day (today's with the overdue ones), read with one query grouped by study day,
+     * and the new words the new-cards-per-day limit lets in each day until none are left (today what
+     * is left of today's limit). Reviews that the new words and the coming reviews will add are not
+     * forecast.
+     */
+    public List<WorkloadDay> workloadForecast(long deckId, int days) {
+        int count = Math.max(1, days);
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDate today = studyDay.of(now);
+        try {
+            Map<LocalDate, Integer> due = wordRepository.countDueByStudyDay(deckId, today, studyDay.rolloverHour(),
+                studyDay.start(today.plusDays(count)));
+            ReviewQueueCounts queue = queueCounts(deckId, now);
+            int newWordsLeft = wordRepository.countNew(deckId);
+            List<WorkloadDay> forecast = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                LocalDate day = today.plusDays(i);
+                int newWords = Math.min(newWordsLeft, i == 0 ? queue.newAvailableToday() : queue.newCardsPerDay());
+                newWordsLeft -= newWords;
+                forecast.add(new WorkloadDay(day, due.getOrDefault(day, 0), newWords));
+            }
+            return forecast;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot forecast the workload", e);
         }
     }
 
