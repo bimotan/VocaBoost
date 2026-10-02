@@ -20,6 +20,9 @@ import java.util.Map;
  * speech and example, and, after a review answer, what the learner typed and the question's
  * direction; it asks for a short JSON explanation (see {@link AiExplanation}), which is returned as
  * labelled sections, or as the provider's text when it is not that JSON.
+ *
+ * <p>The API key is sent as a bearer token only over https, or over http to this computer (a local
+ * server such as Ollama); any other plain-http endpoint is refused before anything is sent.
  */
 public class OpenAiCompatibleAiService implements AiService {
     /**
@@ -96,7 +99,10 @@ public class OpenAiCompatibleAiService implements AiService {
         URI endpoint;
         try {
             endpoint = AiEndpoint.chatCompletions(baseUrl);
+            ApiKeys.requireSafeToSendKey(endpoint, "The AI base URL");
+            ApiKeys.requireSendable(apiKey, "The AI API key");
         } catch (IllegalArgumentException e) {
+            // Our own messages, which never contain the key.
             throw new IllegalStateException(e.getMessage(), e);
         }
         try {
@@ -132,7 +138,9 @@ public class OpenAiCompatibleAiService implements AiService {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("AI request was interrupted.", e);
         } catch (IllegalArgumentException e) {
-            throw new IllegalStateException("AI provider URL is invalid.", e);
+            // The JDK quotes an invalid header value, which would be the key, so the cause is dropped.
+            throw new IllegalStateException("Cannot build the AI request: "
+                + ApiKeys.redact(e.getMessage(), apiKey));
         }
     }
 
@@ -172,6 +180,7 @@ public class OpenAiCompatibleAiService implements AiService {
     /**
      * The provider's own error message from an OpenAI-style error body, or "" if there is none.
      * It is shown in the UI and logged, so the API key is masked in case the provider echoes it.
+     * The key is never put into a message or log record anywhere else either.
      */
     private String errorDetail(String body) {
         if (body == null || body.isBlank()) {
@@ -187,10 +196,7 @@ public class OpenAiCompatibleAiService implements AiService {
             if (message.isBlank()) {
                 message = root.path("message").asText("");
             }
-            message = message.strip();
-            if (!apiKey.isBlank()) {
-                message = message.replace(apiKey, "***");
-            }
+            message = ApiKeys.redact(message.strip(), apiKey);
             return message.length() > MAX_ERROR_DETAIL_LENGTH
                 ? message.substring(0, MAX_ERROR_DETAIL_LENGTH) + "..."
                 : message;

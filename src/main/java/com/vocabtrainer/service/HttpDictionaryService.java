@@ -30,6 +30,9 @@ import java.util.logging.Logger;
  * speech. Objects with neither a meaning nor a definition, and fields outside the entries (such
  * as {@code meta}), are ignored. HTTP 404 or an answer without entries means the word is not
  * there; other failures say why the API could not be asked.
+ *
+ * <p>The key is sent only over https, or over http to this computer; a plain-http address
+ * elsewhere is not asked at all while a key is set. The key never appears in a message or log.
  */
 public class HttpDictionaryService implements DictionaryService {
     public static final String SOURCE = "Configured API";
@@ -73,23 +76,34 @@ public class HttpDictionaryService implements DictionaryService {
         if (clean.isBlank()) {
             return DictionaryLookupResult.notFound("Please enter an English word first.");
         }
-        HttpRequest request;
+        URI uri;
         try {
-            HttpRequest.Builder builder = HttpRequest.newBuilder(buildUri(clean))
-                .timeout(timeout)
-                .header("Accept", "application/json")
-                .header("User-Agent", HttpLookup.USER_AGENT)
-                .GET();
-            if (!apiKey.isBlank()) {
-                builder.header("Authorization", "Bearer " + apiKey);
-                builder.header("X-API-Key", apiKey);
-            }
-            request = builder.build();
+            uri = buildUri(clean);
         } catch (IllegalArgumentException e) {
             LOGGER.log(Level.WARNING, "DICTIONARY_API_BASE_URL is not a valid http(s) URL: " + baseUrl, e);
             return DictionaryLookupResult.unavailable(LookupOutcome.SERVICE_ERROR,
                 NAME + "：地址无效（DICTIONARY_API_BASE_URL = " + baseUrl + "）。");
         }
+        if (!apiKey.isBlank() && !ApiKeys.isSafeToSendKey(uri)) {
+            LOGGER.warning("Not sending DICTIONARY_API_KEY over plain http to " + uri.getHost());
+            return DictionaryLookupResult.unavailable(LookupOutcome.SERVICE_ERROR, NAME
+                + "：DICTIONARY_API_BASE_URL 使用明文 http，API key 会被明文发送，所以没有查询。请改用 https"
+                + "（本机地址 localhost、127.0.0.1、::1 除外）。");
+        }
+        if (!apiKey.isBlank() && !ApiKeys.isSendable(apiKey)) {
+            return DictionaryLookupResult.unavailable(LookupOutcome.AUTH_ERROR,
+                NAME + "：DICTIONARY_API_KEY 含有空格或不能放进 HTTP 请求头的字符（例如全角字符或换行），请重新设置。");
+        }
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
+            .timeout(timeout)
+            .header("Accept", "application/json")
+            .header("User-Agent", HttpLookup.USER_AGENT)
+            .GET();
+        if (!apiKey.isBlank()) {
+            builder.header("Authorization", "Bearer " + apiKey);
+            builder.header("X-API-Key", apiKey);
+        }
+        HttpRequest request = builder.build();
         HttpLookup.Reply reply = HttpLookup.get(httpClient, request, NAME, NOT_FOUND);
         if (!reply.ok() && reply.failure().outcome() == LookupOutcome.AUTH_ERROR) {
             return DictionaryLookupResult.unavailable(LookupOutcome.AUTH_ERROR,

@@ -77,6 +77,11 @@ final class StubHttpServer implements AutoCloseable {
         return answer(path, Answer.json(status, body));
     }
 
+    /** Where the server listens, e.g. to use it as the proxy of a client: then every request ends up here. */
+    InetSocketAddress address() {
+        return server.getAddress();
+    }
+
     URI uri(String path) {
         return URI.create("http://" + server.getAddress().getHostString() + ":" + server.getAddress().getPort() + path);
     }

@@ -10,6 +10,7 @@ import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.UiErrors;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
+import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
@@ -23,14 +24,29 @@ import javafx.scene.layout.VBox;
 import java.sql.SQLException;
 import java.util.Optional;
 
-/** Saves, clears and tests the optional AI provider used for review explanations, and clears its cache. */
+/**
+ * Saves, clears and tests the optional AI provider used for review explanations, and clears its
+ * cache. A saved API key is never put back into the form: the box shows its last characters, and
+ * Replace or Remove change it.
+ */
 final class AiSettingsBox {
+    private static final String KEY_STORAGE_NOTE = "The API key is stored unencrypted in vocab.db in the data folder,"
+        + " which only your user account can open where the system allows it. It is only sent to the base URL"
+        + " (https, or http to this computer) and is never shown again, logged, or written to exports and JSON backups."
+        + " To keep it out of the database, set VOCABOOST_AI_API_KEY instead.";
+
     private final ViewContext context;
     private final SettingsService settingsService;
     private final AiCacheRepository aiCacheRepository;
     private final ConfiguredServices configured;
     private final Label statusLabel = new Label();
+    private final PasswordField apiKeyField = new PasswordField();
+    private final Label apiKeyStatus = new Label();
+    private final Button replaceKeyButton = new Button("Replace");
+    private final Button removeKeyButton = new Button("Remove");
     private final VBox root;
+    /** Whether the user chose Replace, so the key field is shown although a key is saved. */
+    private boolean replacingKey;
 
     AiSettingsBox(ViewContext context, SettingsService settingsService, AiCacheRepository aiCacheRepository,
                   ConfiguredServices configured) {
@@ -45,10 +61,16 @@ final class AiSettingsBox {
         TextField baseUrlField = new TextField(settingsService.getAiBaseUrl().orElse(""));
         baseUrlField.setId("aiBaseUrlField");
         baseUrlField.setPromptText("https://api.example.com/v1 (/chat/completions is added)");
-        PasswordField apiKeyField = new PasswordField();
         apiKeyField.setId("aiApiKeyField");
-        apiKeyField.setText(settingsService.getAiApiKey().orElse(""));
-        apiKeyField.setPromptText("API key");
+        apiKeyStatus.setId("aiKeyStatusLabel");
+        replaceKeyButton.setId("replaceAiKeyButton");
+        replaceKeyButton.setOnAction(event -> {
+            replacingKey = true;
+            showKeyState();
+            apiKeyField.requestFocus();
+        });
+        removeKeyButton.setId("removeAiKeyButton");
+        removeKeyButton.setOnAction(event -> removeKey());
         TextField modelField = new TextField(settingsService.getAiModel().orElse(""));
         modelField.setId("aiModelField");
         modelField.setPromptText("model name");
@@ -70,6 +92,9 @@ final class AiSettingsBox {
                     modelField.getText(),
                     temperatureField.getText()
                 );
+                replacingKey = false;
+                apiKeyField.clear();
+                showKeyState();
                 reloadAiService();
                 statusLabel.setText("Saved. " + aiStatusText());
             } catch (RuntimeException e) {
@@ -85,6 +110,8 @@ final class AiSettingsBox {
             providerField.setText("openai-compatible");
             baseUrlField.clear();
             apiKeyField.clear();
+            replacingKey = false;
+            showKeyState();
             modelField.clear();
             temperatureField.clear();
             reloadAiService();
@@ -106,18 +133,26 @@ final class AiSettingsBox {
         form.add(providerField, 1, 0);
         form.add(new Label("Base URL"), 0, 1);
         form.add(baseUrlField, 1, 1);
+        HBox keyRow = new HBox(10, apiKeyField, apiKeyStatus, replaceKeyButton, removeKeyButton);
+        keyRow.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(apiKeyField, Priority.ALWAYS);
         form.add(new Label("API key"), 0, 2);
-        form.add(apiKeyField, 1, 2);
+        form.add(keyRow, 1, 2);
         form.add(new Label("Model"), 0, 3);
         form.add(modelField, 1, 3);
         form.add(new Label("Temperature"), 0, 4);
         form.add(temperatureField, 1, 4);
         GridPane.setHgrow(providerField, Priority.ALWAYS);
         GridPane.setHgrow(baseUrlField, Priority.ALWAYS);
-        GridPane.setHgrow(apiKeyField, Priority.ALWAYS);
+        GridPane.setHgrow(keyRow, Priority.ALWAYS);
         GridPane.setHgrow(modelField, Priority.ALWAYS);
         HBox buttons = new HBox(10, saveButton, clearButton, testButton, clearCacheButton);
-        root = new VBox(10, Widgets.sectionTitle("AI Explanation Provider"), form, buttons, statusLabel);
+        Label keyNote = new Label(KEY_STORAGE_NOTE);
+        keyNote.setId("aiKeyNoteLabel");
+        keyNote.setWrapText(true);
+        keyNote.setStyle("-fx-text-fill: #6b7280;");
+        showKeyState();
+        root = new VBox(10, Widgets.sectionTitle("AI Explanation Provider"), form, keyNote, buttons, statusLabel);
     }
 
     Node root() {
@@ -151,6 +186,42 @@ final class AiSettingsBox {
             "Testing AI explanation...",
             testButton
         );
+    }
+
+    /**
+     * Shows the key field when no key is saved or the user replaces it; otherwise the saved key's
+     * last characters with Replace and Remove.
+     */
+    private void showKeyState() {
+        Optional<String> hint = settingsService.getAiApiKeyHint();
+        boolean saved = hint.isPresent();
+        boolean typing = !saved || replacingKey;
+        setShown(apiKeyField, typing);
+        setShown(apiKeyStatus, saved);
+        setShown(replaceKeyButton, saved && !replacingKey);
+        setShown(removeKeyButton, saved);
+        apiKeyField.setPromptText(saved ? "New API key (leave empty to keep the saved one)" : "API key");
+        apiKeyStatus.setText(hint.map(value -> value.length() > 4 ? "Saved, ends with " + value : "Saved").orElse(""));
+    }
+
+    private static void setShown(Node node, boolean shown) {
+        node.setVisible(shown);
+        node.setManaged(shown);
+    }
+
+    private void removeKey() {
+        if (!context.dialogs().confirm("Remove API key", "Remove the saved API key?",
+            "Review explanations use the offline mock text until a key is saved again.")) {
+            return;
+        }
+        context.errors().guard("Remove API key failed", () -> {
+            settingsService.removeAiApiKey();
+            replacingKey = false;
+            apiKeyField.clear();
+            showKeyState();
+            reloadAiService();
+            statusLabel.setText("API key removed. " + aiStatusText());
+        });
     }
 
     /** Deletes every cached explanation, so each word is explained afresh the next time. */

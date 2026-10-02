@@ -49,8 +49,22 @@ public class SettingsService {
         return get(AI_BASE_URL_KEY).filter(value -> !value.isBlank());
     }
 
+    /**
+     * The saved AI API key, for sending it to the provider only. It is stored as plain text in the
+     * {@code settings} table (see docs/ARCHITECTURE.md); show {@link #getAiApiKeyHint()} instead.
+     */
     public Optional<String> getAiApiKey() {
         return get(AI_API_KEY_KEY).filter(value -> !value.isBlank());
+    }
+
+    /** How the saved key is shown, e.g. "••••abcd"; empty when no key is saved. */
+    public Optional<String> getAiApiKeyHint() {
+        return getAiApiKey().map(ApiKeys::hint);
+    }
+
+    /** Deletes the saved AI API key and keeps the other AI settings. */
+    public void removeAiApiKey() {
+        delete(AI_API_KEY_KEY);
     }
 
     public Optional<String> getAiModel() {
@@ -70,19 +84,22 @@ public class SettingsService {
     /**
      * Saves the AI settings after checking them.
      *
+     * @param apiKey      a new key, or blank to keep the saved one
      * @param temperature a number from 0 to 2, or blank to send none
-     * @throws IllegalArgumentException with a message for the user if a value is missing or invalid
+     * @throws IllegalArgumentException with a message for the user if a value is missing or invalid;
+     *                                  the message never contains the key
      */
     public void saveAiSettings(String provider, String baseUrl, String apiKey, String model, String temperature) {
         String cleanProvider = provider == null || provider.isBlank() ? "openai-compatible" : provider.trim();
         String cleanBaseUrl = baseUrl == null ? "" : baseUrl.trim();
-        String cleanApiKey = apiKey == null ? "" : apiKey.trim();
+        String cleanApiKey = apiKey == null || apiKey.isBlank() ? getAiApiKey().orElse("") : apiKey.trim();
         String cleanModel = model == null ? "" : model.trim();
         String cleanTemperature = temperature == null ? "" : temperature.trim();
         if (cleanBaseUrl.isBlank() || cleanApiKey.isBlank() || cleanModel.isBlank()) {
             throw new IllegalArgumentException("AI base URL, API key, and model are required.");
         }
-        AiEndpoint.chatCompletions(cleanBaseUrl);
+        ApiKeys.requireSafeToSendKey(AiEndpoint.chatCompletions(cleanBaseUrl), "The AI base URL");
+        ApiKeys.requireSendable(cleanApiKey, "The API key");
         if (!cleanTemperature.isEmpty() && parseTemperature(cleanTemperature).isEmpty()) {
             throw new IllegalArgumentException("Temperature must be a number from 0 to 2, or empty for the provider's default.");
         }

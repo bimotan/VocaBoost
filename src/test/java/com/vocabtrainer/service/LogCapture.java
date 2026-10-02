@@ -25,6 +25,32 @@ final class LogCapture extends Handler implements AutoCloseable {
         return new LogCapture(Logger.getLogger(type.getName()));
     }
 
+    /** Collects what every class under {@code loggerName} logs, e.g. "com.vocabtrainer" for the whole app. */
+    static LogCapture of(String loggerName) {
+        return new LogCapture(Logger.getLogger(loggerName));
+    }
+
+    List<LogRecord> records() {
+        return List.copyOf(records);
+    }
+
+    /** Every text a record carries: its message, parameters and the messages of its exception chain. */
+    static String allText(LogRecord record) {
+        StringBuilder text = new StringBuilder(String.valueOf(record.getMessage()));
+        if (record.getParameters() != null) {
+            for (Object parameter : record.getParameters()) {
+                text.append('\n').append(parameter);
+            }
+        }
+        for (Throwable error = record.getThrown(); error != null; error = error.getCause()) {
+            text.append('\n').append(error);
+            for (Throwable suppressed : error.getSuppressed()) {
+                text.append('\n').append(suppressed);
+            }
+        }
+        return text.toString();
+    }
+
     List<LogRecord> warnings() {
         return records.stream().filter(record -> record.getLevel() == Level.WARNING).toList();
     }
