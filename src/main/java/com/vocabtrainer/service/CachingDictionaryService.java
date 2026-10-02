@@ -40,6 +40,8 @@ public class CachingDictionaryService implements DictionaryService {
 
     private static final Logger LOGGER = Logger.getLogger(CachingDictionaryService.class.getName());
     private static final String BLANK_WORD = "Please enter an English word first.";
+    /** What earlier versions wrote as the source of every cache entry, whichever dictionary answered. */
+    private static final String LEGACY_SOURCE = "dictionary";
 
     private final DictionaryService delegate;
     private final DictionaryCacheRepository cacheRepository;
@@ -105,6 +107,7 @@ public class CachingDictionaryService implements DictionaryService {
                 return result;
             }
             case NOT_FOUND -> {
+                misses.values().removeIf(old -> !now.isBefore(old.until()));
                 misses.put(missKey(key), new RememberedMiss(result, now.plus(NOT_FOUND_TTL)));
                 if (expired.isPresent()) {
                     deleteCache(key);
@@ -132,7 +135,7 @@ public class CachingDictionaryService implements DictionaryService {
                 return Optional.empty();
             }
             List<DictionaryEntry> entries = deserialize(row.get().payload());
-            if (isUsableCache(entries) && !fromOfflineDictionary(entries)) {
+            if (isUsableCache(entries) && !fromOfflineDictionary(entries) && !legacyLeftover(row.get(), entries)) {
                 return Optional.of(new Cached(entries, row.get().createdAt()));
             }
             cacheRepository.delete(key);
@@ -145,7 +148,7 @@ public class CachingDictionaryService implements DictionaryService {
 
     private void saveCache(String key, List<DictionaryEntry> entries, LocalDateTime now) {
         String source = entries.get(0).source() == null || entries.get(0).source().isBlank()
-            ? "dictionary" : entries.get(0).source();
+            ? "online dictionary" : entries.get(0).source();
         try {
             cacheRepository.save(key, serialize(entries), source, now);
         } catch (SQLException e) {
@@ -189,6 +192,18 @@ public class CachingDictionaryService implements DictionaryService {
     private static boolean fromOfflineDictionary(List<DictionaryEntry> entries) {
         return entries.stream().anyMatch(entry -> LocalDictionaryService.ECDICT_SOURCE.equals(entry.source())
             || LocalDictionaryService.STARTER_SOURCE.equals(entry.source()));
+    }
+
+    /**
+     * Earlier versions cached whatever the whole chain answered, with {@link #LEGACY_SOURCE} as the
+     * source: the configured API's answers read by a regex parser that could garble them, and
+     * Wiktionary's raw HTML from any language's section, including entries that only name a
+     * misspelling. Only their dictionaryapi.dev entries were read as they are now; any other such
+     * entry is looked up again instead of being used, even while the dictionaries cannot be asked.
+     */
+    private static boolean legacyLeftover(DictionaryCacheRepository.CachedLookup row, List<DictionaryEntry> entries) {
+        return LEGACY_SOURCE.equals(row.source()) && entries.stream()
+            .anyMatch(entry -> !PublicOnlineDictionaryService.DICTIONARY_API_SOURCE.equals(entry.source()));
     }
 
     private String serialize(List<DictionaryEntry> entries) {

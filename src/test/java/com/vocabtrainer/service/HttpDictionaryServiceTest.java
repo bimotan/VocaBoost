@@ -101,6 +101,18 @@ class HttpDictionaryServiceTest {
     }
 
     @Test
+    void entriesWithAChineseMeaningComeBeforeEnglishOnlyOnes() {
+        server.answer("/lookup", 200, """
+            {"word":"lucid","definition":"easily understood","senses":[{"chinese":"清晰的"},{"definition":"bright"}]}
+            """);
+
+        List<DictionaryEntry> entries = service("").lookup("lucid").entries();
+
+        assertEquals(List.of("清晰的", "", ""), entries.stream().map(DictionaryEntry::chinese).toList());
+        assertEquals(List.of("", "easily understood", "bright"), entries.stream().map(DictionaryEntry::definition).toList());
+    }
+
+    @Test
     void anAnswerWithoutEntriesOrA404MeansNotFound() {
         server.answer("/lookup", 200, "{\"entries\":[]}");
         assertEquals(LookupOutcome.NOT_FOUND, service("").lookup("snarkle").outcome());

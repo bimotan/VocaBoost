@@ -12,6 +12,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -131,6 +132,8 @@ public class HttpDictionaryService implements DictionaryService {
         for (JsonNode node : entryNodes(root)) {
             collect(node, query, entries);
         }
+        // The lookup box fills the add form with the first entry: one with a Chinese meaning, if any.
+        entries.sort(Comparator.comparing(entry -> entry.chinese().isEmpty()));
         return entries;
     }
 

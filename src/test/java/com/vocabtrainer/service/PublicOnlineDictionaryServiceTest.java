@@ -108,6 +108,21 @@ class PublicOnlineDictionaryServiceTest {
     }
 
     @Test
+    void aMisspellingAfterAUsageLabelIsNotFoundEither() {
+        // Wiktionary renders labels before the definition: "(nonstandard) Misspelling of a lot."
+        server.answer("/wiki/alot", 200, """
+            {"en":[{"partOfSpeech":"Adverb","language":"English","definitions":[
+                {"definition":"<span class=\\"usage-label-sense\\"><span class=\\"ib-brac\\">(</span><span class=\\"ib-content\\">nonstandard</span><span class=\\"ib-brac\\">)</span></span> <span class=\\"form-of-definition\\">Misspelling of <a>a lot</a>.</span>"},
+                {"definition":"(proscribed, common) Misspelling of <a>a lot</a>."}]}]}
+            """);
+
+        DictionaryLookupResult result = service.lookup("alot");
+
+        assertEquals(LookupOutcome.NOT_FOUND, result.outcome(), result.toString());
+        assertTrue(result.message().endsWith("（(nonstandard) Misspelling of a lot.）。"), result.message());
+    }
+
+    @Test
     void aCapitalisedWordIsAlsoLookedUpInLowerCaseOnWiktionary() {
         server.answer("/wiki/lucid", 200, """
             {"en":[{"partOfSpeech":"Adjective","definitions":[{"definition":"Clear."}]}]}

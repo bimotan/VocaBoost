@@ -36,8 +36,9 @@ public class PublicOnlineDictionaryService implements DictionaryService {
     private static final Logger LOGGER = Logger.getLogger(PublicOnlineDictionaryService.class.getName());
     private static final String ENGLISH_ONLY_NOTE = "该来源主要返回英文释义，请确认或填写中文释义。";
     private static final int MAX_ENTRIES = 5;
+    /** "Misspelling of receive.", also after usage labels such as "(nonstandard)" or "(proscribed, common)". */
     private static final Pattern MISSPELLING = Pattern.compile(
-        "(?i)^(?:an? )?(?:common |nonstandard |rare )?misspelling of\\b");
+        "(?i)^(?:\\([^)]*\\)\\s*)*(?:an? )?(?:common |nonstandard |rare )?misspelling of\\b");
     private static final Pattern TAG = Pattern.compile("<[^>]*>");
     private static final Pattern ENTITY = Pattern.compile("&(#x[0-9a-fA-F]{1,6}|#[0-9]{1,7}|[a-zA-Z]{2,8});");
 
@@ -205,7 +206,7 @@ public class PublicOnlineDictionaryService implements DictionaryService {
             matcher.appendReplacement(text, Matcher.quoteReplacement(decodeEntity(matcher.group(1), matcher.group())));
         }
         matcher.appendTail(text);
-        return text.toString().replace(' ', ' ').replaceAll("\\s+", " ").trim();
+        return text.toString().replace('\u00a0', ' ').replaceAll("\\s+", " ").trim();
     }
 
     private static String decodeEntity(String name, String original) {

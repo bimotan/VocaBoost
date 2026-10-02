@@ -184,6 +184,32 @@ class DictionaryChainTest {
     }
 
     @Test
+    void anEntryAnEarlierVersionCachedFromWiktionaryIsLookedUpAgain() throws Exception {
+        // Earlier versions cached every answer with source "dictionary", Wiktionary's raw HTML from
+        // any language's section and misspelling-only entries included (finding D9).
+        ScriptedDictionary wiktionary = new ScriptedDictionary(PublicOnlineDictionaryService.WIKTIONARY_SOURCE);
+        wiktionary.found("recieve", "", "<span>Misspelling of receive.</span>");
+        online.found("zeugma", "", "a figure of speech");
+        DictionaryService before = DictionaryServiceFactory.compose(new LocalDictionaryService(), null,
+            new CompositeDictionaryService(List.of(online, wiktionary)), cache, clock);
+        before.lookup("recieve");
+        before.lookup("zeugma");
+        for (String word : List.of("recieve", "zeugma")) {
+            cache.save(word, cache.find(word).orElseThrow().payload(), "dictionary", START);
+        }
+        online.answer("recieve", DictionaryLookupResult.unavailable(LookupOutcome.NETWORK_ERROR, "offline"));
+
+        DictionaryLookupResult legacyWiktionary = chain(null).lookup("recieve");
+        DictionaryLookupResult legacyDictionaryApi = chain(null).lookup("zeugma");
+
+        assertEquals(LookupOutcome.NETWORK_ERROR, legacyWiktionary.outcome(), "not verified by the old entry");
+        assertTrue(cache.find("recieve").isEmpty());
+        assertEquals("Loaded from dictionary cache.", legacyDictionaryApi.message(),
+            "dictionaryapi.dev entries were read as they are now");
+        assertEquals(1, online.calls("zeugma"));
+    }
+
+    @Test
     void nothingFoundIsNotFoundOnlyWhenEveryDictionaryAnsweredSo() {
         ScriptedDictionary first = new ScriptedDictionary("first");
         ScriptedDictionary second = new ScriptedDictionary("second");
