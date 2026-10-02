@@ -9,30 +9,52 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.domain.WordVerificationResult;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.AchievementService;
+import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.DeckContext;
 import com.vocabtrainer.ui.Formats;
+import com.vocabtrainer.ui.LatestRequest;
+import com.vocabtrainer.ui.UiAsync;
+import com.vocabtrainer.ui.UiErrors;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import com.vocabtrainer.ui.WordFields;
 import javafx.collections.ListChangeListener;
+import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.function.UnaryOperator;
 
-/** The manual add form, with a dictionary lookup that fills it in. */
+/**
+ * The manual add form, with a dictionary lookup that fills it in. Adding first checks the word with
+ * the dictionaries in the background, so a slow or unreachable online dictionary never freezes the
+ * window: the Add button stays usable, changing the English word cancels the check, and a check
+ * that finishes for a word no longer in the form is dropped. A word the dictionaries do not have is
+ * added as UNVERIFIED only after confirmation; when they could not be asked, the user can retry,
+ * add it unchecked (tag UNCHECKED) or cancel.
+ */
 final class AddWordBox {
+    private static final String UNVERIFIED_TAG = "UNVERIFIED";
+    private static final String UNCHECKED_TAG = "UNCHECKED";
+
     private final ViewContext context;
     private final WordRepository wordRepository;
     private final WordValidationService validationService;
@@ -49,7 +71,12 @@ final class AddWordBox {
     private final TextArea noteArea = textArea("addNoteArea", "Notes", 3);
     private final Label statusLabel = new Label();
     private final ComboBox<Deck> addDeckSelector = Widgets.deckComboBox("addDeckSelector", 260);
+    private final ProgressIndicator busyIndicator = LookupMessages.busyIndicator("addWordBusyIndicator");
+    private final LatestRequest checks = new LatestRequest();
     private final VBox root;
+    private UiAsync.Cancellable runningCheck;
+    /** The English word being checked while {@link #runningCheck} runs. */
+    private String checkedWord;
 
     AddWordBox(ViewContext context, WordRepository wordRepository, WordValidationService validationService,
                GoalService goalService, AchievementService achievementService, ConfiguredServices configured) {
@@ -71,6 +98,15 @@ final class AddWordBox {
         Button addButton = new Button("Add word");
         addButton.setId("addWordButton");
         addButton.setOnAction(event -> addWordFromForm());
+        englishField.textProperty().addListener((obs, oldText, newText) -> {
+            if (runningCheck != null && !sameWord(validationService.normalizeEnglish(newText), checkedWord)) {
+                String canceled = checkedWord;
+                cancelCheck();
+                statusLabel.setText("Canceled adding " + canceled + ": the English word changed.");
+            }
+        });
+        HBox addRow = new HBox(10, addButton, busyIndicator);
+        addRow.setAlignment(Pos.CENTER_LEFT);
 
         GridPane addForm = new GridPane();
         addForm.setHgap(10);
@@ -91,7 +127,7 @@ final class AddWordBox {
         addForm.add(exampleArea, 1, 6);
         addForm.add(new Label("Notes"), 0, 7);
         addForm.add(noteArea, 1, 7);
-        addForm.add(addButton, 1, 8);
+        addForm.add(addRow, 1, 8);
         addForm.add(statusLabel, 1, 9);
 
         DictionaryLookupBox lookup = new DictionaryLookupBox(context, validationService, configured, this::fillFrom);
@@ -116,6 +152,7 @@ final class AddWordBox {
         tagsField.setText(WordFields.appendTag("dictionary", entry.source()));
     }
 
+    /** Checks the form and the English word, then adds the word (see {@link #decide}). */
     private void addWordFromForm() {
         try {
             Deck targetDeck = addDeckSelector.getValue();
@@ -123,30 +160,97 @@ final class AddWordBox {
                 statusLabel.setText("Please select a target deck first.");
                 return;
             }
-            ValidatedWord validated = validationService.validate(
-                englishField.getText(),
-                chineseField.getText(),
-                phoneticField.getText(),
-                posField.getText(),
-                exampleArea.getText(),
-                noteArea.getText(),
-                tagsField.getText()
-            );
+            ValidatedWord validated = validateForm();
             if (wordRepository.findByEnglish(targetDeck.getId(), validated.english()).isPresent()) {
                 statusLabel.setText("Word already exists in " + targetDeck.getName() + ": "
                     + validated.english() + ". Edit it in Word List.");
                 return;
             }
-            WordVerificationResult verification = configured.dictionary().verify(validated.english());
-            String tags;
-            if (!verification.found()) {
-                if (!confirmUnverifiedAdd(validated.english(), verification.message())) {
-                    statusLabel.setText("Canceled: " + validated.english());
-                    return;
+            checkThenAdd(validated.english());
+        } catch (IllegalArgumentException e) {
+            statusLabel.setText(e.getMessage());
+        } catch (SQLException | RuntimeException e) {
+            context.errors().reportFailure("Add failed", e);
+        }
+    }
+
+    /** Asks the dictionaries about {@code english} in the background; a check still running is canceled. */
+    private void checkThenAdd(String english) {
+        cancelCheck();
+        long ticket = checks.next();
+        checkedWord = english;
+        LookupMessages.setBusy(busyIndicator, true);
+        statusLabel.setText("Checking " + english + " in the dictionaries...");
+        DictionaryService dictionary = configured.dictionary();
+        runningCheck = context.async().start(
+            () -> dictionary.verify(english),
+            verification -> {
+                if (checks.isLatest(ticket)) {
+                    checkFinished();
+                    decide(english, verification);
                 }
-                tags = WordFields.appendTag(validated.tags(), "UNVERIFIED");
-            } else {
-                tags = WordFields.appendTag(WordFields.appendTag(validated.tags(), "VERIFIED"), verification.source());
+            },
+            error -> {
+                if (checks.isLatest(ticket)) {
+                    checkFinished();
+                    context.errors().logFailure("Checking " + english + " failed", error);
+                    statusLabel.setText("Checking " + english + " failed: " + UiErrors.rootMessage(error));
+                }
+            });
+    }
+
+    private void decide(String english, WordVerificationResult verification) {
+        switch (verification.status()) {
+            case VERIFIED -> addFromForm(english,
+                tags -> WordFields.appendTag(WordFields.appendTag(tags, "VERIFIED"), verification.source()),
+                " | Verified by " + verification.source());
+            case UNVERIFIED -> {
+                if (confirmUnverifiedAdd(english, verification.message())) {
+                    addFromForm(english, tags -> WordFields.appendTag(tags, UNVERIFIED_TAG), " | Marked " + UNVERIFIED_TAG);
+                } else {
+                    statusLabel.setText("Canceled: " + english);
+                }
+            }
+            case UNCHECKED -> {
+                ButtonType retry = new ButtonType("重试", ButtonBar.ButtonData.OTHER);
+                ButtonType addUnchecked = new ButtonType("直接添加", ButtonBar.ButtonData.OK_DONE);
+                ButtonType cancel = new ButtonType("取消", ButtonBar.ButtonData.CANCEL_CLOSE);
+                Optional<ButtonType> choice = context.dialogs().choose("无法验证", "无法验证：" + english,
+                    LookupMessages.headline(verification.outcome()) + System.lineSeparator() + verification.message()
+                        + System.lineSeparator() + "重试，或不经验证直接添加并标记为 " + UNCHECKED_TAG + "？",
+                    retry, addUnchecked, cancel);
+                if (choice.isPresent() && choice.get() == retry) {
+                    checkThenAdd(english);
+                } else if (choice.isPresent() && choice.get() == addUnchecked) {
+                    addFromForm(english, tags -> WordFields.appendTag(tags, UNCHECKED_TAG),
+                        " | Not checked: the dictionaries could not be asked");
+                } else {
+                    statusLabel.setText("Canceled: " + english);
+                }
+            }
+        }
+    }
+
+    /**
+     * Saves what the form holds now, which may have been edited while its English word was checked;
+     * a change of the English word itself cancels the check, so it is still {@code checkedEnglish}.
+     */
+    private void addFromForm(String checkedEnglish, UnaryOperator<String> tagging, String verificationText) {
+        try {
+            Deck targetDeck = addDeckSelector.getValue();
+            if (targetDeck == null) {
+                statusLabel.setText("Please select a target deck first.");
+                return;
+            }
+            ValidatedWord validated = validateForm();
+            if (!sameWord(validated.english(), checkedEnglish)) {
+                statusLabel.setText("Canceled adding " + checkedEnglish + ": the English word changed.");
+                return;
+            }
+            if (wordRepository.findByEnglish(targetDeck.getId(), validated.english()).isPresent()) {
+                statusLabel.setText("Word already exists in " + targetDeck.getName() + ": "
+                    + validated.english() + ". Edit it in Word List.");
+                return;
             }
             ValidatedWord wordToSave = new ValidatedWord(
                 validated.english(),
@@ -155,7 +259,7 @@ final class AddWordBox {
                 validated.partOfSpeech(),
                 validated.exampleSentence(),
                 validated.note(),
-                tags
+                tagging.apply(validated.tags())
             );
             WordCard word = WordCard.createNew(targetDeck.getId(), wordToSave.english(), wordToSave.chinese());
             WordFields.applyValidatedFields(word, wordToSave);
@@ -168,8 +272,7 @@ final class AddWordBox {
             exampleArea.clear();
             noteArea.clear();
             tagsField.clear();
-            String addedText = "Added to " + targetDeck.getName() + ": " + wordToSave.english()
-                + (verification.found() ? " | Verified by " + verification.source() : " | Marked UNVERIFIED");
+            String addedText = "Added to " + targetDeck.getName() + ": " + wordToSave.english() + verificationText;
             statusLabel.setText(addedText);
             context.errors().guard("Word added, but updating progress failed", () -> {
                 GoalUpdate update = goalService.recordNewWords(targetDeck.getId(), 1);
@@ -183,6 +286,36 @@ final class AddWordBox {
         } catch (SQLException | RuntimeException e) {
             context.errors().reportFailure("Add failed", e);
         }
+    }
+
+    private ValidatedWord validateForm() {
+        return validationService.validate(
+            englishField.getText(),
+            chineseField.getText(),
+            phoneticField.getText(),
+            posField.getText(),
+            exampleArea.getText(),
+            noteArea.getText(),
+            tagsField.getText()
+        );
+    }
+
+    private void cancelCheck() {
+        if (runningCheck != null) {
+            runningCheck.cancel();
+            checks.invalidate();
+            checkFinished();
+        }
+    }
+
+    private void checkFinished() {
+        runningCheck = null;
+        checkedWord = null;
+        LookupMessages.setBusy(busyIndicator, false);
+    }
+
+    private static boolean sameWord(String left, String right) {
+        return left != null && right != null && left.toLowerCase(Locale.ROOT).equals(right.toLowerCase(Locale.ROOT));
     }
 
     private boolean confirmUnverifiedAdd(String english, String message) {

@@ -52,11 +52,12 @@ class WordUiTest extends MainWindowUiTest {
         dialogs.confirm(false);
         click("addWordButton");
 
+        // The dictionaries are asked in the background, then the question is asked.
+        waitForText("addWordStatusLabel", "Canceled: snarkle");
         ScriptedDialogs.Shown question = dialogs.last(ScriptedDialogs.Kind.CONFIRM);
         assertEquals("词条未找到", question.title());
         assertEquals("词条未找到：snarkle", question.header());
         assertTrue(question.content().endsWith("是否强制添加并标记为 UNVERIFIED？"), question.content());
-        waitForText("addWordStatusLabel", "Canceled: snarkle");
         assertTrue(services.wordRepository().findByEnglish(currentDeck().getId(), "snarkle").isEmpty());
         assertEquals("snarkle", text("addEnglishField"));
 
