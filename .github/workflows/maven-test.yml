@@ -28,20 +28,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
+          # Also caches the Maven that the wrapper downloads (~/.m2/wrapper/dists).
           cache: maven
-
-      - name: Cache the Maven Wrapper's Maven
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/wrapper
-          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
 
       # Enforcer rules, tests without the UI tests, coverage report and floor, and the jar.
       - name: Build and test
@@ -49,7 +44,7 @@ jobs:
 
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: surefire-reports-${{ matrix.os }}-jdk${{ matrix.java }}
           path: target/surefire-reports
@@ -61,20 +56,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
-
-      - name: Cache the Maven Wrapper's Maven
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/wrapper
-          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
 
       - name: Install virtual display
         run: sudo apt-get update && sudo apt-get install -y xvfb
@@ -84,7 +73,7 @@ jobs:
 
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: surefire-reports-ui
           path: target/surefire-reports
@@ -92,7 +81,7 @@ jobs:
 
       - name: Upload UI snapshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ui-snapshots
           path: target/ui-snapshots
@@ -101,7 +90,7 @@ jobs:
       # The coverage of all tests, UI included.
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: target/site/jacoco
@@ -117,20 +106,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
-
-      - name: Cache the Maven Wrapper's Maven
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/wrapper
-          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
 
       # The test jobs run the tests; this checks the packaging scripts and the trimmed runtime.
       - name: Package the Windows app image
@@ -152,7 +135,7 @@ jobs:
 
       - name: Upload the Windows app image
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: VocaBoost-windows-app-image
           path: target/dist
