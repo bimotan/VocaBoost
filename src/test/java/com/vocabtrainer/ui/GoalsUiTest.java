@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -134,6 +136,25 @@ class GoalsUiTest extends MainWindowUiTest {
         assertEquals("Goals not saved", error.title());
         assertEquals("Reviews per day must be a whole number.", error.content());
         assertEquals("0 / 20", text("reviewedTodayLabel"));
+    }
+
+    @Test
+    void goalsThatCannotBeReadAreReportedAndNoFormOpens() throws Exception {
+        selectTab("dashboardTab");
+        try (Connection connection = services.databaseManager().getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE settings RENAME TO settings_unreadable");
+        }
+
+        click("editGoalsButton");
+
+        ScriptedDialogs.Shown error = dialogs.takeError();
+        assertEquals("Goals not saved", error.title());
+        assertTrue(dialogs.shown().stream().noneMatch(shown -> shown.kind() == ScriptedDialogs.Kind.FORM));
+        try (Connection connection = services.databaseManager().getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE settings_unreadable RENAME TO settings");
+        }
     }
 
     private static <T extends Node> T field(Node form, String id, Class<T> type) {

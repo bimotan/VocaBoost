@@ -260,7 +260,8 @@ public class BackupService {
             ));
         }
         List<BackupFile.AchievementEntry> achievements = new ArrayList<>();
-        for (Achievement achievement : achievementRepository.findAll(deckId)) {
+        // What the deck shows: its own badges and the streak badges, which belong to no deck.
+        for (Achievement achievement : achievementRepository.findShown(deckId, AchievementService.STREAK_CODES)) {
             achievements.add(new BackupFile.AchievementEntry(
                 achievement.code(),
                 achievement.name(),
@@ -553,7 +554,16 @@ public class BackupService {
             unlockedAt,
             count(entry.xpReward(), 0, "xpReward")
         );
-        if (achievementRepository.insertIfAbsent(deckId, achievement)) {
+        boolean restored;
+        if (AchievementService.STREAK_CODES.contains(code)) {
+            // The streak counts every deck, so its badges belong to no deck; one this database has
+            // in any deck already is not added again (nor unlocked again later, with its XP).
+            restored = !achievementRepository.existsInAnyDeck(code)
+                && achievementRepository.insertIfAbsent(AchievementRepository.NO_DECK, achievement);
+        } else {
+            restored = achievementRepository.insertIfAbsent(deckId, achievement);
+        }
+        if (restored) {
             tally.achievementsRestored++;
         }
     }

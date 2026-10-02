@@ -120,7 +120,8 @@ public final class DashboardView {
 
         Button editGoalsButton = new Button("Edit goals");
         editGoalsButton.setId("editGoalsButton");
-        editGoalsButton.setOnAction(event -> editGoals());
+        // Reading the goals for the form can fail too (the database); that is reported, not thrown at JavaFX.
+        editGoalsButton.setOnAction(event -> context.errors().guard("Goals not saved", this::editGoals));
         goalScopeLabel.setStyle("-fx-text-fill: #6b7280;");
         HBox goalsTitle = new HBox(12, Widgets.sectionTitle("Daily Goals"), editGoalsButton, goalScopeLabel);
         goalsTitle.setAlignment(Pos.CENTER_LEFT);
