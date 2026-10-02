@@ -24,6 +24,10 @@ public class WordCard {
     private int consecutiveCorrect;
     private int lapses;
     private boolean archived;
+    private CardState state = CardState.NEW;
+    private double stability;
+    private double difficulty;
+    private int learningStep;
 
     public WordCard() {
     }
@@ -68,6 +72,17 @@ public class WordCard {
      */
     public boolean isWeak() {
         return lapses > 0 || consecutiveCorrect < 3 || intervalDays <= 3;
+    }
+
+    /** The FSRS difficulty an SM-2 easiness factor stands for: 2.5 gives 5, 1.3 gives 9, within 1 to 10. */
+    public static double difficultyFromEasiness(double easinessFactor) {
+        double ease = Double.isFinite(easinessFactor) && easinessFactor > 0 ? easinessFactor : DEFAULT_EASINESS;
+        return Math.min(10.0, Math.max(1.0, 5.0 + (DEFAULT_EASINESS - ease) / 0.3));
+    }
+
+    /** The SM-2 easiness factor written for older versions: the inverse of {@link #difficultyFromEasiness}, 1.3 to 2.8. */
+    public static double easinessFromDifficulty(double difficulty) {
+        return Math.min(2.8, Math.max(1.3, DEFAULT_EASINESS - (difficulty - 5.0) * 0.3));
     }
 
     public long getId() {
@@ -212,5 +227,40 @@ public class WordCard {
 
     public void setArchived(boolean archived) {
         this.archived = archived;
+    }
+
+    public CardState getState() {
+        return state;
+    }
+
+    public void setState(CardState state) {
+        this.state = state == null ? CardState.NEW : state;
+    }
+
+    /** FSRS stability in days: the interval after which recall drops to 90%; 0 for a new card. */
+    public double getStability() {
+        return stability;
+    }
+
+    public void setStability(double stability) {
+        this.stability = stability;
+    }
+
+    /** FSRS difficulty from 1 (easy) to 10 (hard); 0 for a new card. */
+    public double getDifficulty() {
+        return difficulty;
+    }
+
+    public void setDifficulty(double difficulty) {
+        this.difficulty = difficulty;
+    }
+
+    /** The index of the current learning or relearning step. */
+    public int getLearningStep() {
+        return learningStep;
+    }
+
+    public void setLearningStep(int learningStep) {
+        this.learningStep = learningStep;
     }
 }
