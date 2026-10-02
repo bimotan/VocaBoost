@@ -10,14 +10,16 @@ import java.util.Locale;
 /**
  * The Word List's status, tag and part-of-speech filters and its Status column, without JavaFX.
  * The rules for weak and mastered words come from {@link WordCard}, so the list agrees with the
- * weak-words review mode and the dashboard.
+ * weak-words review mode and the dashboard. Suspended words are listed under All, Suspended, Leech,
+ * Unverified and the tag and part-of-speech filters, never as due, weak or mastered.
  *
  * @param status       one of {@link #STATUSES}; null means All
  * @param tag          part of a tag, ignoring case; blank matches every word
  * @param partOfSpeech part of the part of speech, ignoring case; blank matches every word
  */
 public record WordListFilter(String status, String tag, String partOfSpeech) {
-    public static final List<String> STATUSES = List.of("All", "Due", "Weak", "Mastered", "Leech", "Unverified");
+    public static final List<String> STATUSES =
+        List.of("All", "Due", "Weak", "Mastered", "Leech", "Suspended", "Unverified");
 
     /** @param dayEnd the end of the current study day, which decides which words are due today */
     public boolean matches(WordCard word, LocalDateTime now, LocalDateTime dayEnd) {
@@ -25,6 +27,9 @@ public record WordListFilter(String status, String tag, String partOfSpeech) {
             return false;
         }
         if ("Leech".equals(status) && !word.isLeech()) {
+            return false;
+        }
+        if ("Suspended".equals(status) && !word.isSuspended()) {
             return false;
         }
         if ("Weak".equals(status) && !word.isWeak()) {
@@ -43,8 +48,11 @@ public record WordListFilter(String status, String tag, String partOfSpeech) {
             || containsIgnoreCase(word.getPartOfSpeech(), partOfSpeech.trim());
     }
 
-    /** The Status column: Mastered, Due, New or Learning. */
+    /** The Status column: Suspended, Mastered, Due, New or Learning. */
     public static String statusOf(WordCard word, LocalDateTime now, LocalDateTime dayEnd) {
+        if (word.isSuspended()) {
+            return "Suspended";
+        }
         if (word.isMastered()) {
             return "Mastered";
         }

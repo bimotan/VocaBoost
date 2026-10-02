@@ -94,8 +94,9 @@ public class CachingAiService implements AiService {
     /**
      * {@code explain:v2:<english>:<sha-256>}. The hash covers the provider identity and everything
      * the prompt sends ({@link OpenAiCompatibleAiService#prompt}): the word's fields, the question's
-     * direction and the learner's answer, so the key stays short, an explanation written for one
-     * answer is not shown for another, and the base URL is not stored in clear text.
+     * direction, the learner's answer and a memory aid's focus, so the key stays short, an
+     * explanation written for one answer is not shown for another, and the base URL is not stored in
+     * clear text. The keys of plain explanations are those earlier versions used.
      */
     String cacheKey(ExplanationRequest request) {
         WordCard word = request.word();
@@ -104,6 +105,9 @@ public class CachingAiService implements AiService {
         String answer = request.hasAnswer() ? request.normalizedAnswer() : "";
         String hashed = String.join("\0", providerIdentity, english, clean(word.getChinese()),
             clean(word.getExampleSentence()), clean(word.getPartOfSpeech()), direction, answer);
+        if (request.focus() == ExplanationRequest.Focus.MEMORY_AID) {
+            hashed += "\0memory-aid";
+        }
         return KEY_PREFIX + english + ":" + sha256(hashed);
     }
 

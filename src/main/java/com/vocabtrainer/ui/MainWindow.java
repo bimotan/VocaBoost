@@ -49,8 +49,9 @@ public class MainWindow {
             services.localDictionary(), configured);
         StatisticsView statistics = new StatisticsView(context, services.statsService(), services.goalService(),
             services.backupService(), databasePath);
-        WordListView wordList = new WordListView(context, services.wordRepository(), services.validationService(),
-            services.clock(), services.reviewScheduler().studyDay(), services.clozeMaker());
+        WordListView wordList = new WordListView(context, services.wordRepository(), services.reviewLogRepository(),
+            services.validationService(), services.clock(), services.reviewScheduler().studyDay(),
+            services.clozeMaker());
 
         TabPane tabs = new TabPane();
         tabs.setId("mainTabs");

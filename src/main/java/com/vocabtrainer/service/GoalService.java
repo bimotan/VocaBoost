@@ -127,6 +127,23 @@ public class GoalService {
         }
     }
 
+    /**
+     * Takes back what saving the review {@code log} added, as an undo does (in the transaction that
+     * deletes the log): the counters {@link #recordReview} added (none for a practice), {@code xp}
+     * (the review's XP and its badges' rewards) and, when {@code completedDailyGoal}, the daily goal's
+     * completion. A day left without progress has no row, as if the review had never been saved.
+     */
+    public void revertReview(long deckId, ReviewLog log, int xp, boolean completedDailyGoal) {
+        LocalDate day = studyDay.of(log.getReviewedAt());
+        boolean review = log.getKind() == ReviewKind.LEARN || log.getKind() == ReviewKind.REVIEW;
+        try {
+            goalRepository.subtractProgress(deckId, day, review ? 1 : 0, review && log.isCorrect() ? 1 : 0,
+                log.getKind() == ReviewKind.LEARN ? 1 : 0, Math.max(0, xp), completedDailyGoal);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot take back the review's goal progress", e);
+        }
+    }
+
     /** Adds XP to the deck's day, such as an achievement's reward. */
     public void awardXp(long deckId, int xp) {
         if (xp <= 0) {

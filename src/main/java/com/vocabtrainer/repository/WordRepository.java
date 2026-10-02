@@ -11,15 +11,27 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+/**
+ * The words table. A suspended word ({@link WordCard#isSuspended()}, column {@code archived}) is in
+ * no review queue, due count, weak list or mastered count: every such query filters
+ * {@code archived = 0}. The Word List ({@link #search}), backups and the CSV export
+ * ({@link #findAllIncludingSuspended}), duplicate checks ({@link #findByEnglish}) and the deck's
+ * word count ({@link #countAll}) include it.
+ */
 public class WordRepository {
+    /** At most this many ids are bound in one {@code IN} list. */
+    private static final int IDS_PER_STATEMENT = 500;
     /**
      * The words {@link WordCard#isDue} calls due: due before the end of the study day and, for a
      * learning or relearning card, due by now. Binds the end of the study day, then now.
@@ -122,6 +134,52 @@ public class WordRepository {
         }
     }
 
+    /** Deletes the words, and with them their review logs, all or none; returns how many were deleted. */
+    public int deleteByIds(Collection<Long> ids) throws SQLException {
+        return updateByIds("DELETE FROM words WHERE id IN (%s)", null, ids);
+    }
+
+    /**
+     * Suspends or unsuspends the words, all or none; their schedules stay as they are. Returns how
+     * many words changed.
+     */
+    public int setSuspended(Collection<Long> ids, boolean suspended) throws SQLException {
+        return updateByIds("UPDATE words SET archived = ? WHERE archived <> ? AND id IN (%s)", suspended ? 1 : 0, ids);
+    }
+
+    /**
+     * Runs {@code sql} for the ids, {@value #IDS_PER_STATEMENT} at a time, in one transaction. The
+     * {@code %s} in {@code sql} becomes the placeholders; {@code flag}, when not null, is bound to the
+     * two {@code ?} before them.
+     */
+    private int updateByIds(String sql, Integer flag, Collection<Long> ids) throws SQLException {
+        List<Long> distinct = List.copyOf(new LinkedHashSet<>(ids));
+        if (distinct.isEmpty()) {
+            return 0;
+        }
+        return databaseManager.inTransaction(() -> {
+            int changed = 0;
+            try (Connection connection = databaseManager.getConnection()) {
+                for (int from = 0; from < distinct.size(); from += IDS_PER_STATEMENT) {
+                    List<Long> chunk = distinct.subList(from, Math.min(distinct.size(), from + IDS_PER_STATEMENT));
+                    String placeholders = String.join(", ", Collections.nCopies(chunk.size(), "?"));
+                    try (PreparedStatement statement = connection.prepareStatement(sql.formatted(placeholders))) {
+                        int index = 1;
+                        if (flag != null) {
+                            statement.setInt(index++, flag);
+                            statement.setInt(index++, flag);
+                        }
+                        for (long id : chunk) {
+                            statement.setLong(index++, id);
+                        }
+                        changed += statement.executeUpdate();
+                    }
+                }
+            }
+            return changed;
+        });
+    }
+
     public Optional<WordCard> findById(long id) throws SQLException {
         String sql = "SELECT * FROM words WHERE id = ?";
         try (Connection connection = databaseManager.getConnection();
@@ -136,8 +194,12 @@ public class WordRepository {
         return Optional.empty();
     }
 
+    /**
+     * The deck's word with this English text, ignoring case, suspended or not: the unique index on
+     * (deck_id, english) covers suspended words too, so a duplicate check must find them.
+     */
     public Optional<WordCard> findByEnglish(long deckId, String english) throws SQLException {
-        String sql = "SELECT * FROM words WHERE deck_id = ? AND english = ? COLLATE NOCASE AND archived = 0";
+        String sql = "SELECT * FROM words WHERE deck_id = ? AND english = ? COLLATE NOCASE";
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
@@ -153,7 +215,7 @@ public class WordRepository {
 
     /**
      * The deck's English words in lower case, for duplicate checks without one query per word.
-     * Archived words are included, because the unique index on (deck_id, english) covers them too.
+     * Suspended words are included, because the unique index on (deck_id, english) covers them too.
      */
     public Set<String> findEnglishKeys(long deckId) throws SQLException {
         Set<String> keys = new HashSet<>();
@@ -169,6 +231,7 @@ public class WordRepository {
         return keys;
     }
 
+    /** The deck's words in study: every word except the suspended ones. */
     public List<WordCard> findAll(long deckId) throws SQLException {
         String sql = "SELECT * FROM words WHERE deck_id = ? AND archived = 0 ORDER BY lower(english)";
         try (Connection connection = databaseManager.getConnection();
@@ -180,8 +243,8 @@ public class WordRepository {
         }
     }
 
-    /** Every word in the deck, archived ones included. */
-    public List<WordCard> findAllIncludingArchived(long deckId) throws SQLException {
+    /** Every word in the deck, suspended ones included: what backups and the CSV export write. */
+    public List<WordCard> findAllIncludingSuspended(long deckId) throws SQLException {
         String sql = "SELECT * FROM words WHERE deck_id = ? ORDER BY lower(english), id";
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -192,16 +255,20 @@ public class WordRepository {
         }
     }
 
+    /**
+     * The Word List: the deck's words, suspended ones included, whose English, Chinese or tags
+     * contain {@code query} (every word when it is blank), by English word.
+     */
     public List<WordCard> search(long deckId, String query) throws SQLException {
         if (query == null || query.isBlank()) {
-            return findAll(deckId);
+            return findAllIncludingSuspended(deckId);
         }
         String like = "%" + query.trim().toLowerCase() + "%";
         String sql = """
             SELECT * FROM words
-            WHERE deck_id = ? AND archived = 0
+            WHERE deck_id = ?
               AND (lower(english) LIKE ? OR lower(chinese) LIKE ? OR lower(COALESCE(tags, '')) LIKE ?)
-            ORDER BY lower(english)
+            ORDER BY lower(english), id
             """;
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -359,11 +426,17 @@ public class WordRepository {
         }
     }
 
+    /** Every word of the deck, suspended ones included: the Word List's rows without a filter. */
     public int countAll(long deckId) throws SQLException {
-        return count("SELECT COUNT(*) FROM words WHERE deck_id = ? AND archived = 0", deckId);
+        return count("SELECT COUNT(*) FROM words WHERE deck_id = ?", deckId);
     }
 
-    /** Every word row in every deck, archived or not. */
+    /** The deck's suspended words. */
+    public int countSuspended(long deckId) throws SQLException {
+        return count("SELECT COUNT(*) FROM words WHERE deck_id = ? AND archived <> 0", deckId);
+    }
+
+    /** Every word row in every deck, suspended or not. */
     public int countAllInDatabase() throws SQLException {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement("SELECT COUNT(*) FROM words");
@@ -407,16 +480,17 @@ public class WordRepository {
     }
 
     /**
-     * Active-word and due-word counts of every deck that has words, by deck id, in one query.
+     * Word counts (suspended words included) and due-word counts (suspended words never due) of every
+     * deck that has words, by deck id, in one query.
      *
      * @param dayEnd the end of the current study day, see {@link #countDue}
      */
     public Map<Long, DeckWordCounts> countByDeck(LocalDateTime now, LocalDateTime dayEnd) throws SQLException {
-        String sql = "SELECT deck_id, COUNT(*) AS total, COALESCE(SUM(CASE WHEN " + DUE + """
+        String sql = "SELECT deck_id, COUNT(*) AS total, COALESCE(SUM(CASE WHEN archived = 0 AND " + DUE + """
                 THEN 1 ELSE 0 END), 0) AS due,
-                COALESCE(SUM(CASE WHEN card_state = 'NEW' AND next_review_at < ? THEN 1 ELSE 0 END), 0) AS due_new
+                COALESCE(SUM(CASE WHEN archived = 0 AND card_state = 'NEW' AND next_review_at < ? THEN 1 ELSE 0 END), 0)
+                    AS due_new
             FROM words
-            WHERE archived = 0
             GROUP BY deck_id
             """;
         try (Connection connection = databaseManager.getConnection();
@@ -475,7 +549,7 @@ public class WordRepository {
         statement.setInt(14, word.getRepetitions());
         statement.setInt(15, word.getConsecutiveCorrect());
         statement.setInt(16, word.getLapses());
-        statement.setInt(17, word.isArchived() ? 1 : 0);
+        statement.setInt(17, word.isSuspended() ? 1 : 0);
         statement.setString(18, word.getState().name());
         statement.setDouble(19, word.getStability());
         statement.setDouble(20, word.getDifficulty());
@@ -509,7 +583,7 @@ public class WordRepository {
         word.setRepetitions(rs.getInt("repetitions"));
         word.setConsecutiveCorrect(rs.getInt("consecutive_correct"));
         word.setLapses(rs.getInt("lapses"));
-        word.setArchived(rs.getInt("archived") == 1);
+        word.setSuspended(rs.getInt("archived") != 0);
         word.setStability(rs.getDouble("stability"));
         word.setDifficulty(rs.getDouble("difficulty"));
         word.setLearningStep(rs.getInt("learning_step"));

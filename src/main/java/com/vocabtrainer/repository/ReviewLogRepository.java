@@ -15,7 +15,10 @@ import java.sql.Statement;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -30,9 +33,16 @@ public class ReviewLogRepository {
         + " ELSE l.rating <> 'AGAIN' AND l.similarity >= " + ReviewRating.MIN_SIMILARITY_HARD + " END)";
     /**
      * A review_logs row aliased {@code l} is a review: not the practice of a word that was not due
-     * ({@link ReviewKind#PRACTICE}), which counts towards no goal, accuracy or streak.
+     * ({@link ReviewKind#PRACTICE}), which counts towards no goal, accuracy or streak, and not a new
+     * word marked as already known ({@link ReviewKind#KNOWN}), which was no review at all. A kind
+     * this version does not know reads as a review, as {@link ReviewLog#getKind()} does.
      */
-    static final String IS_REVIEW = "l.kind <> 'PRACTICE'";
+    static final String IS_REVIEW = "l.kind NOT IN ('PRACTICE', 'KNOWN')";
+    /** A review_logs row aliased {@code l} records an answer: anything but {@link ReviewKind#KNOWN}. */
+    static final String IS_ANSWER = "l.kind <> 'KNOWN'";
+
+    /** At most this many ids are bound in one {@code IN} list. */
+    private static final int IDS_PER_STATEMENT = 500;
 
     private final DatabaseManager databaseManager;
 
@@ -107,7 +117,38 @@ public class ReviewLogRepository {
         });
     }
 
-    /** Every review log of the deck's words, archived words included, oldest first. */
+    /** Deletes one log, such as the log of a rating that is being undone; returns whether it existed. */
+    public boolean deleteById(long id) throws SQLException {
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement("DELETE FROM review_logs WHERE id = ?")) {
+            statement.setLong(1, id);
+            return statement.executeUpdate() > 0;
+        }
+    }
+
+    /** How many logs the words have together: what deleting them would delete too. */
+    public int countByWords(Collection<Long> wordIds) throws SQLException {
+        List<Long> ids = List.copyOf(new LinkedHashSet<>(wordIds));
+        int count = 0;
+        try (Connection connection = databaseManager.getConnection()) {
+            for (int from = 0; from < ids.size(); from += IDS_PER_STATEMENT) {
+                List<Long> chunk = ids.subList(from, Math.min(ids.size(), from + IDS_PER_STATEMENT));
+                String sql = "SELECT COUNT(*) FROM review_logs WHERE word_id IN ("
+                    + String.join(", ", Collections.nCopies(chunk.size(), "?")) + ")";
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    for (int index = 0; index < chunk.size(); index++) {
+                        statement.setLong(index + 1, chunk.get(index));
+                    }
+                    try (ResultSet rs = statement.executeQuery()) {
+                        count += rs.next() ? rs.getInt(1) : 0;
+                    }
+                }
+            }
+        }
+        return count;
+    }
+
+    /** Every review log of the deck's words, suspended words included, oldest first. */
     public List<ReviewLog> findByDeck(long deckId) throws SQLException {
         String sql = """
             SELECT l.*
@@ -330,7 +371,7 @@ public class ReviewLogRepository {
     }
 
     /**
-     * How many reviews the deck's words had, archived words included and practice not; counting
+     * How many reviews the deck's words had, suspended words included and practice not; counting
      * stops at {@code atMost}, so asking whether there were at least 100 reads at most 100 logs.
      */
     public int countReviews(long deckId, int atMost) throws SQLException {
@@ -354,8 +395,9 @@ public class ReviewLogRepository {
     }
 
     /**
-     * The deck's active words with the lowest average answer similarity, then the most reviews that
-     * were not correct (that counted as Again) and the most reviews. Words never reviewed are left out.
+     * The deck's words in study (not suspended) with the lowest average answer similarity, then the
+     * most reviews that were not correct (that counted as Again) and the most reviews. Words never
+     * answered are left out; marking a word as already known is no answer.
      */
     public List<HardWordStat> hardestWords(long deckId, int limit) throws SQLException {
         String sql = """
@@ -364,11 +406,11 @@ public class ReviewLogRepository {
                    SUM(CASE WHEN %s THEN 0 ELSE 1 END) AS again_count
             FROM words w
             JOIN review_logs l ON l.word_id = w.id
-            WHERE w.deck_id = ? AND w.archived = 0
+            WHERE w.deck_id = ? AND w.archived = 0 AND %s
             GROUP BY w.id
             ORDER BY avg_similarity ASC, again_count DESC, reviews DESC
             LIMIT ?
-            """.formatted(CORRECT);
+            """.formatted(CORRECT, IS_ANSWER);
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
@@ -389,14 +431,17 @@ public class ReviewLogRepository {
         }
     }
 
-    /** When a word of the deck, archived words included, was last reviewed. */
+    /**
+     * When a word of the deck, suspended words included, was last reviewed or practiced; marking a
+     * word as already known is not a review.
+     */
     public Optional<LocalDateTime> latestReviewAt(long deckId) throws SQLException {
         String sql = """
             SELECT MAX(l.reviewed_at)
             FROM review_logs l
             JOIN words w ON w.id = l.word_id
-            WHERE w.deck_id = ?
-            """;
+            WHERE w.deck_id = ? AND %s
+            """.formatted(IS_ANSWER);
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, deckId);
@@ -425,14 +470,15 @@ public class ReviewLogRepository {
         }
     }
 
-    /** The time of the newest review of every deck that has reviews, by deck id, in one query. */
+    /** {@link #latestReviewAt} of every deck that has reviews, by deck id, in one query. */
     public Map<Long, LocalDateTime> latestReviewByDeck() throws SQLException {
         String sql = """
             SELECT w.deck_id, MAX(l.reviewed_at) AS latest
             FROM review_logs l
             JOIN words w ON w.id = l.word_id
+            WHERE %s
             GROUP BY w.deck_id
-            """;
+            """.formatted(IS_ANSWER);
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql);
              ResultSet rs = statement.executeQuery()) {

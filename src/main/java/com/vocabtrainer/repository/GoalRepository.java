@@ -194,6 +194,48 @@ public class GoalRepository {
         return find(deckId, date).orElseThrow(() -> new SQLException("Daily goal not found: " + date));
     }
 
+    /**
+     * Takes back progress an undone review added to the deck's row of {@code date}: subtracts the
+     * counters and XP (never below 0) and, if {@code uncomplete}, clears the completion. A row left
+     * without any progress is deleted, as if the review had never been saved. Returns the row
+     * afterwards, or empty when there is none.
+     */
+    public Optional<GoalRow> subtractProgress(long deckId, LocalDate date, int reviewDelta, int correctDelta,
+                                              int newWordDelta, int xpDelta, boolean uncomplete) throws SQLException {
+        String sql = """
+            UPDATE daily_goals
+            SET reviewed_count = MAX(0, reviewed_count - ?),
+                correct_count = MAX(0, correct_count - ?),
+                new_words_count = MAX(0, new_words_count - ?),
+                xp_earned = MAX(0, xp_earned - ?),
+                completed = CASE WHEN ? THEN 0 ELSE completed END
+            WHERE deck_id = ? AND goal_date = ?
+            """;
+        String delete = """
+            DELETE FROM daily_goals
+            WHERE deck_id = ? AND goal_date = ? AND reviewed_count = 0 AND correct_count = 0
+              AND new_words_count = 0 AND xp_earned = 0 AND completed = 0
+            """;
+        try (Connection connection = databaseManager.getConnection()) {
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setInt(1, reviewDelta);
+                statement.setInt(2, correctDelta);
+                statement.setInt(3, newWordDelta);
+                statement.setInt(4, xpDelta);
+                statement.setBoolean(5, uncomplete);
+                statement.setLong(6, deckId);
+                statement.setString(7, DateTimeUtil.toDatabaseDate(date));
+                statement.executeUpdate();
+            }
+            try (PreparedStatement statement = connection.prepareStatement(delete)) {
+                statement.setLong(1, deckId);
+                statement.setString(2, DateTimeUtil.toDatabaseDate(date));
+                statement.executeUpdate();
+            }
+        }
+        return find(deckId, date);
+    }
+
     public void markCompleted(LocalDate date) throws SQLException {
         markCompleted(0L, date);
     }

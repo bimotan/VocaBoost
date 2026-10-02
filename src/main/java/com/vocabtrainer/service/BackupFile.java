@@ -16,7 +16,7 @@ import java.util.List;
  * {@code learningStep}) next to the SM-2 fields. Backups written before FSRS lack it; restoring
  * them derives it like the schema upgrade does. Review logs also carry the rating the schedule
  * used and whether the user overrode the answer check. Older versions of the app ignore the extra
- * fields.
+ * fields. A word's {@code archived} flag is whether it is suspended.
  */
 record BackupFile(
     String format,
@@ -59,8 +59,8 @@ record BackupFile(
     }
 
     /**
-     * @param kind            {@code LEARN}, {@code REVIEW} or {@code PRACTICE}; absent in backups written
-     *                        before it was logged, which restore as {@code REVIEW}
+     * @param kind            {@code LEARN}, {@code REVIEW}, {@code PRACTICE} or {@code KNOWN}; absent in
+     *                        backups written before it was logged, which restore as {@code REVIEW}
      * @param direction       {@code EN_TO_ZH}, {@code ZH_TO_EN} or {@code CLOZE}; absent when unknown
      * @param effectiveRating the rating the schedule used; absent when the log did not record it,
      *                        which reads as the rating capped by the similarity

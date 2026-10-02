@@ -131,6 +131,28 @@ public final class CardScheduler {
         return outcome;
     }
 
+    /**
+     * Puts a card the user already knows straight into review, without a review: it gets
+     * {@code stability} days of stability and the difficulty of a first Easy rating, and is due after
+     * the interval that stability gives at the desired retention (with fuzz). The last review time is
+     * {@code now}, so its memory decays from now on; the review counters stay as they are.
+     */
+    public Outcome markKnown(WordCard card, double stability, LocalDateTime now) {
+        double difficulty = fsrs.initialDifficulty(ReviewRating.EASY.getGrade());
+        int days = fuzzedInterval(fsrs.nextInterval(stability), fuzzFraction(card), 1, options.maximumInterval());
+        Outcome outcome = new Outcome(CardState.REVIEW, stability, difficulty, 0, days,
+            studyDay.startOfDayAfter(now, days), false);
+        card.setState(outcome.state());
+        card.setStability(outcome.stability());
+        card.setDifficulty(outcome.difficulty());
+        card.setLearningStep(0);
+        card.setIntervalDays(days);
+        card.setNextReviewAt(outcome.due());
+        card.setLastReviewedAt(now);
+        card.setEasinessFactor(WordCard.easinessFromDifficulty(difficulty));
+        return outcome;
+    }
+
     /** Where a rating moves the card: a step with its delay, or into review (delay null). */
     private record Step(CardState state, int index, Duration delay) {
         static final Step GRADUATE = new Step(CardState.REVIEW, 0, null);

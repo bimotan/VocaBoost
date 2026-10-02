@@ -79,14 +79,14 @@ class StatsServiceTest {
         // Due dates are set relative to CLOCK, since WordCard.createNew uses the wall clock.
         WordCard due = wordRepository.save(wordDueAt(gre, "abate", "减弱", NOW.minusHours(1)));
         wordRepository.save(wordDueAt(gre, "lucid", "清晰的", NOW.plusDays(3)));
-        WordCard archived = wordDueAt(gre, "gone", "消失的", NOW.minusHours(1));
-        archived.setArchived(true);
-        wordRepository.save(archived);
+        WordCard suspended = wordDueAt(gre, "gone", "消失的", NOW.minusHours(1));
+        suspended.setSuspended(true);
+        wordRepository.save(suspended);
         wordRepository.save(wordDueAt(sat, "laud", "赞扬", NOW.minusDays(1)));
         LocalDateTime reviewed = NOW.minusHours(2);
         reviewLogRepository.insert(new ReviewLog(0, due.getId(), reviewed.minusDays(1), "减弱", "减弱", 1,
             ReviewRating.GOOD, 1000));
-        reviewLogRepository.insert(new ReviewLog(0, archived.getId(), reviewed, "消失的", "消失的", 1,
+        reviewLogRepository.insert(new ReviewLog(0, suspended.getId(), reviewed, "消失的", "消失的", 1,
             ReviewRating.GOOD, 1000));
 
         List<DeckOverview> overviews = statsService.deckOverviews(List.of(gre, sat, empty));
@@ -98,7 +98,8 @@ class StatsServiceTest {
             assertEquals(statsService.dashboardStats(deckId).dueToday(), overview.due(), overview.deck().getName());
             assertEquals(statsService.latestReviewAt(deckId), overview.latestReviewAt(), overview.deck().getName());
         }
-        assertEquals(new DeckOverview(gre, 2, 1, reviewed), overviews.get(0));
+        // The suspended word is one of the deck's words, but never due.
+        assertEquals(new DeckOverview(gre, 3, 1, reviewed), overviews.get(0));
         assertEquals(new DeckOverview(sat, 1, 1, null), overviews.get(1));
         assertEquals(new DeckOverview(empty, 0, 0, null), overviews.get(2));
     }

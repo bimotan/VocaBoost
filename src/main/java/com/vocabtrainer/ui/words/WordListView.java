@@ -1,6 +1,7 @@
 package com.vocabtrainer.ui.words;
 
 import com.vocabtrainer.domain.WordCard;
+import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.ReviewScheduler;
 import com.vocabtrainer.service.WordValidationService;
@@ -17,14 +18,21 @@ import com.vocabtrainer.util.DateTimeUtil;
 import javafx.animation.PauseTransition;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
+import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.SelectionMode;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -34,15 +42,21 @@ import java.sql.SQLException;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.OptionalDouble;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
- * The Word List tab: search and filter the current deck's words, edit or delete one. Under the table
- * a card shows the selected word's phonetic, part of speech, example (the word in bold), note and tags.
+ * The Word List tab: search and filter the current deck's words, suspended ones included, edit one,
+ * and suspend, unsuspend or delete the selected ones. Deleting asks first, says that the words'
+ * review history goes with them and offers to suspend them instead. Under the table a card shows the
+ * selected word's phonetic, part of speech, example (the word in bold), note and tags.
  */
 public final class WordListView {
     private final ViewContext context;
     private final WordRepository wordRepository;
+    private final ReviewLogRepository reviewLogRepository;
     private final Clock clock;
     private final StudyDay studyDay;
     private final WordEditDialog editDialog;
@@ -54,6 +68,8 @@ public final class WordListView {
     private final ComboBox<String> wordStatusFilter = new ComboBox<>();
     private final TextField tagFilterField = new TextField();
     private final TextField posFilterField = new TextField();
+    private final Button suspendButton = new Button("Suspend");
+    private final Button unsuspendButton = new Button("Unsuspend");
     private final Tab tab;
     private final LazyRefresh lazy;
 
@@ -61,11 +77,12 @@ public final class WordListView {
      * {@code clock} and {@code studyDay} decide which words are due today and how strong their memory
      * is; {@code examples} finds the word in its example sentence.
      */
-    public WordListView(ViewContext context, WordRepository wordRepository, WordValidationService validationService,
-                        Clock clock, StudyDay studyDay, ClozeMaker examples) {
+    public WordListView(ViewContext context, WordRepository wordRepository, ReviewLogRepository reviewLogRepository,
+                        WordValidationService validationService, Clock clock, StudyDay studyDay, ClozeMaker examples) {
         this.context = context;
         this.examples = examples;
         this.wordRepository = wordRepository;
+        this.reviewLogRepository = reviewLogRepository;
         this.clock = clock;
         this.studyDay = studyDay;
         this.editDialog = new WordEditDialog(context, wordRepository, validationService);
@@ -114,14 +131,30 @@ public final class WordListView {
         editButton.setOnAction(event -> editSelectedWord());
         Button deleteButton = new Button("Delete selected");
         deleteButton.setId("deleteWordButton");
-        deleteButton.setOnAction(event -> deleteSelectedWord());
+        deleteButton.setOnAction(event -> deleteSelectedWords());
+        suspendButton.setId("suspendWordsButton");
+        suspendButton.setTooltip(new Tooltip("暂停: stop reviewing the selected words, keeping them and their"
+            + " history"));
+        suspendButton.setOnAction(event -> setSelectedSuspended(true));
+        unsuspendButton.setId("unsuspendWordsButton");
+        unsuspendButton.setTooltip(new Tooltip("Review the selected suspended words again"));
+        unsuspendButton.setOnAction(event -> setSelectedSuspended(false));
 
-        HBox controls = new HBox(10, searchField, wordStatusFilter, tagFilterField, posFilterField,
-            refreshButton, editButton, deleteButton);
+        HBox filters = new HBox(10, searchField, wordStatusFilter, tagFilterField, posFilterField, refreshButton);
         HBox.setHgrow(searchField, Priority.ALWAYS);
+        Label selectionHint = new Label("Shift- or Ctrl-click to select several words.");
+        selectionHint.setStyle("-fx-text-fill: #6b7280;");
+        HBox actions = new HBox(10, editButton, suspendButton, unsuspendButton, deleteButton, selectionHint);
+        actions.setAlignment(Pos.CENTER_LEFT);
+        VBox controls = new VBox(8, filters, actions);
 
         wordTable.setId("wordTable");
         wordTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        // Several words can be selected (Shift or Ctrl) to suspend, unsuspend or delete them together.
+        wordTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+        wordTable.getSelectionModel().getSelectedItems().addListener(
+            (ListChangeListener<WordCard>) change -> updateSelectionActions());
+        updateSelectionActions();
         TableColumn<WordCard, String> englishCol = new TableColumn<>("English");
         englishCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getEnglish()));
         TableColumn<WordCard, String> chineseCol = new TableColumn<>("Chinese");
@@ -161,17 +194,25 @@ public final class WordListView {
             LocalDateTime now = LocalDateTime.now(clock);
             LocalDateTime dayEnd = studyDay.end(now);
             WordCard selected = wordTable.getSelectionModel().getSelectedItem();
+            Set<Long> selectedIds = selectedWords().stream().map(WordCard::getId).collect(Collectors.toSet());
             wordItems.setAll(words.stream().filter(word -> filter.matches(word, now, dayEnd)).toList());
-            // Keep the selected word selected, with its details as they are now (e.g. after an edit).
-            if (selected != null) {
-                wordItems.stream()
-                    .filter(word -> word.getId() == selected.getId())
-                    .findFirst()
-                    .ifPresentOrElse(word -> {
-                        wordTable.getSelectionModel().select(word);
-                        showDetails(word);
-                    }, () -> showDetails(null));
+            // Keep the selected words selected, with their details as they are now (e.g. after an edit);
+            // the one whose details were shown is selected last, so they still are.
+            wordTable.getSelectionModel().clearSelection();
+            int shownIndex = -1;
+            for (int index = 0; index < wordItems.size(); index++) {
+                long id = wordItems.get(index).getId();
+                if (selected != null && id == selected.getId()) {
+                    shownIndex = index;
+                } else if (selectedIds.contains(id)) {
+                    wordTable.getSelectionModel().select(index);
+                }
             }
+            if (shownIndex >= 0) {
+                wordTable.getSelectionModel().select(shownIndex);
+            }
+            showDetails(wordTable.getSelectionModel().getSelectedItem());
+            updateSelectionActions();
         } catch (SQLException e) {
             context.errors().reportFailure("Refresh failed", e);
         }
@@ -198,20 +239,89 @@ public final class WordListView {
         }
     }
 
-    private void deleteSelectedWord() {
-        WordCard selected = wordTable.getSelectionModel().getSelectedItem();
-        if (selected == null) {
+    private List<WordCard> selectedWords() {
+        return List.copyOf(wordTable.getSelectionModel().getSelectedItems());
+    }
+
+    /** Suspend is offered while a word in study is selected, Unsuspend while a suspended one is. */
+    private void updateSelectionActions() {
+        List<WordCard> selected = selectedWords();
+        suspendButton.setDisable(selected.stream().allMatch(WordCard::isSuspended));
+        unsuspendButton.setDisable(selected.stream().noneMatch(WordCard::isSuspended));
+    }
+
+    private void setSelectedSuspended(boolean suspended) {
+        List<Long> ids = selectedWords().stream().map(WordCard::getId).toList();
+        if (ids.isEmpty()) {
+            context.errors().showInfo("Please select the words to " + (suspended ? "suspend." : "unsuspend."));
+            return;
+        }
+        try {
+            wordRepository.setSuspended(ids, suspended);
+            context.changes().publish(DataChange.WORDS);
+        } catch (SQLException | RuntimeException e) {
+            context.errors().reportFailure(suspended ? "Suspend failed" : "Unsuspend failed", e);
+        }
+    }
+
+    /**
+     * Deletes the selected words after a confirmation that says their review history goes with them
+     * and that only a backup brings them back, and that offers to suspend them instead.
+     */
+    private void deleteSelectedWords() {
+        List<WordCard> selected = selectedWords();
+        if (selected.isEmpty()) {
             context.errors().showInfo("Please select a word to delete.");
             return;
         }
-        if (context.dialogs().confirm("Delete word", "Delete " + selected.getEnglish() + "?",
-            "Related review logs will also be removed.")) {
-            try {
-                wordRepository.deleteById(selected.getId());
-                context.changes().publish(DataChange.WORDS);
-            } catch (SQLException | RuntimeException e) {
-                context.errors().reportFailure("Delete failed", e);
+        List<Long> ids = selected.stream().map(WordCard::getId).toList();
+        try {
+            int reviews = reviewLogRepository.countByWords(ids);
+            boolean canSuspend = selected.stream().anyMatch(word -> !word.isSuspended());
+            ButtonType delete = new ButtonType("Delete", ButtonBar.ButtonData.OK_DONE);
+            ButtonType suspendInstead = new ButtonType("Suspend instead", ButtonBar.ButtonData.OTHER);
+            ButtonType cancel = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+            ButtonType[] buttons = canSuspend
+                ? new ButtonType[] {delete, suspendInstead, cancel}
+                : new ButtonType[] {delete, cancel};
+            String header = selected.size() == 1
+                ? "Delete \"" + selected.get(0).getEnglish() + "\"?"
+                : "Delete " + selected.size() + " words?";
+            Optional<ButtonType> choice = context.dialogs().choose(selected.size() == 1 ? "Delete word" : "Delete words",
+                header, deleteWarning(selected.size(), reviews, canSuspend), buttons);
+            if (choice.isEmpty() || choice.get() == cancel) {
+                return;
             }
+            if (choice.get() == suspendInstead) {
+                wordRepository.setSuspended(ids, true);
+            } else {
+                wordRepository.deleteByIds(ids);
+            }
+            context.changes().publish(DataChange.WORDS);
+        } catch (SQLException | RuntimeException e) {
+            context.errors().reportFailure("Delete failed", e);
         }
+    }
+
+    /**
+     * What deleting {@code words} words with {@code reviews} review logs between them loses, that only
+     * a backup brings it back, and, when {@code canSuspend}, that suspending keeps it.
+     */
+    static String deleteWarning(int words, int reviews, boolean canSuspend) {
+        boolean one = words == 1;
+        String history = reviews == 0
+            ? (one ? "It has no review history yet." : "They have no review history yet.")
+            : (one ? "Its review history" : "Their review history") + " (" + reviews
+                + (reviews == 1 ? " review" : " reviews") + ") will be deleted with "
+                + (one ? "it" : "them") + ", and leaves the daily counts and statistics.";
+        String text = history + System.lineSeparator() + System.lineSeparator()
+            + "Deleting cannot be undone: only restoring a JSON backup made before brings "
+            + (one ? "it" : "them") + " back.";
+        if (canSuspend) {
+            text += System.lineSeparator() + System.lineSeparator() + "Suspend instead to stop reviewing "
+                + (one ? "it" : "them") + " and keep the history; you can unsuspend " + (one ? "it" : "them")
+                + " here at any time.";
+        }
+        return text;
     }
 }

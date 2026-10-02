@@ -25,8 +25,10 @@ import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -84,6 +86,20 @@ import java.util.logging.Logger;
  * The user may override the cap ("I was right"): the chosen rating then counts as it is. Each log
  * keeps the chosen rating, the rating the schedule used and whether the user overrode the check;
  * an answer is correct when it did not count as Again ({@link ReviewLog#isCorrect()}).
+ *
+ * <p><b>Already known</b> ({@link #markKnown}) puts a new card straight into review with
+ * {@value ReviewScheduler#KNOWN_STABILITY_DAYS} days of stability and logs it as
+ * {@link ReviewKind#KNOWN}, which is no review: no XP, goal, accuracy, streak or new-card allowance.
+ * <b>Suspending</b> a card ({@link #suspendWord}) keeps it and its schedule but takes it out of every
+ * queue and count until it is unsuspended.
+ *
+ * <p><b>Undo.</b> Each rating, Already known and suspension of the session can be taken back, the
+ * last one first, up to {@value #UNDO_LIMIT} of them ({@link #undoLast}): in one transaction the card
+ * gets back its exact review state (the FSRS and SM-2 fields, unsuspended, and the tags it had, such
+ * as before a rating tagged it as a leech), the review log is deleted, and the XP, the daily goal's
+ * completion and the badges the rating earned are taken back. The session's counts go back too, and
+ * the submitted answer is kept again, so the card can be rated again without typing the answer. A new
+ * session (another deck or mode, or a reset) starts without anything to undo.
  */
 public class ReviewService {
     /** How many weak words the next one is chosen from, besides those the session already showed. */
@@ -92,6 +108,8 @@ public class ReviewService {
     static final int REVIEWS_PER_NEW_CARD = 4;
     /** In an All Due session, new cards wait while more review cards than this are due. */
     static final int LARGE_BACKLOG = 100;
+    /** How many of the session's last actions can be undone. */
+    public static final int UNDO_LIMIT = 100;
 
     private static final Logger LOGGER = Logger.getLogger(ReviewService.class.getName());
 
@@ -126,6 +144,8 @@ public class ReviewService {
     private int sessionXp;
     /** Review cards rated since the session last introduced a new card. */
     private int reviewsSinceNewCard;
+    /** What {@link #undoLast} can take back, the latest first. */
+    private final Deque<UndoEntry> undoStack = new ArrayDeque<>();
 
     public ReviewService(WordRepository wordRepository, ReviewLogRepository reviewLogRepository,
                          SimilarityService similarityService, ReviewScheduler scheduler) {
@@ -365,6 +385,7 @@ public class ReviewService {
         sessionAchievements.clear();
         pendingAnswers.clear();
         clozeSkipped.clear();
+        undoStack.clear();
         currentCloze = null;
         currentQuestionMode = questionModeFor(activeSessionMode);
         remember(() -> {
@@ -519,10 +540,10 @@ public class ReviewService {
         return clozeMaker.highlight(word.getExampleSentence(), word.getEnglish());
     }
 
-    /** Whether the word still exists and is not archived; false once it was deleted from the Word List. */
+    /** Whether the word still exists and is not suspended; false once it was deleted or suspended elsewhere. */
     public boolean isReviewable(long wordId) {
         try {
-            return wordRepository.findById(wordId).filter(word -> !word.isArchived()).isPresent();
+            return wordRepository.findById(wordId).filter(word -> !word.isSuspended()).isPresent();
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read word " + wordId, e);
         }
@@ -624,7 +645,12 @@ public class ReviewService {
         pendingAnswers.remove(wordId);
         activeSessionDeckId = saved.word().getDeckId();
         sessionReviewed++;
-        sessionWords.add(wordId);
+        boolean firstInSession = sessionWords.add(wordId);
+        pushUndo(new UndoEntry(
+            new UndoAction(UndoAction.Kind.RATING, saved.before(), answer, answer.direction(), rating,
+                saved.earnedXp(), saved.unlocked(), true),
+            saved.word().getTags(), saved.log(), saved.word().getDeckId(), saved.completedDailyGoal(),
+            true, firstInSession, reviewsSinceNewCard));
         if (saved.kind() == ReviewKind.LEARN) {
             reviewsSinceNewCard = 0;
         } else if (saved.reviewCard()) {
@@ -644,11 +670,12 @@ public class ReviewService {
         // Read inside the transaction so a retry starts from the stored card, not a half-updated copy.
         WordCard word = wordRepository.findById(wordId)
             .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
+        WordCard before = word.copy();
         LocalDateTime now = LocalDateTime.now(clock);
         ReviewKind kind = kindOf(word, now);
         ReviewLog log = log(wordId, answer, rating, overridden, now, kind);
         if (kind == ReviewKind.PRACTICE) {
-            return savePractice(word, log, now);
+            return savePractice(before, word, log, now);
         }
         StudyDay studyDay = scheduler.studyDay();
         boolean reviewCard = word.getState() == CardState.REVIEW;
@@ -672,11 +699,13 @@ public class ReviewService {
         if (goalService != null) {
             progress = goalService.getTodayProgress(deckId);
         }
-        return new SavedReview(updated, progress, earnedXp, unlocked, becameLeech, kind, reviewCard, log);
+        return new SavedReview(before, updated, progress, earnedXp, unlocked, becameLeech, kind, reviewCard, log,
+            goalUpdate != null && goalUpdate.dailyGoalCompleted());
     }
 
     /** Logs the practice of a word that is not due; only a failed answer can bring its due date forward. */
-    private SavedReview savePractice(WordCard word, ReviewLog log, LocalDateTime now) throws SQLException {
+    private SavedReview savePractice(WordCard before, WordCard word, ReviewLog log, LocalDateTime now)
+        throws SQLException {
         LocalDateTime due = practiceDue(word, log.getEffectiveRating(), now);
         if (!Objects.equals(due, word.getNextReviewAt())) {
             word.setNextReviewAt(due);
@@ -686,8 +715,8 @@ public class ReviewService {
         GoalUpdate goalUpdate = goalService == null
             ? null
             : goalService.recordPractice(word.getDeckId(), log);
-        return new SavedReview(word, goalUpdate == null ? null : goalUpdate.progress(),
-            goalUpdate == null ? 0 : goalUpdate.xpEarned(), List.of(), false, ReviewKind.PRACTICE, false, log);
+        return new SavedReview(before, word, goalUpdate == null ? null : goalUpdate.progress(),
+            goalUpdate == null ? 0 : goalUpdate.xpEarned(), List.of(), false, ReviewKind.PRACTICE, false, log, false);
     }
 
     /**
@@ -734,10 +763,13 @@ public class ReviewService {
     }
 
     /**
-     * @param reviewCard whether the card was in review before; the interleaving of new cards counts these
-     * @param log        the saved review log
+     * @param before             the card before the rating, which undoing it restores
+     * @param reviewCard         whether the card was in review before; the interleaving of new cards counts these
+     * @param log                the saved review log
+     * @param completedDailyGoal whether this review completed the day's goal
      */
     private record SavedReview(
+        WordCard before,
         WordCard word,
         DailyGoalProgress progress,
         int earnedXp,
@@ -745,7 +777,214 @@ public class ReviewService {
         boolean becameLeech,
         ReviewKind kind,
         boolean reviewCard,
-        ReviewLog log
+        ReviewLog log,
+        boolean completedDailyGoal
+    ) {
+    }
+
+    /**
+     * Marks the new card {@code wordId} as already known: it goes straight into review with
+     * {@value ReviewScheduler#KNOWN_STABILITY_DAYS} days of stability, without a learning session, and
+     * a {@link ReviewKind#KNOWN} log records it. That is no review: it earns no XP and counts towards
+     * no goal, accuracy, streak, badge or new-cards-per-day limit, nor towards the session. An answer
+     * submitted for the card is dropped. Can be undone ({@link #undoLast}). Returns the card as saved.
+     *
+     * @throws IllegalArgumentException if the card is not new (it was reviewed before)
+     */
+    public WordCard markKnown(long wordId) {
+        ReviewAnswer answer = pendingAnswers.get(wordId);
+        ReviewMode questionMode = answer != null ? answer.direction() : currentQuestionMode;
+        KnownSaved saved;
+        try {
+            saved = transactions.inTransaction(() -> {
+                WordCard word = wordRepository.findById(wordId)
+                    .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
+                if (word.getState() != CardState.NEW) {
+                    throw new IllegalArgumentException("\"" + word.getEnglish()
+                        + "\" was reviewed before; only a new word can be marked as already known.");
+                }
+                WordCard before = word.copy();
+                LocalDateTime now = LocalDateTime.now(clock);
+                scheduler.markKnown(word, now);
+                wordRepository.update(word);
+                ReviewLog log = reviewLogRepository.insert(new ReviewLog(0, wordId, now, "", word.getChinese(),
+                    1.0, ReviewRating.EASY, 0, ReviewKind.KNOWN, null, ReviewRating.EASY, false));
+                return new KnownSaved(before, word, log);
+            });
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot mark the word as known", e);
+        }
+        pendingAnswers.remove(wordId);
+        WordCard after = saved.after();
+        pushUndo(new UndoEntry(
+            new UndoAction(UndoAction.Kind.KNOWN, saved.before(), answer, questionMode, null, 0, List.of(), true),
+            after.getTags(), saved.log(), after.getDeckId(), false, false, false, reviewsSinceNewCard));
+        return after;
+    }
+
+    private record KnownSaved(WordCard before, WordCard after, ReviewLog log) {
+    }
+
+    /**
+     * Suspends {@code wordId} from the Review tab: it keeps its schedule but is in no queue or count
+     * until it is unsuspended (in the Word List), and an answer submitted for it is dropped. Can be
+     * undone ({@link #undoLast}); nothing happens if it is suspended already.
+     *
+     * @param shown whether it is the card on screen, which undoing shows again; false for a leech
+     *              suspended from the notice about it while the next card is shown
+     */
+    public void suspendWord(long wordId, boolean shown) {
+        ReviewAnswer answer = shown ? pendingAnswers.get(wordId) : null;
+        ReviewMode questionMode = answer != null ? answer.direction() : currentQuestionMode;
+        WordCard before;
+        try {
+            before = transactions.inTransaction(() -> {
+                WordCard word = wordRepository.findById(wordId)
+                    .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
+                if (word.isSuspended()) {
+                    return null;
+                }
+                wordRepository.setSuspended(List.of(wordId), true);
+                return word;
+            });
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot suspend the word", e);
+        }
+        if (before == null) {
+            return;
+        }
+        if (shown) {
+            pendingAnswers.remove(wordId);
+        }
+        pushUndo(new UndoEntry(
+            new UndoAction(UndoAction.Kind.SUSPEND, before, answer, questionMode, null, 0, List.of(), shown),
+            before.getTags(), null, before.getDeckId(), false, false, false, reviewsSinceNewCard));
+    }
+
+    /** Whether the session has something to undo. */
+    public boolean canUndo() {
+        return !undoStack.isEmpty();
+    }
+
+    /** How many of the session's actions can be undone, one after the other. */
+    public int undoDepth() {
+        return undoStack.size();
+    }
+
+    /** What {@link #undoLast} would take back, with the card as it would be again; empty if nothing. */
+    public Optional<UndoAction> nextUndo() {
+        return Optional.ofNullable(undoStack.peekFirst()).map(UndoEntry::action);
+    }
+
+    /**
+     * Takes back the session's last rating, Already known or suspension, see the class comment. A
+     * rating's answer is kept again, so {@link #rateCurrent} can rate the card again; when the card
+     * was on screen, it is again the session's current card, asked the same way.
+     *
+     * @return what was undone, with the card as it is now
+     * @throws IllegalStateException if there is nothing to undo, the card was deleted since (that
+     *                               action is dropped, so the one before can be undone next) or
+     *                               the database cannot be written (nothing changes)
+     */
+    public UndoAction undoLast() {
+        UndoEntry entry = undoStack.peekFirst();
+        if (entry == null) {
+            throw new IllegalStateException("There is nothing to undo.");
+        }
+        UndoAction action = entry.action();
+        WordCard restored;
+        try {
+            restored = transactions.inTransaction(() -> restore(entry));
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot undo", e);
+        }
+        undoStack.pollFirst();
+        if (restored == null) {
+            throw new IllegalStateException("\"" + action.word().getEnglish()
+                + "\" was deleted, so what was done to it cannot be undone.");
+        }
+        // Committed: only in-memory session state changes from here on.
+        long wordId = restored.getId();
+        if (entry.countedInSession()) {
+            sessionReviewed--;
+            if (entry.log().isCorrect()) {
+                sessionCorrect--;
+            }
+            sessionXp -= action.xp();
+            action.unlocked().forEach(sessionAchievements::remove);
+            if (entry.firstInSession()) {
+                sessionWords.remove(wordId);
+            }
+            reviewsSinceNewCard = entry.reviewsSinceNewCard();
+        }
+        if (action.answer() != null) {
+            pendingAnswers.put(wordId, action.answer());
+        }
+        if (action.wasShown()) {
+            currentQuestionMode = action.questionMode();
+            currentCloze = action.questionMode() == ReviewMode.CLOZE ? clozeMaker.make(restored).orElse(null) : null;
+        }
+        return action.withWord(restored);
+    }
+
+    /**
+     * Restores the card of {@code entry} and deletes what its action wrote; null when the card was
+     * deleted since. Runs in the undo's transaction.
+     */
+    private WordCard restore(UndoEntry entry) throws SQLException {
+        UndoAction action = entry.action();
+        WordCard before = action.word();
+        Optional<WordCard> stored = wordRepository.findById(before.getId());
+        if (stored.isEmpty()) {
+            return null;
+        }
+        WordCard card = stored.get();
+        card.copyReviewStateFrom(before);
+        // The tags the action left (e.g. a new "leech" tag) go back; tags edited since stay.
+        if (Objects.equals(card.getTags(), entry.tagsAfter())) {
+            card.setTags(before.getTags());
+        }
+        wordRepository.update(card);
+        if (entry.log() != null) {
+            reviewLogRepository.deleteById(entry.log().getId());
+        }
+        if (action.kind() == UndoAction.Kind.RATING) {
+            if (goalService != null) {
+                goalService.revertReview(entry.deckId(), entry.log(), action.xp(), entry.completedDailyGoal());
+            }
+            if (achievementService != null && !action.unlocked().isEmpty()) {
+                achievementService.revoke(entry.deckId(), action.unlocked());
+            }
+        }
+        return card;
+    }
+
+    private void pushUndo(UndoEntry entry) {
+        undoStack.addFirst(entry);
+        while (undoStack.size() > UNDO_LIMIT) {
+            undoStack.removeLast();
+        }
+    }
+
+    /**
+     * One action {@link #undoLast} can take back.
+     *
+     * @param tagsAfter           the card's tags right after the action
+     * @param log                 the log the action wrote; null for a suspension
+     * @param completedDailyGoal  whether the rating completed the day's goal
+     * @param countedInSession    whether the action is a rating the session counts
+     * @param firstInSession      whether the rating was the session's first of this card
+     * @param reviewsSinceNewCard the session's review cards since its last new card, before the action
+     */
+    private record UndoEntry(
+        UndoAction action,
+        String tagsAfter,
+        ReviewLog log,
+        long deckId,
+        boolean completedDailyGoal,
+        boolean countedInSession,
+        boolean firstInSession,
+        int reviewsSinceNewCard
     ) {
     }
 

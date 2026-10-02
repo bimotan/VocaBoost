@@ -87,7 +87,8 @@ public class StatsService {
                 today.reviews(),
                 today.accuracy(),
                 queue.dueReviews(),
-                queue.newAvailableToday()
+                queue.newAvailableToday(),
+                wordRepository.countSuspended(deckId)
             );
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read dashboard stats", e);
@@ -240,6 +241,9 @@ public class StatsService {
         builder.append("- Deck: ").append(deckName == null || deckName.isBlank() ? "Deck " + deckId : deckName)
             .append(System.lineSeparator());
         builder.append("- Total words: ").append(dashboard.totalWords()).append(System.lineSeparator());
+        if (dashboard.suspendedWords() > 0) {
+            builder.append("- Suspended words: ").append(dashboard.suspendedWords()).append(System.lineSeparator());
+        }
         builder.append("- Due words: ").append(dashboard.dueToday()).append(System.lineSeparator());
         builder.append("- Mastered words: ").append(dashboard.masteredWords()).append(System.lineSeparator());
         builder.append("- Reviews today: ").append(dashboard.reviewedToday()).append(System.lineSeparator());

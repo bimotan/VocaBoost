@@ -131,6 +131,10 @@ class CachingAiServiceTest {
             "the prompt sends the example, so it is part of the key");
         assertTrue(key.startsWith("explain:v2:lucid:"), key);
         assertEquals("explain:v2:lucid:".length() + 64, key.length());
+        assertNotEquals(key, modelA.cacheKey(ExplanationRequest.memoryAid(word)),
+            "a memory aid is another answer than an explanation");
+        assertEquals(key, modelA.cacheKey(new ExplanationRequest(word, null, null, ExplanationRequest.Focus.EXPLANATION)),
+            "plain explanations keep the keys of earlier versions");
     }
 
     @Test

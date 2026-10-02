@@ -103,6 +103,24 @@ class OpenAiCompatibleAiServiceTest {
     }
 
     @Test
+    void aMemoryAidForALeechAsksAboveAllForAMnemonic() throws Exception {
+        server.answer("/v1/chat/completions", 200, completion(STRUCTURED_REPLY));
+
+        String text = provider("/v1", null).explain(ExplanationRequest.memoryAid(abandon));
+
+        assertEquals("""
+            Word: abandon
+            Part of speech: verb; noun
+            Chinese meaning in the learner's deck: 放纵; 放弃
+            Existing example: He abandoned the plan.
+            The learner keeps forgetting this word: it lapsed again and again (a leech). Make "memory_tip" the \
+            heart of the reply: one vivid mnemonic (word root, sound or image) that ties the English word to its \
+            Chinese meaning, or a contrast with the word it is easily confused with, in two or three short \
+            sentences.""", onlyRequestBody().path("messages").get(1).path("content").asText());
+        assertTrue(text.contains("Memory tip: a + band：挣脱束缚"), text);
+    }
+
+    @Test
     void aConfiguredTemperatureIsSent() throws Exception {
         server.answer("/v1/chat/completions", 200, completion(STRUCTURED_REPLY));
 

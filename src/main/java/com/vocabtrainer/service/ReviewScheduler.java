@@ -33,6 +33,12 @@ import java.util.logging.Logger;
  * {@value WordCard#LEECH_TAG}.
  */
 public class ReviewScheduler {
+    /**
+     * The stability, in days, of a new word the user marks as already known: at the default desired
+     * retention it is due again in about two months, and then reviewed like any other word.
+     */
+    public static final double KNOWN_STABILITY_DAYS = 60.0;
+
     private static final Logger LOGGER = Logger.getLogger(ReviewScheduler.class.getName());
 
     private final CardScheduler cards;
@@ -92,6 +98,14 @@ public class ReviewScheduler {
     }
 
     /**
+     * Puts {@code word}, which the user already knows, straight into review at {@code at}, with
+     * {@value #KNOWN_STABILITY_DAYS} days of stability; see {@link CardScheduler#markKnown}.
+     */
+    public void markKnown(WordCard word, LocalDateTime at) {
+        cards.markKnown(word, KNOWN_STABILITY_DAYS, at);
+    }
+
+    /**
      * Tags {@code word} {@value WordCard#LEECH_TAG} (and logs it) if it lapsed
      * {@value WordCard#LEECH_LAPSES} times or more and is not tagged yet; returns whether it was
      * tagged now.
@@ -147,7 +161,8 @@ public class ReviewScheduler {
      * difficulty do not depend on the steps. Each log counts as its {@link ReviewLog#getEffectiveRating()
      * effective rating}. Counters (reviews, lapses, current run of correct answers) are recounted; the
      * text fields stay as they are. Practice logs are skipped: practicing a card that was not due did
-     * not change its schedule.
+     * not change its schedule. A {@link ReviewKind#KNOWN} log puts the card into review as
+     * {@link #markKnown} did.
      */
     public void replay(WordCard word, List<ReviewLog> history) {
         word.setState(CardState.NEW);
@@ -163,7 +178,13 @@ public class ReviewScheduler {
         history.stream()
             .filter(log -> log.getKind() != ReviewKind.PRACTICE)
             .sorted(Comparator.comparing(ReviewLog::getReviewedAt).thenComparingLong(ReviewLog::getId))
-            .forEach(log -> applyRating(withoutSteps, word, log.getEffectiveRating(), log.getReviewedAt()));
+            .forEach(log -> {
+                if (log.getKind() == ReviewKind.KNOWN) {
+                    withoutSteps.markKnown(word, KNOWN_STABILITY_DAYS, log.getReviewedAt());
+                } else {
+                    applyRating(withoutSteps, word, log.getEffectiveRating(), log.getReviewedAt());
+                }
+            });
     }
 
     /**

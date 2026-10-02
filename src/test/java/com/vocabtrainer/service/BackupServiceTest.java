@@ -117,8 +117,8 @@ class BackupServiceTest {
         assertEquals(1, result.achievementsRestored());
         assertTrue(result.invalidRows().isEmpty(), result.invalidRows().toString());
 
-        Map<String, WordCard> restored = byEnglish(target.words.findAllIncludingArchived(restoredDeck.getId()));
-        List<WordCard> originals = source.words.findAllIncludingArchived(deck.getId());
+        Map<String, WordCard> restored = byEnglish(target.words.findAllIncludingSuspended(restoredDeck.getId()));
+        List<WordCard> originals = source.words.findAllIncludingSuspended(deck.getId());
         assertEquals(originals.size(), restored.size());
         for (WordCard original : originals) {
             assertSameWord(original, restored.get(original.getEnglish()));
@@ -258,7 +258,7 @@ class BackupServiceTest {
             ReviewRating.AGAIN, 500));
         target.goals.ensure(deck.getId(), TODAY, 20, 5, 10);
         target.goals.addProgress(deck.getId(), TODAY, 1, 0, 0, 3);
-        List<WordCard> wordsBefore = target.words.findAllIncludingArchived(deck.getId());
+        List<WordCard> wordsBefore = target.words.findAllIncludingSuspended(deck.getId());
         List<String> logsBefore = logSnapshot(target, deck.getId());
         List<String> goalsBefore = goalSnapshot(target, deck.getId());
 
@@ -268,7 +268,7 @@ class BackupServiceTest {
             json, deck.getId(), BackupService.ExistingWordPolicy.OVERWRITE_SCHEDULE));
         assertTrue(ErrorMessages.rootMessage(error).contains("simulated"), ErrorMessages.rootMessage(error));
 
-        List<WordCard> wordsAfter = target.words.findAllIncludingArchived(deck.getId());
+        List<WordCard> wordsAfter = target.words.findAllIncludingSuspended(deck.getId());
         assertEquals(wordsBefore.size(), wordsAfter.size());
         assertSameWord(wordsBefore.get(0), wordsAfter.get(0));
         assertEquals(logsBefore, logSnapshot(target, deck.getId()));
@@ -457,7 +457,7 @@ class BackupServiceTest {
         assertTrue(db.words.findWithoutCardState().isEmpty());
     }
 
-    /** Four words (one archived) whose text breaks naive JSON handling, with logs, goals and an achievement. */
+    /** Four words (one suspended) whose text breaks naive JSON handling, with logs, goals and an achievement. */
     private static void seedTrickyDeck(Db db, long deckId) throws SQLException {
         WordCard aberrant = card(deckId, "aberrant", "a. 异常的; [医] 畸变的 {x}");
         aberrant.setPhonetic("/æˈberənt/");
@@ -493,7 +493,7 @@ class BackupServiceTest {
         zeal.setStability(1.2);
         zeal.setDifficulty(9.1);
         zeal.setLearningStep(0);
-        zeal.setArchived(true);
+        zeal.setSuspended(true);
         db.words.insert(zeal);
 
         WordCard obdurate = card(deckId, "obdurate", "[律] 顽固的");
@@ -529,7 +529,7 @@ class BackupServiceTest {
     }
 
     private static List<String> logSnapshot(Db db, long deckId) throws SQLException {
-        Map<Long, String> english = db.words.findAllIncludingArchived(deckId).stream()
+        Map<Long, String> english = db.words.findAllIncludingSuspended(deckId).stream()
             .collect(Collectors.toMap(WordCard::getId, WordCard::getEnglish));
         return db.logs.findByDeck(deckId).stream()
             .map(log -> String.join("|", english.get(log.getWordId()), String.valueOf(log.getReviewedAt()),
@@ -555,7 +555,7 @@ class BackupServiceTest {
         assertEquals(expected.getNote(), actual.getNote());
         assertEquals(expected.getTags(), actual.getTags());
         assertEquals(expected.getAddedAt(), actual.getAddedAt());
-        assertEquals(expected.isArchived(), actual.isArchived());
+        assertEquals(expected.isSuspended(), actual.isSuspended());
         assertSameSchedule(expected, actual);
     }
 

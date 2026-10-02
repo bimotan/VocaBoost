@@ -22,7 +22,9 @@ class WordListFilterTest {
         NOW.plusMinutes(10));
     private final WordCard leech = word("cavil", "noun", "gre; leech", CardState.REVIEW, 2, 9, 20, 3, 8,
         NOW.plusDays(1));
-    private final List<WordCard> words = List.of(fresh, mastered, lapsedLater, learning, leech);
+    private final WordCard suspendedLeech = suspended(word("carp", "verb", "gre; leech", CardState.RELEARNING, 1, 9,
+        20, 0, 9, NOW.minusHours(1)));
+    private final List<WordCard> words = List.of(fresh, mastered, lapsedLater, learning, leech, suspendedLeech);
 
     @Test
     void statusFiltersUseTheWordCardRules() {
@@ -31,14 +33,24 @@ class WordListFilterTest {
         assertEquals(List.of(fresh), matching(new WordListFilter("Due", "", "")));
         assertEquals(List.of(lapsedLater, leech), matching(new WordListFilter("Weak", "", "")));
         assertEquals(List.of(mastered), matching(new WordListFilter("Mastered", "", "")));
-        assertEquals(List.of(leech), matching(new WordListFilter("Leech", "", "")));
+        assertEquals(List.of(leech, suspendedLeech), matching(new WordListFilter("Leech", "", "")));
+        assertEquals(List.of(suspendedLeech), matching(new WordListFilter("Suspended", "", "")));
         assertEquals(List.of(lapsedLater), matching(new WordListFilter("Unverified", "", "")));
+    }
+
+    @Test
+    void aSuspendedWordSaysSoAndIsNeverDueWeakOrMastered() {
+        assertEquals("Suspended", WordListFilter.statusOf(suspendedLeech, NOW, DAY_END));
+        assertEquals("Suspended", WordListFilter.statusOf(suspended(word("zeal", "noun", "", CardState.REVIEW, 40, 3,
+            5, 5, 0, NOW.plusDays(30))), NOW, DAY_END));
+        assertEquals(List.of(suspendedLeech), matching(new WordListFilter("All", "", "verb")).stream()
+            .filter(WordCard::isSuspended).toList());
     }
 
     @Test
     void tagAndPartOfSpeechMatchPartsIgnoringCase() {
         assertEquals(List.of(mastered, learning), matching(new WordListFilter("All", " MINE ", "")));
-        assertEquals(List.of(fresh, lapsedLater), matching(new WordListFilter("All", "", "VERB")));
+        assertEquals(List.of(fresh, lapsedLater, suspendedLeech), matching(new WordListFilter("All", "", "VERB")));
         assertEquals(List.of(learning), matching(new WordListFilter("All", "", "adj")));
         assertEquals(List.of(lapsedLater), matching(new WordListFilter("Weak", "gre", "verb")));
         assertEquals(List.of(), matching(new WordListFilter("All", "no-such-tag", "")));
@@ -62,6 +74,11 @@ class WordListFilterTest {
 
         assertEquals("Due", WordListFilter.statusOf(review, NOW, DAY_END));
         assertEquals("Learning", WordListFilter.statusOf(step, NOW, DAY_END));
+    }
+
+    private static WordCard suspended(WordCard word) {
+        word.setSuspended(true);
+        return word;
     }
 
     private List<WordCard> matching(WordListFilter filter) {

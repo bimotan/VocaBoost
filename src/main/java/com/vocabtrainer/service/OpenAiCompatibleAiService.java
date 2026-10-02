@@ -146,7 +146,8 @@ public class OpenAiCompatibleAiService implements AiService {
 
     /**
      * The user message: the word's fields and, when the learner answered, the question's direction
-     * and the typed answer. {@link CachingAiService} keys its cache on the same fields.
+     * and the typed answer; for a memory aid, that the learner keeps forgetting the word.
+     * {@link CachingAiService} keys its cache on the same fields.
      */
     static String prompt(ExplanationRequest request) {
         WordCard word = request.word();
@@ -154,6 +155,13 @@ public class OpenAiCompatibleAiService implements AiService {
         appendLine(prompt, "Part of speech", word.getPartOfSpeech());
         appendLine(prompt, "Chinese meaning in the learner's deck", word.getChinese());
         appendLine(prompt, "Existing example", word.getExampleSentence());
+        if (request.focus() == ExplanationRequest.Focus.MEMORY_AID) {
+            prompt.append("\nThe learner keeps forgetting this word: it lapsed again and again (a leech).")
+                .append(" Make \"memory_tip\" the heart of the reply: one vivid mnemonic (word root, sound or")
+                .append(" image) that ties the English word to its Chinese meaning, or a contrast with the word it")
+                .append(" is easily confused with, in two or three short sentences.");
+            return prompt.toString();
+        }
         if (!request.hasAnswer()) {
             prompt.append("\nThere is no learner answer; explain the word.");
             return prompt.toString();

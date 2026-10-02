@@ -174,7 +174,8 @@ public final class DashboardView {
         DashboardStats stats = statsService.dashboardStats(deckId);
         DailyGoalProgress progress = goalService.getTodayProgress(deckId);
         List<Achievement> achievements = achievementService.getUnlockedAchievements(deckId);
-        totalWordsLabel.setText(String.valueOf(stats.totalWords()));
+        totalWordsLabel.setText(stats.totalWords()
+            + (stats.suspendedWords() > 0 ? " (" + stats.suspendedWords() + " suspended)" : ""));
         dueTodayLabel.setText(String.valueOf(stats.dueToday()));
         dueReviewsLabel.setText(String.valueOf(stats.dueReviews()));
         newAvailableTodayLabel.setText(String.valueOf(stats.newAvailableToday()));

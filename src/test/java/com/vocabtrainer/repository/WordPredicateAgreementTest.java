@@ -27,7 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The weak, mastered and due rules exist twice: as WordCard predicates (Word List filters, Status
  * column) and as SQL (weak-words review mode, dashboard and deck counts). These tests run both over
- * every combination of the fields involved, so the two cannot drift apart unnoticed.
+ * every combination of the fields involved, each also as a suspended word, so the two cannot drift
+ * apart unnoticed and no query counts a suspended word.
  */
 class WordPredicateAgreementTest {
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 3, 10, 12, 0);
@@ -44,7 +45,10 @@ class WordPredicateAgreementTest {
     private WordRepository words;
     private DeckRepository decks;
     private Deck deck;
+    /** Every word of the deck, suspended ones included. */
+    private List<WordCard> all;
     private List<WordCard> active;
+    private Set<Long> suspended;
 
     @BeforeEach
     void insertEveryCombination() throws SQLException {
@@ -61,42 +65,64 @@ class WordPredicateAgreementTest {
                 for (double difficulty : new double[] {0, 6.9, 7, 9}) {
                     for (int[] history : histories) {
                         for (LocalDateTime next : dueTimes) {
-                            WordCard card = WordCard.createNew(deck.getId(), "word" + index++, "词");
-                            card.setState(state);
-                            card.setStability(stability);
-                            card.setDifficulty(difficulty);
-                            card.setRepetitions(history[0]);
-                            card.setConsecutiveCorrect(history[1]);
-                            card.setNextReviewAt(next);
-                            cards.add(card);
+                            for (boolean isSuspended : new boolean[] {false, true}) {
+                                WordCard card = WordCard.createNew(deck.getId(), "word" + index++, "词");
+                                card.setState(state);
+                                card.setStability(stability);
+                                card.setDifficulty(difficulty);
+                                card.setRepetitions(history[0]);
+                                card.setConsecutiveCorrect(history[1]);
+                                card.setNextReviewAt(next);
+                                card.setSuspended(isSuspended);
+                                cards.add(card);
+                            }
                         }
                     }
                 }
             }
         }
-        // Archived words count nowhere, whatever their fields say.
-        WordCard archived = WordCard.createNew(deck.getId(), "archived", "词");
-        archived.setArchived(true);
-        archived.setNextReviewAt(NOW.minusDays(1));
-        cards.add(archived);
         words.insertAll(cards);
+        all = words.findAllIncludingSuspended(deck.getId());
         active = words.findAll(deck.getId());
-        assertEquals(cards.size() - 1, active.size());
+        suspended = all.stream().filter(WordCard::isSuspended).map(WordCard::getId).collect(Collectors.toSet());
+        assertEquals(cards.size(), all.size());
+        assertEquals(cards.size() / 2, active.size());
+        assertEquals(cards.size() / 2, suspended.size());
+        assertTrue(active.stream().noneMatch(WordCard::isSuspended));
+    }
+
+    @Test
+    void suspendedWordsAreNeverDueWeakOrMasteredWhateverTheirFields() {
+        assertTrue(all.stream().filter(WordCard::isSuspended)
+            .noneMatch(card -> card.isDue(NOW, DAY_END) || card.isWeak() || card.isMastered()));
+    }
+
+    @Test
+    void theWordListAndDuplicateChecksIncludeSuspendedWords() throws SQLException {
+        assertEquals(ids(all.stream()), ids(words.search(deck.getId(), "").stream()));
+        assertEquals(ids(all.stream()), ids(words.search(deck.getId(), "word").stream()));
+        WordCard aSuspendedWord = all.stream().filter(WordCard::isSuspended).findFirst().orElseThrow();
+        assertEquals(aSuspendedWord.getId(),
+            words.findByEnglish(deck.getId(), aSuspendedWord.getEnglish().toUpperCase()).orElseThrow().getId());
+        assertTrue(words.findEnglishKeys(deck.getId()).contains(aSuspendedWord.getEnglish()));
+        assertEquals(suspended.size(), words.countSuspended(deck.getId()));
+        assertEquals(all.size(), words.countAll(deck.getId()));
     }
 
     @Test
     void weakWordsModeSelectsExactlyTheWordsWordCardCallsWeak() throws SQLException {
         Set<Long> sql = words.findWeak(deck.getId(), 10_000).stream().map(WordCard::getId).collect(Collectors.toSet());
-        Set<Long> java = active.stream().filter(WordCard::isWeak).map(WordCard::getId).collect(Collectors.toSet());
+        Set<Long> java = all.stream().filter(WordCard::isWeak).map(WordCard::getId).collect(Collectors.toSet());
 
         assertEquals(java, sql);
+        assertTrue(java.stream().noneMatch(suspended::contains));
         assertFalse(java.isEmpty());
         assertTrue(java.size() < active.size(), "the cases must include words that are not weak");
     }
 
     @Test
     void theMasteredCountMatchesWordCard() throws SQLException {
-        long java = active.stream().filter(WordCard::isMastered).count();
+        long java = all.stream().filter(WordCard::isMastered).count();
 
         assertEquals(java, words.countMastered(deck.getId()));
         assertTrue(java > 0);
@@ -104,10 +130,11 @@ class WordPredicateAgreementTest {
 
     @Test
     void dueQueriesMatchWordCard() throws SQLException {
-        Set<Long> java = active.stream().filter(card -> card.isDue(NOW, DAY_END)).map(WordCard::getId)
+        Set<Long> java = all.stream().filter(card -> card.isDue(NOW, DAY_END)).map(WordCard::getId)
             .collect(Collectors.toSet());
 
         assertEquals(java.size(), words.countDue(deck.getId(), NOW, DAY_END));
+        assertTrue(java.stream().noneMatch(suspended::contains));
         assertTrue(java.size() < active.size(), "the cases must include words that are not due");
         // Later today: due for a review card, not yet for a learning card.
         assertTrue(active.stream().anyMatch(card -> card.getState() == CardState.REVIEW
@@ -118,7 +145,7 @@ class WordPredicateAgreementTest {
 
     @Test
     void theReviewQueuesSplitTheDueWordsByState() throws SQLException {
-        List<WordCard> due = active.stream().filter(card -> card.isDue(NOW, DAY_END)).toList();
+        List<WordCard> due = all.stream().filter(card -> card.isDue(NOW, DAY_END)).toList();
         Set<Long> reviews = ids(due.stream().filter(card -> card.getState() == CardState.REVIEW));
         Set<Long> newCards = ids(due.stream().filter(card -> card.getState() == CardState.NEW));
         Set<Long> learning = ids(due.stream().filter(card -> card.getState().isLearning()));

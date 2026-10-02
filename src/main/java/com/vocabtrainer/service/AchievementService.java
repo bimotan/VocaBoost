@@ -80,6 +80,21 @@ public class AchievementService {
     }
 
     /**
+     * Locks again the badges a review in {@code deckId} unlocked, when that review is undone; their
+     * XP is taken back with the review's (see {@code GoalService.revertReview}).
+     */
+    public void revoke(long deckId, List<Achievement> unlocked) {
+        try {
+            for (Achievement achievement : unlocked) {
+                boolean streak = STREAK_CODES.contains(achievement.code());
+                achievementRepository.delete(streak ? AchievementRepository.NO_DECK : deckId, achievement.code());
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot take back achievements", e);
+        }
+    }
+
+    /**
      * Unlocks {@code achievement} unless it is unlocked already, and adds its XP to {@code deckId}. A
      * streak badge is unlocked for no deck, and counts as unlocked if it was in any deck.
      */

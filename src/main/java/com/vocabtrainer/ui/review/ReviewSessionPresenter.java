@@ -16,6 +16,7 @@ import com.vocabtrainer.service.ReviewQueueCounts;
 import com.vocabtrainer.service.ReviewScheduler;
 import com.vocabtrainer.service.ReviewService;
 import com.vocabtrainer.service.ReviewSettings;
+import com.vocabtrainer.service.UndoAction;
 import com.vocabtrainer.service.cloze.Cloze;
 import com.vocabtrainer.service.scheduling.IntervalPreview;
 import com.vocabtrainer.ui.DataChange;
@@ -67,6 +68,12 @@ import java.util.regex.Pattern;
  * In Cloze mode the question is the card's example with the word blanked out and the hint its
  * Chinese meaning; the session progress counts the cards skipped for want of a usable example.
  *
+ * A new card can be marked as already known instead of answered, and the card on screen can be
+ * suspended. {@link #undo()} takes back the session's last rating, Already known or suspension, one
+ * after the other: the card comes back on screen as it was, a rated card with its checked answer,
+ * so the user only chooses the rating again. When a rating makes a card a leech, a notice offers to
+ * suspend it and, when an AI provider may be used, to ask for a memory aid.
+ *
  * Call it on the UI thread only.
  */
 public final class ReviewSessionPresenter {
@@ -104,6 +111,8 @@ public final class ReviewSessionPresenter {
     /** What the result area says after a failed practice brought the word's due date forward. */
     static final String PRACTICE_MISSED =
         "Practice saved: the word was not due, but after this miss it is due again from the next study day.";
+    /** Reminds the user that a mistaken action can be taken back. */
+    static final String UNDO_HINT = "Undo (Ctrl+Z) takes it back.";
     /** Chinese text, which in an example sentence would give an English-to-Chinese answer away. */
     private static final Pattern HAN = Pattern.compile("\\p{IsHan}");
 
@@ -116,6 +125,7 @@ public final class ReviewSessionPresenter {
     private final Clock clock;
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
     private final LatestRequest explanations = new LatestRequest();
+    private final LatestRequest memoryAids = new LatestRequest();
     private final Map<ReviewRating, IntervalPreview> ratingPreviews = new EnumMap<>(ReviewRating.class);
     /** The checked answer of the card on screen; null before it is submitted. */
     private ReviewAnswer checked;
@@ -158,6 +168,12 @@ public final class ReviewSessionPresenter {
     private String sessionProgress = "";
     private String completionTitle = "Review complete";
     private String completionMetrics = "";
+    /** The card the last rating made a leech, while the notice about it is shown; null otherwise. */
+    private WordCard leech;
+    private boolean leechSuspended;
+    /** The AI's memory aid for the leech, "loading" or why there is none; empty until asked for. */
+    private String memoryAid = "";
+    private boolean memoryAidLoading;
 
     /**
      * @param aiServices the AI service to explain answers with, asked again for every answer so
@@ -210,6 +226,7 @@ public final class ReviewSessionPresenter {
     /** Starts a new session with the current mode and size. */
     public void resetSession() {
         try {
+            clearLeechNotice();
             newCardsPerDay = reviewService.newCardsPerDay(deckId);
             reviewService.startSession(deckId, mode, reviewService.sessionTarget());
             loadNextCard();
@@ -226,6 +243,7 @@ public final class ReviewSessionPresenter {
     public void startSession(String sizeChoice, String customSize) {
         int target = parseSessionSize(sizeChoice, customSize);
         try {
+            clearLeechNotice();
             customSizeChosen = CUSTOM.equals(sizeChoice);
             reviewService.startSession(deckId, mode, target);
             loadNextCard();
@@ -326,11 +344,20 @@ public final class ReviewSessionPresenter {
         LocalDateTime effectivelyShownAt = now.minus(timeOnScreen(now));
         // The session's mode, not the card's direction: in Mixed mode the service checks the answer in
         // the direction it chose for the card, and an Easy recognition must count as Mixed mode's.
-        checked = reviewService.submitAnswer(answered.getId(), answer, mode, effectivelyShownAt);
+        showChecked(answered, reviewService.submitAnswer(answered.getId(), answer, mode, effectivelyShownAt), "");
+    }
+
+    /**
+     * Shows the checked answer of {@code answered}, with {@code note} above it when not empty, and the
+     * interval each rating would give, and asks the AI service for an explanation.
+     */
+    private void showChecked(WordCard answered, ReviewAnswer answerChecked, String note) {
+        checked = answerChecked;
         overridden = false;
         revealed = WordDetails.of(answered, reviewService.exampleSpans(answered));
         previewRatings();
-        checkedText = "Correct answer: " + checked.correctAnswer() + formsInSentence(checked, cloze)
+        checkedText = (note.isEmpty() ? "" : note + System.lineSeparator() + System.lineSeparator())
+            + "Correct answer: " + checked.correctAnswer() + formsInSentence(checked, cloze)
             + System.lineSeparator() + "Your answer: " + checked.userAnswer()
             + System.lineSeparator() + "Answer similarity: " + Formats.percent(checked.similarity())
             + verdict(checked);
@@ -392,30 +419,229 @@ public final class ReviewSessionPresenter {
             fireChanged();
             return;
         }
+        clearLeechNotice();
+        if (outcome.becameLeech()) {
+            leech = outcome.word();
+        }
+        showNextCardAfter("Rating saved", () -> savedMessage(outcome, dueBefore, rating, countsAs, override)
+            + " XP +" + outcome.xpEarned() + Formats.unlockedSuffix(outcome.unlockedAchievements())
+            + leechNotice(outcome), DataChange.REVIEWS);
+    }
+
+    /**
+     * After something was saved: shows the next card with {@code message} as the result, then tells
+     * the other views about the {@code changed} data. A failure of either is reported as "{@code saved},
+     * but refreshing the review failed", since what was saved stays saved.
+     */
+    private void showNextCardAfter(String saved, Supplier<String> message, DataChange... changed) {
         RuntimeException failure = null;
         try {
             loadNextCard();
             if (card != null) {
-                result = savedMessage(outcome, dueBefore, rating, countsAs, override) + " XP +" + outcome.xpEarned()
-                    + Formats.unlockedSuffix(outcome.unlockedAchievements()) + leechNotice(outcome);
+                result = message.get();
             }
         } catch (RuntimeException e) {
             failure = e;
         } finally {
             fireChanged();
         }
+        failure = publish(failure, changed);
+        if (failure != null) {
+            failures.report(saved + ", but refreshing the review failed", failure);
+        }
+    }
+
+    /** Publishes the {@code changed} data; returns {@code failure}, or the failure of publishing. */
+    private RuntimeException publish(RuntimeException failure, DataChange... changed) {
         try {
-            changes.publish(DataChange.REVIEWS);
+            changes.publish(changed[0], Arrays.copyOfRange(changed, 1, changed.length));
         } catch (RuntimeException e) {
             if (failure == null) {
-                failure = e;
-            } else {
-                failure.addSuppressed(e);
+                return e;
             }
+            failure.addSuppressed(e);
         }
+        return failure;
+    }
+
+    /**
+     * Marks the new card on screen as already known: it goes straight into review for about two
+     * months without being learned, and the next card is shown. Does nothing unless
+     * {@link #canMarkKnown()}.
+     */
+    public void markKnown() {
+        if (!canMarkKnown()) {
+            return;
+        }
+        WordCard known = card;
+        WordCard saved;
+        try {
+            saved = reviewService.markKnown(known.getId());
+        } catch (RuntimeException e) {
+            failures.report("Not marked as known", e);
+            fireChanged();
+            return;
+        }
+        showNextCardAfter("Marked as known", () -> "Marked \"" + known.getEnglish() + "\" as already known: its next"
+            + " review is in " + Formats.interval(IntervalPreview.days(saved.getIntervalDays())) + ". " + UNDO_HINT,
+            DataChange.REVIEWS);
+    }
+
+    /**
+     * Suspends the card on screen: it is not reviewed until it is unsuspended in the Word List, and
+     * the next card is shown. Does nothing unless {@link #canSuspend()}.
+     */
+    public void suspendCard() {
+        if (!canSuspend()) {
+            return;
+        }
+        WordCard suspended = card;
+        try {
+            reviewService.suspendWord(suspended.getId(), true);
+        } catch (RuntimeException e) {
+            failures.report("Not suspended", e);
+            fireChanged();
+            return;
+        }
+        if (leech != null && leech.getId() == suspended.getId()) {
+            leechSuspended = true;
+        }
+        showNextCardAfter("Suspended", () -> suspendedMessage(suspended), DataChange.WORDS, DataChange.REVIEWS);
+    }
+
+    /**
+     * Suspends the card the last rating made a leech, from the notice about it: when it is the card
+     * on screen as {@link #suspendCard()} does, otherwise without changing the card on screen. Does
+     * nothing unless {@link #canSuspendLeech()}.
+     */
+    public void suspendLeech() {
+        if (!canSuspendLeech()) {
+            return;
+        }
+        if (card != null && card.getId() == leech.getId() && canSuspend()) {
+            suspendCard();
+            return;
+        }
+        try {
+            reviewService.suspendWord(leech.getId(), false);
+        } catch (RuntimeException e) {
+            failures.report("Not suspended", e);
+            fireChanged();
+            return;
+        }
+        leechSuspended = true;
+        fireChanged();
+        RuntimeException failure = publish(null, DataChange.WORDS, DataChange.REVIEWS);
         if (failure != null) {
-            failures.report("Rating saved, but refreshing the review failed", failure);
+            failures.report("Suspended, but refreshing the review failed", failure);
         }
+    }
+
+    /**
+     * Asks the AI provider for a memory aid for the card the last rating made a leech; it is shown
+     * under the notice ({@link #memoryAid()}). Does nothing unless {@link #canRequestMemoryAid()}.
+     */
+    public void requestMemoryAid() {
+        if (!canRequestMemoryAid()) {
+            return;
+        }
+        ExplanationRequest request = ExplanationRequest.memoryAid(leech);
+        memoryAid = "Memory aid: loading...";
+        memoryAidLoading = true;
+        long ticket = memoryAids.next();
+        AiService ai = aiServices.get();
+        fireChanged();
+        tasks.run(
+            () -> ai.explain(request),
+            text -> showMemoryAid(ticket, "Memory aid for \"" + request.word().getEnglish() + "\":"
+                + System.lineSeparator() + text),
+            error -> showMemoryAid(ticket, "Memory aid unavailable: " + ErrorMessages.rootMessage(error))
+        );
+    }
+
+    private void showMemoryAid(long ticket, String text) {
+        if (memoryAids.isLatest(ticket)) {
+            memoryAid = text;
+            memoryAidLoading = false;
+            fireChanged();
+        }
+    }
+
+    /**
+     * Takes back the session's last rating, Already known or suspension (see
+     * {@link ReviewService#undoLast()}). The card comes back on screen as it was: a rated card with
+     * the answer that was checked, so only the rating is chosen again; a card marked as known or
+     * suspended waiting for its answer, or with its checked answer if one was submitted. A leech
+     * suspended from the notice about it is only unsuspended, and the card on screen stays. Does
+     * nothing unless {@link #canUndo()}.
+     */
+    public void undo() {
+        if (!canUndo()) {
+            return;
+        }
+        UndoAction undone;
+        try {
+            undone = reviewService.undoLast();
+        } catch (RuntimeException e) {
+            failures.report("Undo failed", e);
+            fireChanged();
+            return;
+        }
+        RuntimeException failure = null;
+        try {
+            if (undone.wasShown()) {
+                clearLeechNotice();
+                showRestored(undone);
+            } else {
+                // Only a leech is suspended while another card is shown: the notice about it comes back.
+                if (leech == null || leech.getId() != undone.word().getId()) {
+                    clearLeechNotice();
+                    leech = undone.word();
+                }
+                leechSuspended = false;
+            }
+        } catch (RuntimeException e) {
+            failure = e;
+        } finally {
+            fireChanged();
+        }
+        failure = publish(failure, DataChange.WORDS, DataChange.REVIEWS);
+        if (failure != null) {
+            failures.report("Undone, but refreshing the review failed", failure);
+        }
+    }
+
+    /** Shows the card an undo restored, as it was before: with its checked answer if it had one. */
+    private void showRestored(UndoAction undone) {
+        clearCard();
+        present(undone.word());
+        String note = undoneMessage(undone);
+        if (undone.answer() == null) {
+            result = note;
+            return;
+        }
+        answer = undone.answer().userAnswer();
+        showChecked(card, undone.answer(), note);
+    }
+
+    /** What an undo took back, e.g. "Undid the Good rating of "abate": XP -14." */
+    static String undoneMessage(UndoAction undone) {
+        String english = "\"" + undone.word().getEnglish() + "\"";
+        return switch (undone.kind()) {
+            case RATING -> "Undid the " + undone.rating().getLabel() + " rating of " + english
+                + (undone.xp() > 0 ? ": XP -" + undone.xp() : "")
+                + (undone.unlocked().isEmpty() ? "" : (undone.xp() > 0 ? ", " : ": ") + "locked again: "
+                    + Formats.achievementNames(undone.unlocked()))
+                + ". Choose a rating again.";
+            case KNOWN -> "Undid \"Already known\" for " + english + ": it is a new word again.";
+            case SUSPEND -> "Undid suspending " + english + ".";
+        };
+    }
+
+    /** What the result area says after the card on screen was suspended. */
+    static String suspendedMessage(WordCard suspended) {
+        return "Suspended \"" + suspended.getEnglish() + "\": it is not reviewed until you unsuspend it in the"
+            + " Word List. " + UNDO_HINT;
     }
 
     /**
@@ -500,6 +726,72 @@ public final class ReviewSessionPresenter {
 
     public boolean canSubmit() {
         return state == State.AWAITING_ANSWER;
+    }
+
+    /** Whether a card is on screen that can be marked as known or suspended: answered or not, not being saved. */
+    private boolean cardActionable() {
+        return card != null && (state == State.AWAITING_ANSWER || state == State.ANSWERED
+            || state == State.RATING_FAILED);
+    }
+
+    /** Whether the card on screen is a new card that can be marked as already known. */
+    public boolean canMarkKnown() {
+        return cardActionable() && card.getState() == CardState.NEW;
+    }
+
+    /** Whether the card on screen can be suspended. */
+    public boolean canSuspend() {
+        return cardActionable();
+    }
+
+    /** Whether the session has a rating, Already known or suspension to undo, and no rating is being saved. */
+    public boolean canUndo() {
+        return state != State.SAVING && reviewService.canUndo();
+    }
+
+    /** What Undo would take back, e.g. "Undo the Good rating of "abate""; empty when nothing. */
+    public String undoDescription() {
+        if (!canUndo()) {
+            return "";
+        }
+        return reviewService.nextUndo().map(action -> {
+            String english = "\"" + action.word().getEnglish() + "\"";
+            return switch (action.kind()) {
+                case RATING -> "Undo the " + action.rating().getLabel() + " rating of " + english;
+                case KNOWN -> "Undo \"Already known\" for " + english;
+                case SUSPEND -> "Undo suspending " + english;
+            };
+        }).orElse("");
+    }
+
+    /** The card the last rating made a leech, while the notice about it is shown. */
+    public Optional<WordCard> leech() {
+        return Optional.ofNullable(leech);
+    }
+
+    /** The notice about a new leech, e.g. "Leech: "cavil" lapsed 8 times."; empty without one. */
+    public String leechNotice() {
+        if (leech == null) {
+            return "";
+        }
+        return "Leech: \"" + leech.getEnglish() + "\" lapsed " + leech.getLapses() + " times."
+            + (leechSuspended ? " Suspended: unsuspend it in the Word List once you have a way to remember it."
+                : " Suspend it for now, or find a way to remember it.");
+    }
+
+    /** Whether the new leech can be suspended from the notice about it. */
+    public boolean canSuspendLeech() {
+        return leech != null && !leechSuspended && state != State.SAVING;
+    }
+
+    /** Whether a memory aid for the new leech can be asked for: an AI provider may be used and none is loading. */
+    public boolean canRequestMemoryAid() {
+        return leech != null && !memoryAidLoading && usesAiProvider();
+    }
+
+    /** The memory aid for the new leech, "loading" or why there is none; empty until asked for. */
+    public String memoryAid() {
+        return memoryAid;
     }
 
     public boolean canRate() {
@@ -656,6 +948,19 @@ public final class ReviewSessionPresenter {
     }
 
     private void loadNextCard() {
+        clearCard();
+        Optional<WordCard> next;
+        try {
+            next = reviewService.nextWord(deckId, mode);
+        } catch (RuntimeException e) {
+            state = State.IDLE;
+            throw e;
+        }
+        present(next.orElse(null));
+    }
+
+    /** Forgets the card on screen and everything shown for it; the next one gets a new card number. */
+    private void clearCard() {
         explanations.invalidate();
         explanationRequest = null;
         explanationLoading = false;
@@ -669,14 +974,14 @@ public final class ReviewSessionPresenter {
         cloze = null;
         overridden = false;
         cardNumber++;
-        Optional<WordCard> next;
-        try {
-            next = reviewService.nextWord(deckId, mode);
-        } catch (RuntimeException e) {
-            state = State.IDLE;
-            throw e;
-        }
-        card = next.orElse(null);
+    }
+
+    /**
+     * Shows {@code next}, the service's current card, waiting for an answer in the direction the
+     * service chose; or the completion when it is null.
+     */
+    private void present(WordCard next) {
+        card = next;
         LocalDateTime now = LocalDateTime.now(clock);
         shownAt = onScreen ? now : null;
         shownBefore = Duration.ZERO;
@@ -907,6 +1212,15 @@ public final class ReviewSessionPresenter {
             error -> showExplanation(ticket, shownAnswer + separator
                 + "AI explanation unavailable: " + ErrorMessages.rootMessage(error))
         );
+    }
+
+    /** Hides the notice about a new leech and drops a memory aid still loading for it. */
+    private void clearLeechNotice() {
+        memoryAids.invalidate();
+        leech = null;
+        leechSuspended = false;
+        memoryAid = "";
+        memoryAidLoading = false;
     }
 
     /** Shows an explanation only for the answer it was requested for, never on a later card. */

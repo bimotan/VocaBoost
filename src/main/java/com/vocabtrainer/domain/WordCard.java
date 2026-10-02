@@ -11,6 +11,10 @@ import java.time.LocalDateTime;
  * still written, so an older version of the app can open the database and older backups can be
  * restored: the interval is the scheduled interval in days and the easiness factor is read from the
  * difficulty.
+ *
+ * <p>A <b>suspended</b> card (stored in {@code words.archived}) keeps its schedule but is never due,
+ * weak or mastered: no review queue, due count or weak list has it, while the Word List, backups and
+ * the CSV export still do.
  */
 public class WordCard {
     public static final double DEFAULT_EASINESS = 2.5;
@@ -41,7 +45,7 @@ public class WordCard {
     private int repetitions;
     private int consecutiveCorrect;
     private int lapses;
-    private boolean archived;
+    private boolean suspended;
     private CardState state = CardState.NEW;
     private double stability;
     private double difficulty;
@@ -65,11 +69,12 @@ public class WordCard {
     /**
      * Whether the card is due. A learning or relearning card is due once its step time has come; any
      * other card from the start of the study day it is due on, that is when it is due before
-     * {@code dayEnd}, the next day rollover after {@code now}. {@code WordRepository.countDue},
-     * {@code countDueByState} and the review queue queries select the same cards in SQL.
+     * {@code dayEnd}, the next day rollover after {@code now}. A suspended card is never due.
+     * {@code WordRepository.countDue}, {@code countDueByState} and the review queue queries select
+     * the same cards in SQL.
      */
     public boolean isDue(LocalDateTime now, LocalDateTime dayEnd) {
-        if (archived) {
+        if (suspended) {
             return false;
         }
         if (nextReviewAt == null) {
@@ -80,20 +85,24 @@ public class WordCard {
 
     /**
      * Mastered words: in review with a stability of at least {@value #MASTERED_STABILITY_DAYS} days,
-     * whatever lapses they had before. {@code WordRepository.countMastered} counts the same in SQL.
+     * whatever lapses they had before, and not suspended. {@code WordRepository.countMastered} counts
+     * the same in SQL.
      */
     public boolean isMastered() {
-        return state == CardState.REVIEW && stability >= MASTERED_STABILITY_DAYS;
+        return !suspended && state == CardState.REVIEW && stability >= MASTERED_STABILITY_DAYS;
     }
 
     /**
      * Weak words: relearning after a lapse, rated Again within the last {@value #RECENT_REVIEWS}
      * reviews, or hard (difficulty {@value #WEAK_DIFFICULTY} or more) and not mastered yet. A lapse
      * stops counting once the word was recalled {@value #RECENT_REVIEWS} times in a row, and a
-     * mastered word is never weak. The weak-words review mode ({@code WordRepository.findWeak})
-     * selects the same words in SQL.
+     * mastered word is never weak, nor is a suspended one. The weak-words review mode
+     * ({@code WordRepository.findWeak}) selects the same words in SQL.
      */
     public boolean isWeak() {
+        if (suspended) {
+            return false;
+        }
         return state == CardState.RELEARNING
             || failedRecently()
             || (difficulty >= WEAK_DIFFICULTY && !isMastered());
@@ -161,6 +170,43 @@ public class WordCard {
     /** The SM-2 easiness factor written for older versions: the inverse of {@link #difficultyFromEasiness}, 1.3 to 2.8. */
     public static double easinessFromDifficulty(double difficulty) {
         return Math.min(2.8, Math.max(1.3, DEFAULT_EASINESS - (difficulty - 5.0) * 0.3));
+    }
+
+    /** A copy of every field, so a change to one card leaves the other as it was. */
+    public WordCard copy() {
+        WordCard copy = new WordCard();
+        copy.id = id;
+        copy.deckId = deckId;
+        copy.english = english;
+        copy.chinese = chinese;
+        copy.phonetic = phonetic;
+        copy.partOfSpeech = partOfSpeech;
+        copy.exampleSentence = exampleSentence;
+        copy.note = note;
+        copy.tags = tags;
+        copy.addedAt = addedAt;
+        copy.copyReviewStateFrom(this);
+        return copy;
+    }
+
+    /**
+     * Takes the review state of {@code other}: the FSRS state, memory and learning step, the due and
+     * last review times, the counters, the SM-2 fields of older versions and whether it is suspended.
+     * The word's text and tags stay as they are.
+     */
+    public void copyReviewStateFrom(WordCard other) {
+        lastReviewedAt = other.lastReviewedAt;
+        nextReviewAt = other.nextReviewAt;
+        easinessFactor = other.easinessFactor;
+        intervalDays = other.intervalDays;
+        repetitions = other.repetitions;
+        consecutiveCorrect = other.consecutiveCorrect;
+        lapses = other.lapses;
+        suspended = other.suspended;
+        state = other.state;
+        stability = other.stability;
+        difficulty = other.difficulty;
+        learningStep = other.learningStep;
     }
 
     public long getId() {
@@ -299,12 +345,16 @@ public class WordCard {
         this.lapses = lapses;
     }
 
-    public boolean isArchived() {
-        return archived;
+    /**
+     * Suspended by the user: kept, with its schedule, but never reviewed until it is unsuspended.
+     * Stored in {@code words.archived}, which older versions never set and treat as hidden.
+     */
+    public boolean isSuspended() {
+        return suspended;
     }
 
-    public void setArchived(boolean archived) {
-        this.archived = archived;
+    public void setSuspended(boolean suspended) {
+        this.suspended = suspended;
     }
 
     public CardState getState() {

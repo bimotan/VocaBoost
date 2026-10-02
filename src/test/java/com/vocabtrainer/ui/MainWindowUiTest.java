@@ -325,6 +325,18 @@ abstract class MainWindowUiTest {
             false, false, false, false));
     }
 
+    /**
+     * Presses a key with the platform's shortcut modifier, as Ctrl+Z (Cmd+Z on a Mac) does: pressed and
+     * released, each passing the scene's event filters; see {@link #pressKey} for {@code targetId}.
+     */
+    void pressShortcut(String targetId, KeyCode code) {
+        boolean mac = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac");
+        fireKey(targetId, new KeyEvent(KeyEvent.KEY_PRESSED, KeyEvent.CHAR_UNDEFINED, "", code,
+            false, !mac, false, mac));
+        fireKey(targetId, new KeyEvent(KeyEvent.KEY_RELEASED, KeyEvent.CHAR_UNDEFINED, "", code,
+            false, !mac, false, mac));
+    }
+
     /** The character a digit, letter (lower case) or Space key types; empty for other keys. */
     private static String keyCharacter(KeyCode code) {
         if (code.isDigitKey() || code == KeyCode.SPACE) {

@@ -48,6 +48,20 @@ public class AchievementRepository {
         }
     }
 
+    /**
+     * Deletes the deck's achievement with this code ({@link #NO_DECK} for a streak badge), such as
+     * one an undone review unlocked; returns whether it existed.
+     */
+    public boolean delete(long deckId, String code) throws SQLException {
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "DELETE FROM achievements WHERE deck_id = ? AND code = ?")) {
+            statement.setLong(1, deckId);
+            statement.setString(2, code);
+            return statement.executeUpdate() > 0;
+        }
+    }
+
     public boolean exists(String code) throws SQLException {
         return exists(0L, code);
     }

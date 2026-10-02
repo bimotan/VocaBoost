@@ -109,13 +109,13 @@ public class BackupService {
     }
 
     /**
-     * Writes the deck's words as CSV for spreadsheets ({@link CsvWriter}: UTF-8 with BOM, formula
-     * cells neutralized). The header row uses the names "Import GRE CSV" maps columns by, so the
-     * file imports back with every field in place.
+     * Writes the deck's words, suspended ones included, as CSV for spreadsheets ({@link CsvWriter}:
+     * UTF-8 with BOM, formula cells neutralized). The header row uses the names "Import GRE CSV" maps
+     * columns by, so the file imports back with every field in place.
      */
     public Path exportWordsCsv(long deckId, Path outputPath) {
         try {
-            List<WordCard> words = wordRepository.findAll(deckId);
+            List<WordCard> words = wordRepository.findAllIncludingSuspended(deckId);
             ensureParent(outputPath);
             try (CsvWriter writer = CsvWriter.create(outputPath)) {
                 writer.writeRow(WordColumns.EXPORT_ORDER.stream().map(WordColumn::headerName).toList());
@@ -159,7 +159,7 @@ public class BackupService {
 
     private List<List<String>> reviewLogCsvRows(long deckId) throws SQLException {
         Map<Long, String> englishById = new HashMap<>();
-        for (WordCard word : wordRepository.findAllIncludingArchived(deckId)) {
+        for (WordCard word : wordRepository.findAllIncludingSuspended(deckId)) {
             englishById.put(word.getId(), word.getEnglish());
         }
         List<List<String>> rows = new ArrayList<>();
@@ -228,7 +228,7 @@ public class BackupService {
         String deckName = deckRepository.findById(deckId).map(Deck::getName).orElse(null);
         List<BackupFile.WordEntry> words = new ArrayList<>();
         Map<Long, String> englishById = new HashMap<>();
-        for (WordCard word : wordRepository.findAllIncludingArchived(deckId)) {
+        for (WordCard word : wordRepository.findAllIncludingSuspended(deckId)) {
             englishById.put(word.getId(), word.getEnglish());
             words.add(new BackupFile.WordEntry(
                 word.getEnglish(),
@@ -246,7 +246,7 @@ public class BackupService {
                 word.getRepetitions(),
                 word.getConsecutiveCorrect(),
                 word.getLapses(),
-                word.isArchived(),
+                word.isSuspended(),
                 word.getState().name(),
                 word.getStability(),
                 word.getDifficulty(),
@@ -325,7 +325,7 @@ public class BackupService {
         throws SQLException {
         RestoreTally tally = new RestoreTally(version);
         Map<String, WordCard> deckWords = new HashMap<>();
-        for (WordCard word : wordRepository.findAllIncludingArchived(deckId)) {
+        for (WordCard word : wordRepository.findAllIncludingSuspended(deckId)) {
             deckWords.put(wordKey(word.getEnglish()), word);
         }
 
@@ -404,7 +404,7 @@ public class BackupService {
             word.setTags(entry.tags());
             word.setAddedAt(addedAt == null ? now : addedAt);
             (schedule == null ? Schedule.newCard(now) : schedule).applyTo(word);
-            word.setArchived(Boolean.TRUE.equals(entry.archived()));
+            word.setSuspended(Boolean.TRUE.equals(entry.archived()));
             wordRepository.insert(word);
             deckWords.put(key, word);
             if (schedule != null && schedule.state() == null) {

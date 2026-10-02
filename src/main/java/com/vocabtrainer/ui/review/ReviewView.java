@@ -33,6 +33,8 @@ import javafx.scene.control.TextInputControl;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCodeCombination;
+import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -60,12 +62,20 @@ import java.util.Optional;
  * <p>Keyboard: Enter in the answer field submits. Once the answer is checked, 1, 2, 3 and 4 rate
  * Again, Hard, Good and Easy and Space presses the focused button, which is the suggested rating
  * right after submitting (or rates Good when no button has the focus), while the Review tab is shown
- * and the user is not typing in another field.
+ * and the user is not typing in another field. Ctrl+Z (Cmd+Z on a Mac) undoes the last rating,
+ * Already known or suspension while the Review tab is shown, unless the focus is in a field with
+ * text, whose own typing it undoes.
+ *
+ * <p>Next to the answer, "Already known" marks a new card as known, "Suspend" suspends the card and
+ * "Undo" takes back the last of these or the last rating. After a rating made a card a leech, a
+ * notice under the result offers to suspend it and, with an AI provider, a memory aid.
  */
 public final class ReviewView {
     private static final String WORD_QUESTION_STYLE = "-fx-font-size: 34px; -fx-font-weight: 700;";
     /** A cloze's sentence is longer than a word: smaller, so it fits on a line or two. */
     private static final String SENTENCE_QUESTION_STYLE = "-fx-font-size: 24px; -fx-font-weight: 600;";
+    /** Undoes the last rating, Already known or suspension. */
+    static final KeyCombination UNDO_KEY = new KeyCodeCombination(KeyCode.Z, KeyCombination.SHORTCUT_DOWN);
 
     private final ViewContext context;
     private final ReviewSessionPresenter presenter;
@@ -89,9 +99,20 @@ public final class ReviewView {
     private final HBox ratingButtons = new HBox(10);
     private final Map<ReviewRating, Button> ratingButtonsByRating = new EnumMap<>(ReviewRating.class);
     private final ToggleButton overrideButton = new ToggleButton("I was right");
+    private final Button knownButton = new Button("Already known / 已掌握");
+    private final Button suspendButton = new Button("Suspend / 暂停");
+    private final Button undoButton = new Button("Undo");
+    private final Tooltip undoTooltip = new Tooltip();
+    private final Label leechNoticeLabel = new Label();
+    private final Button suspendLeechButton = new Button("Suspend / 暂停");
+    private final Button memoryAidButton = new Button("Get a mnemonic");
+    private final Label memoryAidLabel = new Label();
+    private final VBox leechBox = new VBox(6);
     private final Tab tab;
     private long renderedCardNumber = -1;
     private boolean renderedCanRate;
+    /** The card number of the last render, so a card an undo brought back answered gets the keyboard on its rating. */
+    private long renderedRatedCardNumber = -1;
     private ReviewRating renderedSuggestion;
     private boolean renderedOverridden;
     private boolean swallowTypedKey;
@@ -133,8 +154,9 @@ public final class ReviewView {
         presenter.showDeck(context.decks().currentId());
     }
 
-    /** Lets {@code scene} rate the answered card with the keyboard; see the class comment. */
+    /** Lets {@code scene} rate the answered card and undo with the keyboard; see the class comment. */
     public void installShortcuts(Scene scene) {
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, this::undoWithKey);
         scene.addEventFilter(KeyEvent.KEY_PRESSED, this::rateWithKey);
         // A key press is followed by a key-typed event, delivered to whatever has the focus by then:
         // after a rating that is the next card's answer field, which must not receive the "3".
@@ -166,6 +188,21 @@ public final class ReviewView {
             case DIGIT4, NUMPAD4 -> Optional.of(ReviewRating.EASY);
             default -> Optional.empty();
         };
+    }
+
+    /** Ctrl+Z (Cmd+Z) undoes on the Review tab, unless a field with text has the focus; see the class comment. */
+    private void undoWithKey(KeyEvent event) {
+        if (!tab.isSelected() || !UNDO_KEY.match(event) || hasTextToUndo(event.getTarget())) {
+            return;
+        }
+        event.consume();
+        presenter.undo();
+    }
+
+    /** A field the user types in undoes its own typing; an empty one, like the next card's answer field, does not. */
+    private static boolean hasTextToUndo(EventTarget target) {
+        return target instanceof TextInputControl input && input.isEditable() && !input.isDisabled()
+            && !input.getText().isEmpty();
     }
 
     private void rateWithKey(KeyEvent event) {
@@ -284,18 +321,65 @@ public final class ReviewView {
         ratingButtons.setId("ratingButtons");
         ratingButtons.setDisable(true);
 
-        HBox answerBox = new HBox(10, answerField, submitAnswerButton);
+        configureCardActions();
+        Region answerSpacer = new Region();
+        HBox.setHgrow(answerSpacer, Priority.ALWAYS);
+        HBox answerBox = new HBox(10, answerField, submitAnswerButton, answerSpacer, knownButton, suspendButton,
+            undoButton);
         answerBox.setAlignment(Pos.CENTER_LEFT);
+        configureLeechNotice();
         HBox explanationActions = new HBox(10, regenerateExplanationButton);
         explanationActions.setAlignment(Pos.CENTER_RIGHT);
         explanationActions.managedProperty().bind(regenerateExplanationButton.visibleProperty());
         showIf(detailsCard.root(), false);
         VBox question = new VBox(6, reviewWordLabel, reviewHintLabel);
         VBox content = new VBox(16, modeBox, sessionBox, question, reviewMetaLabel, answerBox,
-            completionCard, reviewResultArea, detailsCard.root(), explanationActions, ratingButtons);
+            completionCard, reviewResultArea, leechBox, detailsCard.root(), explanationActions, ratingButtons);
         content.setPadding(new Insets(28));
         VBox.setVgrow(reviewResultArea, Priority.ALWAYS);
         return content;
+    }
+
+    /** Already known, Suspend and Undo, next to the answer field. */
+    private void configureCardActions() {
+        knownButton.setId("knownButton");
+        knownButton.setTooltip(new Tooltip("已掌握: you know this new word already. It skips learning and comes back"
+            + " for a review in about two months."));
+        knownButton.setOnAction(event -> context.errors().guard("Mark as known failed", presenter::markKnown));
+        suspendButton.setId("suspendCardButton");
+        suspendButton.setTooltip(new Tooltip("暂停: stop reviewing this word, keeping it and its history."
+            + " Unsuspend it in the Word List."));
+        suspendButton.setOnAction(event -> context.errors().guard("Suspend failed", presenter::suspendCard));
+        undoButton.setId("undoButton");
+        undoButton.setTooltip(undoTooltip);
+        undoButton.setOnAction(event -> context.errors().guard("Undo failed", presenter::undo));
+    }
+
+    /** The notice under the result when a rating made a card a leech: Suspend, and a memory aid from the AI. */
+    private void configureLeechNotice() {
+        leechNoticeLabel.setId("leechNoticeLabel");
+        leechNoticeLabel.setWrapText(true);
+        leechNoticeLabel.setStyle("-fx-font-weight: 600; -fx-text-fill: #92400e;");
+        suspendLeechButton.setId("suspendLeechButton");
+        suspendLeechButton.setTooltip(new Tooltip("暂停: stop reviewing this leech for now, keeping its history"));
+        suspendLeechButton.setOnAction(event -> context.errors().guard("Suspend failed", presenter::suspendLeech));
+        memoryAidButton.setId("memoryAidButton");
+        memoryAidButton.setTooltip(new Tooltip("Ask the AI provider for a mnemonic for this word"));
+        memoryAidButton.setOnAction(event -> context.errors().guard("Memory aid failed", presenter::requestMemoryAid));
+        memoryAidButton.managedProperty().bind(memoryAidButton.visibleProperty());
+        memoryAidLabel.setId("memoryAidLabel");
+        memoryAidLabel.setWrapText(true);
+        memoryAidLabel.setMinHeight(Region.USE_PREF_SIZE);
+        memoryAidLabel.managedProperty().bind(memoryAidLabel.visibleProperty());
+        HBox actions = new HBox(10, leechNoticeLabel, suspendLeechButton, memoryAidButton);
+        actions.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(leechNoticeLabel, Priority.ALWAYS);
+        leechBox.getChildren().setAll(actions, memoryAidLabel);
+        leechBox.setId("leechBox");
+        leechBox.setPadding(new Insets(10));
+        leechBox.setStyle("-fx-background-color: #fffbeb; -fx-border-color: #f59e0b; -fx-border-radius: 6;"
+            + " -fx-background-radius: 6;");
+        showIf(leechBox, false);
     }
 
     /**
@@ -479,6 +563,17 @@ public final class ReviewView {
             ratingButtonText(rating, presenter.ratingCountsAs(rating), presenter.ratingPreview(rating))));
         overrideButton.setDisable(!presenter.canOverride());
         overrideButton.setSelected(presenter.isOverridden());
+        knownButton.setDisable(!presenter.canMarkKnown());
+        suspendButton.setDisable(!presenter.canSuspend());
+        undoButton.setDisable(!presenter.canUndo());
+        undoTooltip.setText(presenter.canUndo() ? presenter.undoDescription() + " (Ctrl+Z)" : "Nothing to undo");
+        showIf(leechBox, presenter.leech().isPresent());
+        leechNoticeLabel.setText(presenter.leechNotice());
+        suspendLeechButton.setDisable(!presenter.canSuspendLeech());
+        memoryAidButton.setVisible(presenter.usesAiProvider());
+        memoryAidButton.setDisable(!presenter.canRequestMemoryAid());
+        memoryAidLabel.setText(presenter.memoryAid());
+        memoryAidLabel.setVisible(!presenter.memoryAid().isEmpty());
         regenerateExplanationButton.setVisible(presenter.usesAiProvider());
         regenerateExplanationButton.setDisable(!presenter.canRegenerateExplanation());
         if (presenter.cardNumber() != renderedCardNumber && presenter.canSubmit()) {
@@ -487,12 +582,13 @@ public final class ReviewView {
         }
         ReviewRating suggestion = presenter.suggestedRating().orElse(null);
         if (suggestion != null && (!renderedCanRate || suggestion != renderedSuggestion
-            || presenter.isOverridden() != renderedOverridden)) {
+            || presenter.isOverridden() != renderedOverridden || presenter.cardNumber() != renderedRatedCardNumber)) {
             // The answer field is disabled now; keep the keyboard on the suggested rating, also after
             // "I was right" took the focus, so Space confirms a rating instead of toggling it back.
             ratingButtonsByRating.get(suggestion).requestFocus();
         }
         renderedCanRate = presenter.canRate();
+        renderedRatedCardNumber = presenter.cardNumber();
         renderedSuggestion = suggestion;
         renderedOverridden = presenter.isOverridden();
     }

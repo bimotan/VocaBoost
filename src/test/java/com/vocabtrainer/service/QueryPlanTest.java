@@ -38,9 +38,9 @@ import java.util.regex.Pattern;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Runs what the dashboard, the deck table, the statistics tab, a rating, a backup restore and a
- * word delete do, records every SQL statement the repositories prepare, and checks with EXPLAIN
- * QUERY PLAN that none of them reads the whole review log, goal or word table.
+ * Runs what the dashboard, the deck table, the statistics tab, a rating and its undo, a backup
+ * restore and a word delete do, records every SQL statement the repositories prepare, and checks
+ * with EXPLAIN QUERY PLAN that none of them reads the whole review log, goal or word table.
  */
 class QueryPlanTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-05-28T09:00:00Z"), ZoneId.of("UTC"));
@@ -102,6 +102,16 @@ class QueryPlanTest {
         review.previewRatings(next.getId());
         review.rateCurrent(next.getId(), ReviewRating.GOOD);
         wordRepository.findLearningDueBy(deck.getId(), NOW.plusMinutes(20), 1);
+        // Undoing it, marking a new word as known, suspending one, and the Word List with suspended words.
+        review.undoLast();
+        review.markKnown(review.nextWord(deck.getId(), ReviewMode.EN_TO_ZH).orElseThrow().getId());
+        review.suspendWord(review.nextWord(deck.getId(), ReviewMode.EN_TO_ZH).orElseThrow().getId(), true);
+        review.undoLast();
+        wordRepository.setSuspended(List.of(words.get(3).getId(), words.get(4).getId()), true);
+        wordRepository.search(deck.getId(), "");
+        wordRepository.search(deck.getId(), "word");
+        wordRepository.countSuspended(deck.getId());
+        logRepository.countByWords(List.of(words.get(3).getId(), words.get(4).getId()));
         // The review session's queues: due reviews, new cards and the new cards introduced today.
         wordRepository.findDueReviews(deck.getId(), NOW, NOW.plusDays(1), 10);
         wordRepository.findNewCards(deck.getId(), NOW.plusDays(1), 10);
@@ -120,6 +130,7 @@ class QueryPlanTest {
         // Restoring the same backup again, and deleting a word with its history.
         backup.importJsonBackup(json, deck.getId());
         wordRepository.deleteById(words.get(0).getId());
+        wordRepository.deleteByIds(List.of(words.get(5).getId(), words.get(6).getId()));
 
         List<String> problems = new ArrayList<>();
         for (String sql : databaseManager.statements) {
