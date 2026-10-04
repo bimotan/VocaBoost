@@ -5,9 +5,11 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -23,7 +25,7 @@ import java.util.logging.Logger;
  */
 final class SchemaMigrations {
     /** The version a fully migrated database has: the last step's. */
-    static final int CURRENT_VERSION = 7;
+    static final int CURRENT_VERSION = 8;
 
     private static final Logger LOGGER = Logger.getLogger(SchemaMigrations.class.getName());
 
@@ -70,11 +72,22 @@ final class SchemaMigrations {
         new Step(4, "indexes for statistics", false, this::statisticsIndexes),
         new Step(5, "FSRS card state on words", false, this::fsrsCardState),
         new Step(6, "review log kind and question direction, review queue index", false, this::reviewQueue),
-        new Step(7, "review log effective rating and answer check override", false, this::reviewLogEffectiveRating)
+        new Step(7, "review log effective rating and answer check override", false, this::reviewLogEffectiveRating),
+        new Step(8, "deck names unique among active decks ignoring case", false, this::activeDeckNamesIgnoringCase)
     );
 
     SchemaMigrations(Connection connection) {
         this.connection = connection;
+    }
+
+    /**
+     * Whether {@link #migrate()} will change a database that already holds a schema: one of an
+     * earlier version, or from before versioning. A new, empty database and one of this or a newer
+     * version are not upgraded.
+     */
+    boolean upgradesExistingDatabase() throws SQLException {
+        int version = userVersion();
+        return version < CURRENT_VERSION && (version > 0 || tableExists("decks"));
     }
 
     /** Applies every step the database has not had yet, oldest first. */
@@ -375,6 +388,58 @@ final class SchemaMigrations {
     private void reviewLogEffectiveRating() throws SQLException {
         addColumnIfMissing("review_logs", "effective_rating", "TEXT");
         addColumnIfMissing("review_logs", "overridden", "INTEGER NOT NULL DEFAULT 0");
+    }
+
+    /**
+     * Version 8: active deck names were unique only as typed, so "GRE" and "gre" could both exist.
+     * Of active decks whose names differ only in case (as SQLite's NOCASE compares them: the letters
+     * A to Z), the oldest keeps its name and each newer one, oldest first, gets " (2)", " (3)", ...
+     * appended: the first such name no active deck has, ignoring case. Each rename is logged. Then
+     * the partial index on active names ignores case. Archived decks keep their names; restoring
+     * one is refused while an active deck has its name in any case.
+     */
+    private void activeDeckNamesIgnoringCase() throws SQLException {
+        Map<Long, String> names = new LinkedHashMap<>();
+        try (Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("""
+                 SELECT d.id, d.name FROM decks d
+                 WHERE d.archived = 0 AND EXISTS (
+                     SELECT 1 FROM decks o WHERE o.archived = 0 AND o.id < d.id AND o.name = d.name COLLATE NOCASE)
+                 ORDER BY d.id
+                 """)) {
+            while (rs.next()) {
+                names.put(rs.getLong(1), rs.getString(2));
+            }
+        }
+        for (Map.Entry<Long, String> deck : names.entrySet()) {
+            String renamed = freeActiveDeckName(deck.getValue(), deck.getKey());
+            try (PreparedStatement update = connection.prepareStatement("UPDATE decks SET name = ? WHERE id = ?")) {
+                update.setString(1, renamed);
+                update.setLong(2, deck.getKey());
+                update.executeUpdate();
+            }
+            LOGGER.warning("Renamed deck " + deck.getKey() + " from \"" + deck.getValue() + "\" to \"" + renamed
+                + "\": another active deck has the same name in other upper and lower case");
+        }
+        execute("DROP INDEX IF EXISTS idx_decks_active_name");
+        execute("CREATE UNIQUE INDEX idx_decks_active_name ON decks(name COLLATE NOCASE) WHERE archived = 0");
+    }
+
+    /** {@code name} followed by " (2)", " (3)", ...: the first that no other active deck has, ignoring case. */
+    private String freeActiveDeckName(String name, long deckId) throws SQLException {
+        for (int number = 2; ; number++) {
+            String candidate = name + " (" + number + ")";
+            try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT 1 FROM decks WHERE archived = 0 AND id <> ? AND name = ? COLLATE NOCASE")) {
+                statement.setLong(1, deckId);
+                statement.setString(2, candidate);
+                try (ResultSet rs = statement.executeQuery()) {
+                    if (!rs.next()) {
+                        return candidate;
+                    }
+                }
+            }
+        }
     }
 
     /**

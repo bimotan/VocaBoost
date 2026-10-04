@@ -174,6 +174,11 @@ public final class ReviewSessionPresenter {
     /** The AI's memory aid for the leech, "loading" or why there is none; empty until asked for. */
     private String memoryAid = "";
     private boolean memoryAidLoading;
+    /**
+     * Why saving is paused, such as a backup restore holding the database's write lock; null while it
+     * is not. Ratings, Already known, Suspend and Undo wait until it ends.
+     */
+    private String pausedNote;
 
     /**
      * @param aiServices the AI service to explain answers with, asked again for every answer so
@@ -203,6 +208,30 @@ public final class ReviewSessionPresenter {
     /** Called after every change of the state or of a displayed text. */
     public void addListener(Runnable listener) {
         listeners.add(Objects.requireNonNull(listener, "listener"));
+    }
+
+    /**
+     * Pauses saving while a long write holds the database, {@code note} saying why, or ends the pause
+     * with null. While paused, an answer can still be typed and checked, but ratings, Already known,
+     * Suspend and Undo are not available (a rating would wait for the database and could fail), and
+     * the session settings, which are saved too, cannot be changed.
+     */
+    public void setPaused(String note) {
+        if (Objects.equals(note, pausedNote)) {
+            return;
+        }
+        pausedNote = note;
+        fireChanged();
+    }
+
+    /** Whether saving is paused; see {@link #setPaused}. */
+    public boolean isPaused() {
+        return pausedNote != null;
+    }
+
+    /** Why saving is paused; empty while it is not. */
+    public String pausedNote() {
+        return pausedNote == null ? "" : pausedNote;
     }
 
     // ---- Input ----
@@ -334,7 +363,7 @@ public final class ReviewSessionPresenter {
     public void reviewSettingsChanged() {
         try {
             newCardsPerDay = reviewService.newCardsPerDay(deckId);
-            if (canRate()) {
+            if (isAnswered()) {
                 previewRatings();
             }
             if (state == State.COMPLETE) {
@@ -792,17 +821,17 @@ public final class ReviewSessionPresenter {
 
     /** Whether the card on screen is a new card that can be marked as already known. */
     public boolean canMarkKnown() {
-        return cardActionable() && card.getState() == CardState.NEW;
+        return pausedNote == null && cardActionable() && card.getState() == CardState.NEW;
     }
 
     /** Whether the card on screen can be suspended. */
     public boolean canSuspend() {
-        return cardActionable();
+        return pausedNote == null && cardActionable();
     }
 
     /** Whether the session has a rating, Already known or suspension to undo, and no rating is being saved. */
     public boolean canUndo() {
-        return state != State.SAVING && reviewService.canUndo();
+        return pausedNote == null && state != State.SAVING && reviewService.canUndo();
     }
 
     /** What Undo would take back, e.g. "Undo the Good rating of "abate""; empty when nothing. */
@@ -836,7 +865,7 @@ public final class ReviewSessionPresenter {
 
     /** Whether the new leech can be suspended from the notice about it. */
     public boolean canSuspendLeech() {
-        return leech != null && !leechSuspended && state != State.SAVING;
+        return pausedNote == null && leech != null && !leechSuspended && state != State.SAVING;
     }
 
     /** Whether a memory aid for the new leech can be asked for: an AI provider may be used and none is loading. */
@@ -849,13 +878,19 @@ public final class ReviewSessionPresenter {
         return memoryAid;
     }
 
+    /** Whether the answered card can be rated now: its answer is checked and saving is not paused. */
     public boolean canRate() {
+        return pausedNote == null && isAnswered();
+    }
+
+    /** Whether the card on screen has its answer checked and waits for a rating, which may be paused. */
+    private boolean isAnswered() {
         return state == State.ANSWERED || state == State.RATING_FAILED;
     }
 
     /** Whether the answer check capped the ratings, so the user may say "I was right"; see {@link #setOverridden}. */
     public boolean canOverride() {
-        return canRate() && checked != null && checked.canOverride();
+        return isAnswered() && checked != null && checked.canOverride();
     }
 
     /** Whether the user overrides the answer check of the card on screen. */
@@ -877,7 +912,7 @@ public final class ReviewSessionPresenter {
      * in Mixed mode; empty when it counts as itself or no answer is checked.
      */
     public String ratingCountsAs(ReviewRating rating) {
-        if (checked == null || !(canRate() || state == State.SAVING)) {
+        if (checked == null || !(isAnswered() || state == State.SAVING)) {
             return "";
         }
         ReviewRating counted = checked.countsAs(rating, overridden);
@@ -894,7 +929,7 @@ public final class ReviewSessionPresenter {
      * answer is checked.
      */
     public String ratingPreview(ReviewRating rating) {
-        IntervalPreview preview = canRate() || state == State.SAVING ? ratingPreviews.get(rating) : null;
+        IntervalPreview preview = isAnswered() || state == State.SAVING ? ratingPreviews.get(rating) : null;
         return preview == null ? "" : Formats.interval(preview);
     }
 
@@ -946,7 +981,7 @@ public final class ReviewSessionPresenter {
      * empty until the answer is checked, so nothing there gives the answer away.
      */
     public Optional<WordDetails> revealedDetails() {
-        boolean answered = canRate() || state == State.SAVING;
+        boolean answered = isAnswered() || state == State.SAVING;
         return answered ? Optional.ofNullable(revealed) : Optional.empty();
     }
 

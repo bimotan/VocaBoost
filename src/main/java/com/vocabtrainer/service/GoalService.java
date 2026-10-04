@@ -159,6 +159,19 @@ public class GoalService {
         }
     }
 
+    /**
+     * {@code progress} as it is after {@link #awardXp awarding} {@code xp} more to its deck now, such
+     * as the rewards of the badges a review unlocked, without reading it again: the deck's total
+     * grows, and so does the day's XP when the progress is today's.
+     */
+    public DailyGoalProgress withAwardedXp(DailyGoalProgress progress, int xp) {
+        if (xp <= 0) {
+            return progress;
+        }
+        int dayXp = progress.date().equals(today()) ? progress.xpEarned() + xp : progress.xpEarned();
+        return progress.withXp(dayXp, progress.totalXp() + xp);
+    }
+
     /** Adds XP to the deck's day, such as an achievement's reward. */
     public void awardXp(long deckId, int xp) {
         if (xp <= 0) {
@@ -230,19 +243,15 @@ public class GoalService {
     /**
      * Study days in a row, up to {@code day}, with a review in any deck; practice does not count.
      * A day still in progress does not break the streak: until its first review, the run that ended
-     * the day before counts. Steps back with one indexed lookup per day of the streak.
+     * the day before counts. One query reads the run of review days back from {@code day}, whatever
+     * its length (see {@link ReviewLogRepository#reviewDaysBackFrom}).
      */
     private int streak(LocalDate day) throws SQLException {
         StudyDay studyDay = studyDays.get();
         int days = 0;
         LocalDate expected = day;
-        LocalDateTime before = studyDay.start(day.plusDays(1));
-        while (true) {
-            Optional<LocalDateTime> latest = reviewLogRepository.latestReviewBefore(before);
-            if (latest.isEmpty()) {
-                return days;
-            }
-            LocalDate reviewed = studyDay.of(latest.get());
+        for (LocalDate reviewed : reviewLogRepository.reviewDaysBackFrom(studyDay.start(day.plusDays(1)),
+            studyDay.rolloverHour())) {
             if (days == 0 && reviewed.equals(day.minusDays(1))) {
                 expected = reviewed;
             }
@@ -251,7 +260,7 @@ public class GoalService {
             }
             days++;
             expected = reviewed.minusDays(1);
-            before = studyDay.start(reviewed);
         }
+        return days;
     }
 }

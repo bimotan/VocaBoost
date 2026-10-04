@@ -115,6 +115,10 @@ public final class ReviewView {
     private final Button memoryAidButton = new Button(tr("review.memoryAid"));
     private final Label memoryAidLabel = new Label();
     private final VBox leechBox = new VBox(6);
+    /** Says why saving is paused, e.g. while a backup is restored. */
+    private final Label pausedLabel = new Label();
+    /** The mode, session size and new-words controls, which save what they set. */
+    private final VBox sessionControls = new VBox(16);
     private final Tab tab;
     private long renderedCardNumber = -1;
     private boolean renderedCanRate;
@@ -138,6 +142,9 @@ public final class ReviewView {
         presenter.setOnScreen(tab.isSelected());
         tab.selectedProperty().addListener((observable, wasSelected, selected) -> presenter.setOnScreen(selected));
         context.decks().onSwitch(deck -> presenter.showDeck(deck.getId()));
+        // A backup restore holds the database: ratings wait until it is done instead of failing.
+        presenter.setPaused(context.longWrites().noteProperty().get());
+        context.longWrites().noteProperty().addListener((observable, oldNote, note) -> presenter.setPaused(note));
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.GOALS)) {
                 presenter.goalsChanged();
@@ -348,8 +355,14 @@ public final class ReviewView {
         explanationActions.setAlignment(Pos.CENTER_RIGHT);
         explanationActions.managedProperty().bind(regenerateExplanationButton.visibleProperty());
         showIf(detailsCard.root(), false);
+        pausedLabel.setId("reviewPausedLabel");
+        pausedLabel.setWrapText(true);
+        pausedLabel.setMinHeight(Region.USE_PREF_SIZE);
+        pausedLabel.getStyleClass().add("busy-note");
+        showIf(pausedLabel, false);
+        sessionControls.getChildren().setAll(modeBox, sessionBox);
         VBox question = new VBox(6, reviewWordLabel, reviewHintLabel);
-        VBox content = new VBox(16, modeBox, sessionBox, question, reviewMetaLabel, answerBox,
+        VBox content = new VBox(16, sessionControls, pausedLabel, question, reviewMetaLabel, answerBox,
             completionCard, reviewResultArea, leechBox, detailsCard.root(), explanationActions);
         content.setPadding(new Insets(28, 28, 0, 28));
         VBox.setVgrow(reviewResultArea, Priority.ALWAYS);
@@ -577,6 +590,9 @@ public final class ReviewView {
         } finally {
             rendering = false;
         }
+        sessionControls.setDisable(presenter.isPaused());
+        pausedLabel.setText(presenter.pausedNote());
+        showIf(pausedLabel, presenter.isPaused());
         reviewWordLabel.setText(presenter.question());
         reviewWordLabel.pseudoClassStateChanged(SENTENCE, presenter.isSentenceQuestion());
         reviewHintLabel.setText(presenter.hint());

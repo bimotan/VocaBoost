@@ -87,7 +87,7 @@ class MainWindowSmokeTest extends MainWindowUiTest {
             "clearEcdictButton", "ecdictProgressBar", "cancelEcdictImportButton", "ecdictStatusLabel",
             "aiProviderField", "aiBaseUrlField", "aiApiKeyField", "aiModelField", "aiTemperatureField", "saveAiButton",
             "clearAiButton", "testAiButton", "clearAiCacheButton", "aiStatusLabel",
-            "openDataFolderButton", "openLogFolderButton", "languageSelector"
+            "openDataFolderButton", "openLogFolderButton", "openSnapshotsFolderButton", "languageSelector"
         );
         List<String> missing = required.stream().filter(id -> !ids.contains(id)).toList();
         assertTrue(missing.isEmpty(), "missing ids: " + missing);

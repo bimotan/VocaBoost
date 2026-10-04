@@ -1,6 +1,7 @@
 package com.vocabtrainer.ui.settings;
 
 import com.vocabtrainer.repository.AiCacheRepository;
+import com.vocabtrainer.repository.DatabaseSnapshots;
 import com.vocabtrainer.service.DisplaySettings;
 import com.vocabtrainer.service.ExamPlanService;
 import com.vocabtrainer.service.GoalSettings;
@@ -32,6 +33,8 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -43,7 +46,7 @@ import static com.vocabtrainer.util.Messages.tr;
 
 /**
  * The Settings tab: study settings (scheduler, new words per day, goals, exam date), offline mode (the same
- * switch as the header's), the ECDICT dictionary, the AI provider, the data and log folders, the
+ * switch as the header's), the ECDICT dictionary, the AI provider, the data, log and snapshots folders, the
  * text size and the language. Every setting is saved in the {@code settings} table when it is
  * changed and applies at once, except the language, which applies when the app starts again.
  */
@@ -123,8 +126,24 @@ public final class SettingsView {
         Button logFolderButton = new Button(tr("settings.data.openLogFolder"));
         logFolderButton.setId("openLogFolderButton");
         logFolderButton.setOnAction(event -> openLogFolder());
-        return new VBox(10, Widgets.sectionTitle(tr("settings.data.title")), new HBox(10, dataFolderButton, logFolderButton),
-            note(tr("settings.data.note")));
+        Button snapshotsFolderButton = new Button(tr("settings.data.openSnapshotsFolder"));
+        snapshotsFolderButton.setId("openSnapshotsFolderButton");
+        snapshotsFolderButton.setOnAction(event -> openSnapshotsFolder());
+        return new VBox(10, Widgets.sectionTitle(tr("settings.data.title")),
+            new HBox(10, dataFolderButton, logFolderButton, snapshotsFolderButton),
+            note(tr("settings.data.note")), note(tr("settings.data.snapshotsNote", DatabaseSnapshots.KEEP)));
+    }
+
+    /** Opens the snapshots folder, creating it when no snapshot was written yet. */
+    private void openSnapshotsFolder() {
+        Path folder = DatabaseSnapshots.folderFor(databasePath);
+        try {
+            Files.createDirectories(folder);
+        } catch (IOException | RuntimeException e) {
+            context.errors().reportFailure(tr("folder.openFailed"), e);
+            return;
+        }
+        Folders.open(context.errors(), tr("folder.snapshots"), folder);
     }
 
     private void openLogFolder() {

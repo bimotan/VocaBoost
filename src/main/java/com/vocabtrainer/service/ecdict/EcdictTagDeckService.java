@@ -21,7 +21,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CancellationException;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
@@ -39,12 +38,23 @@ import static com.vocabtrainer.util.Messages.tr;
  * to put in it. The limit counts the words added, so building the same deck again with the same
  * limit adds the next words. Words without a Chinese
  * meaning or whose spelling the app does not accept ("a.m.") are skipped. Adding words earns no XP
- * and counts no new words. The deck and its words are written in one transaction, so a failure or a
- * cancel adds nothing, not even the deck.
+ * and counts no new words.
+ *
+ * <p>The words are written in batches of {@value #BATCH_SIZE}, each in a short transaction of its own
+ * (the first one also creates a new deck), with a short pause between them: a rating or another write
+ * made meanwhile waits at most for one batch instead of for the whole deck, and so never runs into
+ * the database's busy timeout. A cancel stops before the next batch and keeps the batches already
+ * written; a failure keeps them too. Building the same deck again adds the rest, since the words the
+ * deck has are skipped. Nothing is written, not even the deck, when it stops before the first batch.
  */
 public class EcdictTagDeckService {
-    /** Words are inserted, and the progress reported and the cancel checked, in batches of this many. */
-    static final int BATCH_SIZE = 500;
+    /** Words are inserted, each batch in its own transaction, and the progress reported and the cancel checked, in batches of this many. */
+    static final int BATCH_SIZE = 250;
+    /**
+     * The pause after each batch, so that a write that does not wait in line for the transaction lock
+     * (a single statement on another thread) gets the database between two batches.
+     */
+    static final long BATCH_PAUSE_MILLIS = 10;
 
     private static final Logger LOGGER = Logger.getLogger(EcdictTagDeckService.class.getName());
 
@@ -126,10 +136,21 @@ public class EcdictTagDeckService {
      * @param alreadyInDeck tagged words the deck already had, which were skipped
      * @param skipped       tagged words that cannot be added: no Chinese meaning or a spelling the app does not accept
      * @param tagged        words ECDICT tags with the exam
+     * @param canceled      whether the build was canceled before every word was added; the words added
+     *                      until then stay
      */
-    public record Result(Deck deck, boolean created, int added, int alreadyInDeck, int skipped, int tagged) {
+    public record Result(Deck deck, boolean created, int added, int alreadyInDeck, int skipped, int tagged,
+                         boolean canceled) {
+        public Result(Deck deck, boolean created, int added, int alreadyInDeck, int skipped, int tagged) {
+            this(deck, created, added, alreadyInDeck, skipped, tagged, false);
+        }
+
         /** For example "Added 7,504 GRE words to GRE (ECDICT) (new deck). 12 already in the deck." */
         public String toDisplayText(Tag tag) {
+            if (canceled) {
+                return deck == null || added == 0 ? tr("ecdict.deck.canceled")
+                    : tr("ecdict.deck.canceledPartly", added, tag.label(), deck.getName());
+            }
             List<String> text = new ArrayList<>();
             text.add(deck == null ? tr("ecdict.deck.noneAdded", tag.label())
                 : created ? tr("ecdict.deck.addedNew", added, tag.label(), deck.getName())
@@ -144,6 +165,24 @@ public class EcdictTagDeckService {
                 text.add(tr("ecdict.deck.noTagged", tag.code()));
             }
             return Messages.sentences(text);
+        }
+    }
+
+    /**
+     * Writing a batch failed; the batches written before it stay in the deck, as {@link #partial()}
+     * says (no deck and nothing added when the first batch failed).
+     */
+    public static final class BuildFailedException extends IllegalStateException {
+        private final transient Result partial;
+
+        BuildFailedException(String message, Throwable cause, Result partial) {
+            super(message, cause);
+            this.partial = partial;
+        }
+
+        /** What was added before the failure. */
+        public Result partial() {
+            return partial;
         }
     }
 
@@ -187,9 +226,10 @@ public class EcdictTagDeckService {
      * Creates or fills the deck; see the class comment.
      *
      * @param progress  called from the calling thread as ECDICT is read and words are added
-     * @param cancelled checked between batches; when it says true nothing is written
-     * @throws IllegalStateException when no ECDICT dictionary is imported, or reading or writing fails
-     * @throws CancellationException when it was cancelled
+     * @param cancelled checked before each batch; when it says true (or the thread is interrupted) no
+     *                  further batch is written and the result says it was canceled
+     * @throws IllegalStateException when no ECDICT dictionary is imported, or reading fails
+     * @throws BuildFailedException  when writing a batch fails
      */
     public Result build(Request request, Consumer<Progress> progress, BooleanSupplier cancelled) {
         if (!isAvailable()) {
@@ -202,21 +242,36 @@ public class EcdictTagDeckService {
         } catch (SQLException e) {
             throw new IllegalStateException(tr("ecdict.error.read", ErrorMessages.rootMessage(e)), e);
         }
-        checkCancelled(cancelled);
+        if (isCancelled(cancelled)) {
+            return new Result(null, false, 0, 0, 0, rows.size(), true);
+        }
+        Plan plan;
         try {
-            Result result = transactions.inTransaction(() -> fill(request, rows, progress, cancelled));
-            if (result.deck() != null) {
-                LOGGER.info("Added " + result.added() + " ECDICT " + request.tag().code() + " words to deck "
-                    + result.deck().getId() + (result.created() ? " (new)" : ""));
-            }
-            return result;
+            plan = plan(request, rows);
         } catch (SQLException e) {
             throw new IllegalStateException(tr("ecdict.deck.error.add", ErrorMessages.rootMessage(e)), e);
         }
+        if (plan.existing() == null && plan.words().isEmpty()) {
+            // An empty deck would only be in the way.
+            return new Result(null, false, 0, plan.alreadyInDeck(), plan.skipped(), rows.size());
+        }
+        Result result = write(request, plan, rows.size(), progress, cancelled);
+        if (result.deck() != null) {
+            LOGGER.info("Added " + result.added() + " ECDICT " + request.tag().code() + " words to deck "
+                + result.deck().getId() + (result.created() ? " (new)" : "") + (result.canceled() ? " (canceled)" : ""));
+        }
+        return result;
     }
 
-    private Result fill(Request request, List<EcdictRow> rows, Consumer<Progress> progress, BooleanSupplier cancelled)
-        throws SQLException {
+    /**
+     * The words to add, in order, and what was left out.
+     *
+     * @param existing the active deck to fill; null when the deck is to be created
+     */
+    private record Plan(Deck existing, List<WordCard> words, int alreadyInDeck, int skipped) {
+    }
+
+    private Plan plan(Request request, List<EcdictRow> rows) throws SQLException {
         Optional<Deck> existing = deckService.findActiveDeck(request.deckName());
         Set<String> inDeck = existing.isPresent() ? wordRepository.findEnglishKeys(existing.get().getId()) : new HashSet<>();
         List<WordCard> words = new ArrayList<>();
@@ -240,21 +295,60 @@ public class EcdictTagDeckService {
             inDeck.add(word.get().getEnglish().toLowerCase(Locale.ROOT));
             words.add(word.get());
         }
-        if (existing.isEmpty() && words.isEmpty()) {
-            // An empty deck would only be in the way.
-            return new Result(null, false, 0, alreadyInDeck, skipped, rows.size());
-        }
-        Deck deck = existing.orElseGet(() -> deckService.createDeck(request.deckName()));
-        words.forEach(word -> word.setDeckId(deck.getId()));
+        return new Plan(existing.orElse(null), words, alreadyInDeck, skipped);
+    }
+
+    /** Writes the planned words batch by batch; see the class comment. */
+    private Result write(Request request, Plan plan, int tagged, Consumer<Progress> progress,
+                         BooleanSupplier cancelled) {
+        List<WordCard> words = plan.words();
+        Deck deck = plan.existing();
+        boolean create = deck == null;
+        int added = 0;
+        int alreadyInDeck = plan.alreadyInDeck();
         progress.accept(new Progress(0, words.size()));
         for (int start = 0; start < words.size(); start += BATCH_SIZE) {
-            checkCancelled(cancelled);
-            int end = Math.min(words.size(), start + BATCH_SIZE);
-            wordRepository.insertAll(words.subList(start, end));
-            progress.accept(new Progress(end, words.size()));
+            if ((start > 0 && !pause()) || isCancelled(cancelled)) {
+                return new Result(deck, create && deck != null, added, alreadyInDeck, plan.skipped(), tagged, true);
+            }
+            List<WordCard> batch = words.subList(start, Math.min(words.size(), start + BATCH_SIZE));
+            Deck target = deck;
+            Batch written;
+            try {
+                written = transactions.inTransaction(() -> {
+                    Deck into = target != null ? target : deckService.createDeck(request.deckName());
+                    batch.forEach(word -> word.setDeckId(into.getId()));
+                    // A word added to the deck meanwhile (on the add form) is skipped, not a failure.
+                    return new Batch(into, wordRepository.insertAllIfAbsent(batch));
+                });
+            } catch (SQLException | RuntimeException e) {
+                Result partial = new Result(deck, create && deck != null, added, alreadyInDeck, plan.skipped(), tagged);
+                // A deck name the deck service refuses explains itself.
+                String message = e instanceof IllegalArgumentException ? e.getMessage()
+                    : tr("ecdict.deck.error.add", ErrorMessages.rootMessage(e));
+                throw new BuildFailedException(message, e, partial);
+            }
+            deck = written.deck();
+            added += written.inserted();
+            alreadyInDeck += batch.size() - written.inserted();
+            progress.accept(new Progress(start + batch.size(), words.size()));
         }
-        checkCancelled(cancelled);
-        return new Result(deck, existing.isEmpty(), words.size(), alreadyInDeck, skipped, rows.size());
+        return new Result(deck, create, added, alreadyInDeck, plan.skipped(), tagged);
+    }
+
+    /** One batch as written: into which deck, and how many of its words were not in the deck yet. */
+    private record Batch(Deck deck, int inserted) {
+    }
+
+    /** Waits {@value #BATCH_PAUSE_MILLIS} ms between two batches; false when the thread is interrupted. */
+    private static boolean pause() {
+        try {
+            Thread.sleep(BATCH_PAUSE_MILLIS);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     /** The word for an ECDICT row, tagged with the exam; empty when the app cannot take it. */
@@ -274,9 +368,7 @@ public class EcdictTagDeckService {
         }
     }
 
-    private static void checkCancelled(BooleanSupplier cancelled) {
-        if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
-            throw new CancellationException("Building the deck was canceled.");
-        }
+    private static boolean isCancelled(BooleanSupplier cancelled) {
+        return cancelled.getAsBoolean() || Thread.currentThread().isInterrupted();
     }
 }

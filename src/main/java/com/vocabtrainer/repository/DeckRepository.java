@@ -60,24 +60,35 @@ public class DeckRepository {
         throw new SQLException(tr("deck.error.createFailed"));
     }
 
+    /**
+     * The active deck named {@code name}, ignoring upper and lower case as the unique index on active
+     * names does ({@code COLLATE NOCASE}: the letters A to Z), so "gre" finds "GRE".
+     */
     public Optional<Deck> findByName(String name) throws SQLException {
-        return findOneByName("SELECT id, name, created_at, archived FROM decks WHERE name = ? AND archived = 0", name);
+        return findOneByName("""
+            SELECT id, name, created_at, archived FROM decks WHERE name = ? COLLATE NOCASE AND archived = 0
+            """, name);
     }
 
     /**
      * Like {@link #findByName(String)}, but also matches archived decks. Names are unique only among
-     * active decks, so this prefers the active deck and otherwise returns the newest archived one.
+     * active decks, so this prefers the active deck and otherwise returns the newest archived one,
+     * one named exactly {@code name} before one that differs in case.
      */
     public Optional<Deck> findAnyByName(String name) throws SQLException {
         return findOneByName("""
-            SELECT id, name, created_at, archived FROM decks WHERE name = ? ORDER BY archived, id DESC LIMIT 1
+            SELECT id, name, created_at, archived FROM decks WHERE name = ? COLLATE NOCASE
+            ORDER BY archived, name = ? COLLATE BINARY DESC, id DESC LIMIT 1
             """, name);
     }
 
+    /** Binds {@code name} to every parameter of {@code sql}. */
     private Optional<Deck> findOneByName(String sql, String name) throws SQLException {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, name);
+            for (int index = 1; index <= statement.getParameterMetaData().getParameterCount(); index++) {
+                statement.setString(index, name);
+            }
             try (ResultSet rs = statement.executeQuery()) {
                 if (rs.next()) {
                     return Optional.of(map(rs));
@@ -165,13 +176,14 @@ public class DeckRepository {
 
     /**
      * Makes an archived deck active again. Names are unique among active decks only (an archived
-     * deck's name can be reused), so restoring fails while an active deck has the same name.
+     * deck's name can be reused), so restoring fails while an active deck has the same name, in any
+     * upper and lower case.
      */
     public Deck restore(long id) throws SQLException {
         Deck deck = findById(id).orElseThrow(() -> new SQLException(tr("deck.error.notFound")));
         Optional<Deck> activeWithSameName = findByName(deck.getName());
         if (activeWithSameName.isPresent() && activeWithSameName.get().getId() != id) {
-            throw new SQLException(tr("deck.error.restoreNameInUse", deck.getName()));
+            throw new SQLException(restoreNameInUse(deck.getName(), activeWithSameName.get().getName()));
         }
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement("UPDATE decks SET archived = 0 WHERE id = ?")) {
@@ -182,6 +194,15 @@ public class DeckRepository {
             }
         }
         return findById(id).orElseThrow(() -> new SQLException(tr("deck.error.notFound")));
+    }
+
+    /**
+     * Why the archived deck {@code name} cannot be restored while the active deck {@code activeName}
+     * has its name, which may differ in upper and lower case.
+     */
+    public static String restoreNameInUse(String name, String activeName) {
+        return activeName.equals(name) ? tr("deck.error.restoreNameInUse", name)
+            : tr("deck.error.restoreNameInUseCase", activeName, name);
     }
 
     private Deck map(ResultSet rs) throws SQLException {

@@ -81,7 +81,7 @@ class StatisticsAndBackupUiTest extends MainWindowUiTest {
 
         ScriptedDialogs.Shown question = dialogs.last(ScriptedDialogs.Kind.CHOOSE);
         assertEquals("Restore the backup into Restored?", question.header());
-        assertEquals("Keep current progress | Use backup progress | Cancel", question.value());
+        assertEquals("Keep current progress | Use backup progress | Restore into a new deck | Cancel", question.value());
         waitForBackgroundTasks();
         ScriptedDialogs.Shown summary = dialogs.last(ScriptedDialogs.Kind.TEXT);
         assertEquals("Import JSON backup", summary.title());

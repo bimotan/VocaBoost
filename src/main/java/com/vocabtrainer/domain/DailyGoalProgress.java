@@ -26,4 +26,10 @@ public record DailyGoalProgress(
     public double accuracy() {
         return reviewedCount == 0 ? 0.0 : correctCount / (double) reviewedCount;
     }
+
+    /** The same progress with {@code xpEarned} XP earned on its day and {@code totalXp} in the deck. */
+    public DailyGoalProgress withXp(int xpEarned, int totalXp) {
+        return new DailyGoalProgress(date, reviewGoal, newWordGoal, sessionGoal, reviewedCount, correctCount,
+            newWordsCount, xpEarned, completed, currentStreak, totalXp);
+    }
 }

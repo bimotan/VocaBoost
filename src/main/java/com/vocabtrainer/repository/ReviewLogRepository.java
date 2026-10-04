@@ -18,10 +18,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 public class ReviewLogRepository {
     /**
@@ -162,6 +164,26 @@ public class ReviewLogRepository {
             statement.setLong(1, deckId);
             try (ResultSet rs = statement.executeQuery()) {
                 return mapLogs(rs);
+            }
+        }
+    }
+
+    /** The ids of the deck's words, suspended ones included, that have at least one review log. */
+    public Set<Long> wordsWithLogs(long deckId) throws SQLException {
+        String sql = """
+            SELECT w.id
+            FROM words w
+            WHERE w.deck_id = ? AND EXISTS (SELECT 1 FROM review_logs l WHERE l.word_id = w.id)
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            try (ResultSet rs = statement.executeQuery()) {
+                Set<Long> ids = new HashSet<>();
+                while (rs.next()) {
+                    ids.add(rs.getLong(1));
+                }
+                return ids;
             }
         }
     }
@@ -350,22 +372,56 @@ public class ReviewLogRepository {
     }
 
     /**
-     * When the newest review in any deck before {@code before} was, not counting practice; empty if
-     * there is none. One indexed lookup, so the streak can step back day by day.
+     * The study days with a review in any deck (practice and Already known do not count), stepping
+     * back from {@code before}, the start of a study day: the day of the newest review before it, then
+     * the day of the newest review before that day started, and so on while each day is the one
+     * before the last. The last day listed is the first one that breaks the run (it is not the day
+     * before the previous one), so the caller sees where the run ended; empty when there is no review
+     * before {@code before}. When the newest review is older than the two days before {@code before},
+     * only its day is listed: no run can reach {@code before} from there.
+     *
+     * <p>One query, whatever the length of the run: a recursive query takes one indexed lookup per
+     * day inside SQLite, which is how the streak is counted (see {@code GoalService}).
+     *
+     * @param rolloverHour the hour (0 to 23) at which a study day starts, as in {@link #dailyCounts}
      */
-    public Optional<LocalDateTime> latestReviewBefore(LocalDateTime before) throws SQLException {
+    public List<LocalDate> reviewDaysBackFrom(LocalDateTime before, int rolloverHour) throws SQLException {
+        if (rolloverHour < 0 || rolloverHour > 23) {
+            throw new IllegalArgumentException("The day rollover hour must be from 0 to 23: " + rolloverHour);
+        }
+        // date(t, '-H hours') is the study day of t, and strftime(..., day, '+H hours') when that day
+        // starts, written as DateTimeUtil.toDatabase writes times, so the two compare as text.
+        String newestBefore = """
+            (SELECT l.reviewed_at FROM review_logs l
+             WHERE l.reviewed_at < %s AND %s
+             ORDER BY l.reviewed_at DESC
+             LIMIT 1)
+            """;
         String sql = """
-            SELECT l.reviewed_at
-            FROM review_logs l
-            WHERE l.reviewed_at < ? AND %s
-            ORDER BY l.reviewed_at DESC
-            LIMIT 1
-            """.formatted(IS_REVIEW);
+            WITH RECURSIVE run(day, later) AS (
+                SELECT date(%s, :shift), NULL
+                UNION ALL
+                SELECT date(%s, :shift), run.day
+                FROM run
+                WHERE run.day IS NOT NULL AND (
+                    (run.later IS NULL AND run.day >= date(?1, :shift, '-2 days'))
+                    OR run.day = date(run.later, '-1 day'))
+            )
+            SELECT day FROM run WHERE day IS NOT NULL
+            """.formatted(
+                newestBefore.formatted("?1", IS_REVIEW),
+                newestBefore.formatted("strftime('%Y-%m-%dT%H:%M:%S', run.day, :start)", IS_REVIEW))
+            .replace(":shift", "'-" + rolloverHour + " hours'")
+            .replace(":start", "'+" + rolloverHour + " hours'");
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, DateTimeUtil.toDatabase(before));
             try (ResultSet rs = statement.executeQuery()) {
-                return rs.next() ? Optional.of(DateTimeUtil.fromDatabase(rs.getString(1))) : Optional.empty();
+                List<LocalDate> days = new ArrayList<>();
+                while (rs.next()) {
+                    days.add(DateTimeUtil.dateFromDatabase(rs.getString(1)));
+                }
+                return days;
             }
         }
     }

@@ -27,7 +27,6 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
 import java.util.Optional;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.vocabtrainer.util.Messages.tr;
@@ -35,7 +34,8 @@ import static com.vocabtrainer.util.Messages.tr;
 /**
  * "Create deck from ECDICT tag" on the Decks tab: a form for the exam tag, the deck to create or
  * fill, a limit and the order, then the words are added in the background with a progress bar and
- * Cancel. The deck it built becomes the current deck.
+ * Cancel. The deck it built becomes the current deck, also when a cancel or a failure stopped it after
+ * some words were added.
  */
 final class EcdictDeckBox {
     private final ViewContext context;
@@ -181,28 +181,37 @@ final class EcdictDeckBox {
             finished();
             EcdictTagDeckService.Result result = task.getValue();
             statusLabel.setText(result.toDisplayText(request.tag()));
-            if (result.deck() != null) {
-                context.errors().guard(tr("ecdict.deck.refreshFailed"), () -> {
-                    context.decks().switchTo(result.deck());
-                    context.changes().publish(DataChange.DECKS, DataChange.WORDS);
-                });
-            }
+            showBuiltDeck(result);
         });
         task.setOnFailed(event -> {
             finished();
             Throwable error = task.getException();
-            if (error instanceof CancellationException) {
-                statusLabel.setText(tr("ecdict.deck.canceled"));
-                return;
-            }
             context.errors().logFailure(tr("ecdict.deck.failed"), error);
             String message = error.getMessage() == null || error.getMessage().isBlank()
                 ? UiErrors.rootMessage(error) : error.getMessage();
+            // The batches written before the failure stay in the deck.
+            if (error instanceof EcdictTagDeckService.BuildFailedException failed && failed.partial().added() > 0) {
+                EcdictTagDeckService.Result partial = failed.partial();
+                statusLabel.setText(tr("ecdict.deck.failedPartly", message, partial.added(), partial.deck().getName()));
+                showBuiltDeck(partial);
+                return;
+            }
             statusLabel.setText(tr("ecdict.deck.failedNothingAdded", message));
         });
         Thread thread = new Thread(task, UiAsync.THREAD_NAME);
         thread.setDaemon(true);
         thread.start();
+    }
+
+    /** Makes the deck the build added words to the current deck; nothing when it added none. */
+    private void showBuiltDeck(EcdictTagDeckService.Result result) {
+        if (result.deck() == null || (result.canceled() && result.added() == 0)) {
+            return;
+        }
+        context.errors().guard(tr("ecdict.deck.refreshFailed"), () -> {
+            context.decks().switchTo(result.deck());
+            context.changes().publish(DataChange.DECKS, DataChange.WORDS);
+        });
     }
 
     private void finished() {

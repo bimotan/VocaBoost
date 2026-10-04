@@ -14,10 +14,13 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Clock;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -28,7 +31,8 @@ import java.util.logging.Logger;
  * <p>Connections are pooled. {@link #getConnection()} lends one out and closing it returns it for
  * reuse, so repositories keep their try-with-resources style without opening the file each time.
  * Every connection is set up once with foreign keys on, a busy timeout and {@code synchronous=NORMAL};
- * the database itself uses write-ahead logging, so readers never block the writer.
+ * the database itself uses write-ahead logging, so readers never block the writer, and transactions
+ * wait for each other in line (see {@link #inTransaction}).
  * {@link #close()} closes the pooled connections; the app calls it on exit and tests after each
  * test, so no file handle stays open.
  */
@@ -42,6 +46,13 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
     private final Path databasePath;
     private final String jdbcUrl;
     private final ThreadLocal<Transaction> activeTransaction = new ThreadLocal<>();
+    /**
+     * Taken by every outermost {@link #inTransaction} before its {@code BEGIN IMMEDIATE}, first come
+     * first served. SQLite's own wait for the write lock retries at growing intervals, so a thread that
+     * writes many short transactions back to back (building a deck in batches) could keep winning it;
+     * in this line a rating waits for one batch at most.
+     */
+    private final ReentrantLock writeLock = new ReentrantLock(true);
     private final Object poolLock = new Object();
     /** Most recently returned first, guarded by poolLock. */
     private final Deque<Connection> idleConnections = new ArrayDeque<>();
@@ -51,6 +62,8 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
     private long connectionsOpened;
     /** Guarded by poolLock. */
     private boolean closed;
+    /** Whether {@link #initialize()} created the database file. */
+    private volatile boolean createdByInitialize;
 
     public DatabaseManager() {
         this(DateTimeUtil.defaultDatabasePath());
@@ -64,6 +77,9 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
     /**
      * Creates the database file if needed and migrates its schema to the current version; see
      * {@link SchemaMigrations}. Safe to call on every start and on a database of any earlier version.
+     * Before an existing database is upgraded, a snapshot of it is written (see
+     * {@link DatabaseSnapshots}); a snapshot that cannot be written is logged and does not stop the
+     * upgrade.
      */
     public void initialize() throws SQLException {
         try {
@@ -74,12 +90,18 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
         } catch (IOException e) {
             throw new SQLException("Cannot create the database folder for " + databasePath, e);
         }
+        createdByInitialize = !Files.exists(databasePath);
 
         Lease setup = lease();
         boolean migrated = false;
         try {
             enableWriteAheadLog(setup.view);
-            new SchemaMigrations(setup.view).migrate();
+            SchemaMigrations migrations = new SchemaMigrations(setup.view);
+            if (migrations.upgradesExistingDatabase()) {
+                new DatabaseSnapshots(this, Clock.systemDefaultZone())
+                    .takeQuietly("before-upgrade-v" + SchemaMigrations.CURRENT_VERSION, setup.view);
+            }
+            migrations.migrate();
             migrated = true;
         } finally {
             if (migrated) {
@@ -125,7 +147,9 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
      * {@link #getConnection()} call the work makes on this thread joins it, and a nested
      * {@code inTransaction} call joins the outer one. The outermost call commits when the work
      * returns and rolls back if it throws anything; a failed nested call makes the whole
-     * transaction roll back even if the outer work catches the exception.
+     * transaction roll back even if the outer work catches the exception. Outermost transactions
+     * of this manager start one after the other, in the order they asked, waiting at most the busy
+     * timeout for those ahead of them.
      */
     @Override
     public <T> T inTransaction(SqlWork<T> work) throws SQLException {
@@ -139,7 +163,14 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
             }
         }
 
-        Lease lease = lease();
+        acquireWriteLock();
+        Lease lease;
+        try {
+            lease = lease();
+        } catch (SQLException | RuntimeException | Error e) {
+            writeLock.unlock();
+            throw e;
+        }
         Connection connection = lease.view;
         Transaction transaction = new Transaction(connection);
         activeTransaction.set(transaction);
@@ -171,6 +202,34 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
                 // The transaction may still be open on it; closing the connection ends it.
                 lease.discard();
             }
+            writeLock.unlock();
+        }
+    }
+
+    /**
+     * Waits in line for {@link #writeLock}, at most the busy timeout, as SQLite would wait for its
+     * write lock. An interrupt does not cut the wait short (the work was asked for); the thread's
+     * interrupt flag is set again afterwards.
+     */
+    private void acquireWriteLock() throws SQLException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(BUSY_TIMEOUT_MILLIS);
+        boolean interrupted = false;
+        try {
+            while (true) {
+                try {
+                    if (writeLock.tryLock(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)) {
+                        return;
+                    }
+                    throw new SQLException("[SQLITE_BUSY] The database is busy: another task kept writing for "
+                        + BUSY_TIMEOUT_MILLIS / 1000 + " seconds");
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                }
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -188,6 +247,14 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
             openConnections -= idle.size();
         }
         idle.forEach(DatabaseManager::closeQuietly);
+    }
+
+    /**
+     * Whether the last {@link #initialize()} created the database file, so it holds nothing of the
+     * user's yet.
+     */
+    public boolean isNewDatabase() {
+        return createdByInitialize;
     }
 
     /** Physical connections opened since this manager was created; for diagnostics and tests. */

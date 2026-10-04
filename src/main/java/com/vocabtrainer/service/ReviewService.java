@@ -697,8 +697,9 @@ public class ReviewService {
             : achievementService.evaluate(deckId, progress, overdueRescued, goalUpdate.dailyGoalCompleted());
         int achievementXp = unlocked.stream().mapToInt(Achievement::xpReward).sum();
         int earnedXp = (goalUpdate == null ? 0 : goalUpdate.xpEarned()) + achievementXp;
-        if (goalService != null) {
-            progress = goalService.getTodayProgress(deckId);
+        if (progress != null) {
+            // The badges' rewards are the only change since the goal update; it is not read again.
+            progress = goalService.withAwardedXp(progress, achievementXp);
         }
         return new SavedReview(before, updated, progress, earnedXp, unlocked, becameLeech, kind, reviewCard, log,
             goalUpdate != null && goalUpdate.dailyGoalCompleted());

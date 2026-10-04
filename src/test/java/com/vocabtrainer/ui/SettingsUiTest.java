@@ -7,6 +7,7 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.service.SettingsService;
 import javafx.event.ActionEvent;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.Labeled;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Slider;
 import javafx.scene.control.Spinner;
@@ -233,12 +234,26 @@ class SettingsUiTest extends MainWindowUiTest {
     }
 
     @Test
+    void theDataSectionSaysHowToGoBackToASnapshot() {
+        selectTab("settingsTab");
+        String texts = Fx.call(() -> tabNodes("settingsTab").stream()
+            .filter(node -> node instanceof Labeled)
+            .map(node -> ((Labeled) node).getText())
+            .filter(text -> text != null && text.startsWith("Snapshots are copies of vocab.db"))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("no note about snapshots")));
+        assertTrue(texts.contains("the newest 10 are kept"), texts);
+        assertTrue(texts.contains("close VocaBoost, delete vocab.db-wal and vocab.db-shm"), texts);
+        assertEquals("Open snapshots folder", text("openSnapshotsFolderButton"));
+    }
+
+    @Test
     void theAddImportTabOnlyAddsAndImportsWhileTheSettingsTabConfigures() {
         List<String> addImport = idsOnTab("addImportTab");
         List<String> settings = idsOnTab("settingsTab");
         for (String id : List.of("ecdictPathField", "saveEcdictButton", "aiBaseUrlField", "saveAiButton",
             "testAiButton", "clearAiCacheButton", "settingsOfflineModeToggle", "openDataFolderButton",
-            "openLogFolderButton")) {
+            "openLogFolderButton", "openSnapshotsFolderButton")) {
             assertFalse(addImport.contains(id), id + " is on Add / Import");
             assertTrue(settings.contains(id), id + " is not on Settings");
         }

@@ -25,6 +25,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,7 +39,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -228,6 +232,95 @@ class GoalServiceTest {
     }
 
     @Test
+    void theStreakIsReadWithOneQueryWhateverItsLengthAndARatingCountsItOnce() throws Exception {
+        CountingDatabaseManager counting = databases.track(new CountingDatabaseManager(tempDir.resolve("count.db")));
+        counting.initialize();
+        WordRepository countedWords = new WordRepository(counting);
+        ReviewLogRepository countedLogs = new ReviewLogRepository(counting);
+        Deck countedDeck = new DeckRepository(counting).ensureDefaultDeck();
+        GoalService countedGoals = new GoalService(new GoalRepository(counting), countedLogs, clock);
+        WordCard reviewed = WordCard.createNew(countedDeck.getId(), "abate", "释义");
+        reviewed.setNextReviewAt(DAY.atTime(8, 0));
+        countedWords.save(reviewed);
+        WordCard fresh = WordCard.createNew(countedDeck.getId(), "lucid", "释义");
+        fresh.setAddedAt(DAY.atTime(8, 0));
+        fresh.setNextReviewAt(DAY.atTime(8, 0));
+        countedWords.save(fresh);
+        counting.inTransaction(() -> {
+            for (int i = 1; i <= 400; i++) {
+                countedLogs.insert(log(reviewed, DAY.minusDays(i).atTime(20, 0), ReviewKind.REVIEW, ReviewRating.GOOD));
+            }
+            return null;
+        });
+
+        counting.statements.clear();
+        assertEquals(400, countedGoals.getTodayProgress(countedDeck.getId()).currentStreak());
+        assertEquals(1, counting.count("WITH RECURSIVE"), counting.statements.toString());
+        assertTrue(counting.statements.size() <= 5, "reading progress took " + counting.statements);
+
+        ReviewService review = new ReviewService(countedWords, countedLogs, new SimilarityService(),
+            new ReviewScheduler(), countedGoals,
+            new AchievementService(new AchievementRepository(counting), countedGoals, clock), clock, null, new Random(1));
+        review.nextWord(countedDeck.getId(), ReviewMode.EN_TO_ZH).orElseThrow();
+        review.submitAnswer(fresh.getId(), "释义");
+        counting.statements.clear();
+        ReviewOutcome outcome = review.rateCurrent(fresh.getId(), ReviewRating.GOOD);
+
+        assertEquals(401, outcome.progress().currentStreak());
+        assertEquals(1, counting.count("WITH RECURSIVE"), "the streak is counted once per rating");
+        assertTrue(counting.statements.size() < 40, "a rating took " + counting.statements.size() + " statements");
+        DailyGoalProgress reread = countedGoals.getTodayProgress(countedDeck.getId());
+        assertEquals(reread, outcome.progress(), "the rating's progress, badges' XP included, is what a read gives");
+        assertFalse(outcome.unlockedAchievements().isEmpty(), "the first-review and streak badges");
+        assertEquals(outcome.xpEarned(), outcome.progress().totalXp(), "the badges' XP is in the progress");
+    }
+
+    @Test
+    void aRunThatEndedDaysAgoIsNotWalkedBack() throws Exception {
+        WordCard word = word(deck, "abate");
+        databaseManager.inTransaction(() -> {
+            for (int i = 10; i < 310; i++) {
+                logs.insert(log(word, DAY.minusDays(i).atTime(20, 0), ReviewKind.REVIEW, ReviewRating.GOOD));
+            }
+            return null;
+        });
+
+        assertEquals(List.of(DAY.minusDays(10)), logs.reviewDaysBackFrom(new StudyDay().start(DAY.plusDays(1)), 4),
+            "no run can reach today from ten days ago: only that day is read");
+        assertEquals(0, goals.getTodayProgress(deck.getId()).currentStreak());
+        assertEquals(300, goals.progressFor(deck.getId(), DAY.minusDays(10)).currentStreak());
+    }
+
+    @Test
+    void theStreakFollowsTheStudyDaysOfAnyHistoryAsTheDayByDayWalkDid() throws Exception {
+        WordCard word = word(deck, "abate");
+        Random random = new Random(7);
+        List<ReviewLog> history = new ArrayList<>();
+        // Days with and without reviews, some with only a practice or a word marked as known.
+        for (int daysAgo = 0; daysAgo < 60; daysAgo++) {
+            if (random.nextInt(5) == 0) {
+                continue;
+            }
+            LocalDateTime at = DAY.minusDays(daysAgo).atTime(random.nextInt(24), random.nextInt(60), random.nextInt(60));
+            ReviewKind kind = switch (random.nextInt(6)) {
+                case 0 -> ReviewKind.PRACTICE;
+                case 1 -> ReviewKind.KNOWN;
+                default -> ReviewKind.REVIEW;
+            };
+            history.add(logs.insert(log(word, at, kind, ReviewRating.GOOD)));
+        }
+        for (int rollover : new int[] {0, 4, 23}) {
+            StudyDay studyDay = new StudyDay(rollover);
+            GoalService byRollover = new GoalService(goalRepository, logs, GoalSettings.inMemory(), studyDay, clock);
+            for (int daysAgo = -1; daysAgo < 62; daysAgo++) {
+                LocalDate day = DAY.minusDays(daysAgo);
+                assertEquals(walkedStreak(history, studyDay, day),
+                    byRollover.progressFor(deck.getId(), day).currentStreak(), "rollover " + rollover + ", " + day);
+            }
+        }
+    }
+
+    @Test
     void todayUsesTheCurrentGoalsAndAPastDayTheGoalsItWasStudiedWith() throws Exception {
         Deck other = decks.create("TOEFL");
         WordCard word = word(deck, "abate");
@@ -291,6 +384,66 @@ class GoalServiceTest {
     private static ReviewLog log(WordCard word, LocalDateTime at, ReviewKind kind, ReviewRating rating) {
         double similarity = rating == ReviewRating.AGAIN ? 0.0 : 1.0;
         return new ReviewLog(0, word.getId(), at, "释义", "释义", similarity, rating, 1000, kind, ReviewMode.EN_TO_ZH);
+    }
+
+    /**
+     * The streak as the earlier versions counted it, one lookup of the newest review before the
+     * start of a day at a time, here over the logs in memory.
+     */
+    private static int walkedStreak(List<ReviewLog> history, StudyDay studyDay, LocalDate day) {
+        int days = 0;
+        LocalDate expected = day;
+        LocalDateTime before = studyDay.start(day.plusDays(1));
+        while (true) {
+            LocalDateTime limit = before;
+            Optional<LocalDateTime> latest = history.stream()
+                .filter(log -> log.getKind() != ReviewKind.PRACTICE && log.getKind() != ReviewKind.KNOWN)
+                .map(ReviewLog::getReviewedAt)
+                .filter(at -> at.isBefore(limit))
+                .max(LocalDateTime::compareTo);
+            if (latest.isEmpty()) {
+                return days;
+            }
+            LocalDate reviewed = studyDay.of(latest.get());
+            if (days == 0 && reviewed.equals(day.minusDays(1))) {
+                expected = reviewed;
+            }
+            if (!reviewed.equals(expected)) {
+                return days;
+            }
+            days++;
+            expected = reviewed.minusDays(1);
+            before = studyDay.start(reviewed);
+        }
+    }
+
+    /** Records the SQL of every statement the repositories prepare through {@link #getConnection()}. */
+    private static final class CountingDatabaseManager extends DatabaseManager {
+        private final List<String> statements = new CopyOnWriteArrayList<>();
+
+        private CountingDatabaseManager(Path file) {
+            super(file);
+        }
+
+        long count(String fragment) {
+            return statements.stream().filter(sql -> sql.contains(fragment)).count();
+        }
+
+        @Override
+        public Connection getConnection() throws SQLException {
+            Connection connection = super.getConnection();
+            return (Connection) Proxy.newProxyInstance(GoalServiceTest.class.getClassLoader(),
+                new Class<?>[] {Connection.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("prepareStatement")) {
+                        statements.add((String) args[0]);
+                    }
+                    try {
+                        return method.invoke(connection, args);
+                    } catch (InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
+        }
     }
 
     /** "aaa", "aab", ...: distinct English words made of letters only. */
