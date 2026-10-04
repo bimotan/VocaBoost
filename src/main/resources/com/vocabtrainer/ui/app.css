@@ -135,6 +135,12 @@
     -fx-text-fill: -vb-warning-text;
 }
 
+/* Saving waits for a long write, such as a backup restore. */
+.busy-note {
+    -fx-font-weight: 600;
+    -fx-text-fill: -vb-warning-text;
+}
+
 .completion-card {
     -fx-background-color: -vb-success-surface;
     -fx-border-color: -vb-success-border;

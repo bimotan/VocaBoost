@@ -6,9 +6,10 @@ import java.util.function.Supplier;
 
 /**
  * What every part of the main window shares: dialogs, error reporting, background work, change
- * notifications and the current deck.
+ * notifications, the current deck and the long writes that pause the Review tab.
  *
- * @param window the main window, as owner of file choosers
+ * @param window     the main window, as owner of file choosers
+ * @param longWrites background work that holds the database's write lock for long, such as a backup restore
  */
 public record ViewContext(
     Dialogs dialogs,
@@ -16,6 +17,7 @@ public record ViewContext(
     UiAsync async,
     DataChanges changes,
     DeckContext decks,
-    Supplier<Window> window
+    Supplier<Window> window,
+    LongWrites longWrites
 ) {
 }

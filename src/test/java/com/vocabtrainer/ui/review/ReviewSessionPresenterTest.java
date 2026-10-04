@@ -126,6 +126,37 @@ class ReviewSessionPresenterTest {
     }
 
     @Test
+    void whileSavingIsPausedTheAnswerIsCheckedButNothingIsSaved() throws SQLException {
+        presenter.showDeck(deckId);
+        WordCard card = presenter.card().orElseThrow();
+        presenter.setPaused("A backup is being restored.");
+        presenter.setAnswer(firstMeaning(card));
+        presenter.submit();
+
+        assertTrue(presenter.isPaused());
+        assertEquals("A backup is being restored.", presenter.pausedNote());
+        assertEquals(State.ANSWERED, presenter.state());
+        assertFalse(presenter.canRate());
+        assertFalse(presenter.canMarkKnown());
+        assertFalse(presenter.canSuspend());
+        assertFalse(presenter.canUndo());
+        assertFalse(presenter.ratingPreview(ReviewRating.GOOD).isEmpty(), "the intervals are still shown");
+        assertTrue(presenter.revealedDetails().isPresent());
+        presenter.rate(ReviewRating.GOOD);
+        assertEquals(State.ANSWERED, presenter.state(), "a rating waits until the pause ends");
+        assertEquals(0, services.reviewLogRepository().findByWord(card.getId()).size());
+
+        presenter.setPaused(null);
+
+        assertFalse(presenter.isPaused());
+        assertEquals("", presenter.pausedNote());
+        assertTrue(presenter.canRate());
+        presenter.rate(ReviewRating.GOOD);
+        assertEquals(1, services.reviewLogRepository().findByWord(card.getId()).size());
+        assertTrue(failures.isEmpty(), failures.toString());
+    }
+
+    @Test
     void theCardsDetailsAreShownOnlyOnceTheAnswerIsChecked() throws SQLException {
         presenter.showDeck(deckId);
         WordCard card = presenter.card().orElseThrow();

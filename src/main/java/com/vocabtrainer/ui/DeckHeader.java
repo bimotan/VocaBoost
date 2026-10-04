@@ -78,6 +78,8 @@ public final class DeckHeader {
         Label deckLabel = Widgets.formLabel(tr("header.deck"), deckSelector);
         HBox deckControls = new HBox(8, deckLabel, deckSelector, newDeckButton, renameDeckButton, archiveDeckButton);
         deckControls.setAlignment(Pos.CENTER_LEFT);
+        // While a backup is restored into a deck, the decks stay as they are.
+        deckControls.disableProperty().bind(context.longWrites().noteProperty().isNotNull());
         CheckBox offlineToggle = offlineMode.checkBox("offlineModeToggle", tr("offline.toggle"));
         // In a narrow window the status line is cut short first, then the deck selector, never the
         // title or the buttons.

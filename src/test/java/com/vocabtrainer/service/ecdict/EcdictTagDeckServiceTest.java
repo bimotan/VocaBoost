@@ -25,10 +25,13 @@ import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -173,15 +176,110 @@ class EcdictTagDeckServiceTest {
     }
 
     @Test
-    void aCancelAddsNothingNotEvenTheDeck() throws Exception {
+    void aCancelBeforeTheFirstBatchAddsNothingNotEvenTheDeck() throws Exception {
         importEcdict();
         int[] checks = {0};
 
-        assertThrows(CancellationException.class, () -> service.build(
-            request("GRE (ECDICT)", 0, EcdictRepository.TagOrder.FREQUENCY), progress -> { }, () -> ++checks[0] > 1));
+        EcdictTagDeckService.Result result = service.build(
+            request("GRE (ECDICT)", 0, EcdictRepository.TagOrder.FREQUENCY), progress -> { }, () -> ++checks[0] > 1);
 
+        assertTrue(result.canceled());
+        assertNull(result.deck());
+        assertEquals("Canceled. Nothing was added.", result.toDisplayText(EcdictTagDeckService.Tag.GRE));
         assertTrue(decks.findActiveDeck("GRE (ECDICT)").isEmpty());
         assertEquals(0, count("SELECT COUNT(*) FROM words"));
+    }
+
+    @Test
+    void aCancelKeepsTheBatchesWrittenAndBuildingAgainAddsTheRest() throws Exception {
+        importGenerated(600);
+        int[] checks = {0};
+
+        // Checked after reading ECDICT, then before each batch: the second batch is not written.
+        EcdictTagDeckService.Result canceled = service.build(
+            request("GRE (ECDICT)", 0, EcdictRepository.TagOrder.FREQUENCY), progress -> { }, () -> ++checks[0] > 2);
+
+        assertTrue(canceled.canceled());
+        assertTrue(canceled.created());
+        assertEquals(EcdictTagDeckService.BATCH_SIZE, canceled.added());
+        assertEquals(EcdictTagDeckService.BATCH_SIZE, words.countAll(canceled.deck().getId()));
+        assertEquals("Canceled after adding 250 GRE words to GRE (ECDICT). Building the deck again adds the rest.",
+            canceled.toDisplayText(EcdictTagDeckService.Tag.GRE));
+
+        EcdictTagDeckService.Result rest = service.build(
+            request("GRE (ECDICT)", 0, EcdictRepository.TagOrder.FREQUENCY), progress -> { }, () -> false);
+
+        assertFalse(rest.created());
+        assertFalse(rest.canceled());
+        assertEquals(canceled.deck().getId(), rest.deck().getId());
+        assertEquals(600 - EcdictTagDeckService.BATCH_SIZE, rest.added());
+        assertEquals(EcdictTagDeckService.BATCH_SIZE, rest.alreadyInDeck());
+        assertEquals(EcdictFixtures.generatedWord(0), newCardOrder(rest.deck()).get(0), "most common first, as before");
+    }
+
+    @Test
+    void aFailedBatchKeepsTheBatchesBeforeIt() throws Exception {
+        importGenerated(600);
+        WordRepository failing = new WordRepository(databaseManager) {
+            private int batches;
+
+            @Override
+            public int insertAllIfAbsent(List<WordCard> batch) throws SQLException {
+                if (++batches == 2) {
+                    throw new SQLException("[SQLITE_FULL] simulated full disk");
+                }
+                return super.insertAllIfAbsent(batch);
+            }
+        };
+        EcdictTagDeckService failingService = new EcdictTagDeckService(ecdict, decks, failing,
+            new WordValidationService());
+
+        EcdictTagDeckService.BuildFailedException error = assertThrows(EcdictTagDeckService.BuildFailedException.class,
+            () -> failingService.build(request("GRE (ECDICT)", 0, EcdictRepository.TagOrder.FREQUENCY),
+                progress -> { }, () -> false));
+
+        assertTrue(error.getMessage().contains("simulated full disk"), error.getMessage());
+        assertTrue(error.partial().created());
+        assertEquals(EcdictTagDeckService.BATCH_SIZE, error.partial().added());
+        assertEquals(EcdictTagDeckService.BATCH_SIZE, words.countAll(error.partial().deck().getId()));
+    }
+
+    @Test
+    void aRatingWhileADeckIsBuiltWaitsForOneBatchAtMost() throws Exception {
+        importGenerated(8 * EcdictTagDeckService.BATCH_SIZE);
+        Deck other = decks.createDeck("Mine");
+        CountDownLatch building = new CountDownLatch(1);
+        // A slow disk: each batch holds the database for 150 ms.
+        WordRepository slow = new WordRepository(databaseManager) {
+            @Override
+            public int insertAllIfAbsent(List<WordCard> batch) throws SQLException {
+                building.countDown();
+                int inserted = super.insertAllIfAbsent(batch);
+                try {
+                    Thread.sleep(150);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return inserted;
+            }
+        };
+        EcdictTagDeckService slowService = new EcdictTagDeckService(ecdict, decks, slow, new WordValidationService());
+        CompletableFuture<EcdictTagDeckService.Result> build = CompletableFuture.supplyAsync(() -> slowService.build(
+            request("GRE (ECDICT)", 0, EcdictRepository.TagOrder.FREQUENCY), progress -> { }, () -> false));
+        assertTrue(building.await(10, TimeUnit.SECONDS));
+
+        long slowestMillis = 0;
+        for (String english : List.of("probea", "probeb", "probec")) {
+            long started = System.nanoTime();
+            // What a rating does: one short write transaction.
+            databaseManager.inTransaction(() -> words.insert(WordCard.createNew(other.getId(), english, "释义")));
+            slowestMillis = Math.max(slowestMillis, (System.nanoTime() - started) / 1_000_000);
+            Thread.sleep(60);
+        }
+
+        assertEquals(8 * EcdictTagDeckService.BATCH_SIZE, build.get(30, TimeUnit.SECONDS).added());
+        assertTrue(slowestMillis < 700, "a write waited " + slowestMillis + " ms for the deck being built");
+        assertEquals(3, words.countAll(other.getId()));
     }
 
     @Test
@@ -206,6 +304,12 @@ class EcdictTagDeckServiceTest {
         assertThrows(IllegalArgumentException.class, () -> ecdict.findByTag("gre%", EcdictRepository.TagOrder.FREQUENCY));
         assertEquals("GRE (ECDICT)", EcdictTagDeckService.Tag.GRE.defaultDeckName());
         assertEquals("Kaoyan 考研 (ky)", EcdictTagDeckService.Tag.KY.toString());
+    }
+
+    private void importGenerated(int count) throws Exception {
+        Path csv = EcdictFixtures.writeGenerated(tempDir.resolve("generated.csv"), count, "释义");
+        new EcdictImportService(ecdict).importCsv(csv, progress -> { }, () -> false);
+        assertTrue(service.isAvailable());
     }
 
     private void importEcdict() throws Exception {

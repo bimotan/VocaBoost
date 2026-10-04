@@ -58,6 +58,10 @@ public class WordRepository {
     private static final String INSERT = "INSERT INTO words(" + COLUMNS + ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
         + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     private static final int BOUND_COLUMNS = 21;
+    /** {@link #INSERT} unless the deck has the English word already, ignoring case as the unique index does. */
+    private static final String INSERT_IF_ABSENT = "INSERT INTO words(" + COLUMNS + ") SELECT "
+        + String.join(", ", Collections.nCopies(BOUND_COLUMNS, "?"))
+        + " WHERE NOT EXISTS (SELECT 1 FROM words WHERE deck_id = ? AND english = ? COLLATE NOCASE)";
 
     private final DatabaseManager databaseManager;
 
@@ -105,6 +109,31 @@ public class WordRepository {
                     bindWord(statement, word);
                     statement.executeUpdate();
                     inserted++;
+                }
+                return inserted;
+            }
+        });
+    }
+
+    /**
+     * Inserts the words, in order, except those whose deck already has the English word, ignoring
+     * case (as the unique index compares them), for example one added on the add form while a deck
+     * was being built. All or none are written; joins the caller's transaction if there is one.
+     * Returns how many were inserted; the ids of the words are not set.
+     */
+    public int insertAllIfAbsent(List<WordCard> words) throws SQLException {
+        if (words == null || words.isEmpty()) {
+            return 0;
+        }
+        return databaseManager.inTransaction(() -> {
+            try (Connection connection = databaseManager.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(INSERT_IF_ABSENT)) {
+                int inserted = 0;
+                for (WordCard word : words) {
+                    bindWord(statement, word);
+                    statement.setLong(BOUND_COLUMNS + 1, word.getDeckId());
+                    statement.setString(BOUND_COLUMNS + 2, word.getEnglish());
+                    inserted += statement.executeUpdate();
                 }
                 return inserted;
             }

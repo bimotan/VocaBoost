@@ -14,6 +14,9 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -161,6 +164,52 @@ class TransactionTest {
             }
             return null;
         });
+    }
+
+    @Test
+    void transactionsWaitInLineSoAWriterThatNeverPausesCannotStarveAnother() throws Exception {
+        AtomicBoolean stop = new AtomicBoolean();
+        CountDownLatch writing = new CountDownLatch(1);
+        // Back-to-back transactions of 20 ms each, as a deck built in batches writes them.
+        CompletableFuture<Integer> busy = CompletableFuture.supplyAsync(() -> {
+            int written = 0;
+            try {
+                while (!stop.get()) {
+                    String english = "busy" + written;
+                    databaseManager.inTransaction(() -> {
+                        wordRepository.save(word(english));
+                        pause(20);
+                        return null;
+                    });
+                    writing.countDown();
+                    written++;
+                }
+            } catch (SQLException e) {
+                throw new IllegalStateException(e);
+            }
+            return written;
+        });
+        assertTrue(writing.await(10, TimeUnit.SECONDS));
+
+        long slowestMillis = 0;
+        for (int i = 0; i < 20; i++) {
+            long started = System.nanoTime();
+            String english = "probe" + i;
+            databaseManager.inTransaction(() -> wordRepository.save(word(english)));
+            slowestMillis = Math.max(slowestMillis, (System.nanoTime() - started) / 1_000_000);
+        }
+        stop.set(true);
+
+        assertTrue(busy.get(10, TimeUnit.SECONDS) > 0);
+        assertTrue(slowestMillis < 1000, "a transaction waited " + slowestMillis + " ms behind the busy writer");
+    }
+
+    private static void pause(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private int countFromOtherConnection() {

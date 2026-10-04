@@ -7,8 +7,10 @@ import com.vocabtrainer.service.ExamPlanService;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.StatsService;
 import com.vocabtrainer.ui.DataChange;
+import com.vocabtrainer.ui.LongWrites;
 import com.vocabtrainer.ui.UiErrors;
 import com.vocabtrainer.ui.ViewContext;
+import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
@@ -24,7 +26,10 @@ import java.util.logging.Logger;
 
 import static com.vocabtrainer.util.Messages.tr;
 
-/** Report and CSV exports, and JSON backup export and restore. */
+/**
+ * Report and CSV exports, and JSON backup export and restore. The backup buttons are disabled while a
+ * backup is written or restored, and a restore pauses saving on the Review tab ({@link LongWrites}).
+ */
 final class DataActions {
     private static final Logger LOGGER = Logger.getLogger(DataActions.class.getName());
 
@@ -41,6 +46,8 @@ final class DataActions {
     private final BackupService backupService;
     private final ExamPlanService examPlanService;
     private final Labeled status;
+    private final Button exportBackupButton;
+    private final Button importBackupButton;
 
     /** {@code status} shows progress while an export or restore runs. */
     DataActions(ViewContext context, StatsService statsService, GoalService goalService, BackupService backupService,
@@ -51,6 +58,8 @@ final class DataActions {
         this.backupService = backupService;
         this.examPlanService = examPlanService;
         this.status = status;
+        this.exportBackupButton = button("exportBackupButton", tr("data.backup.export"), this::exportJsonBackup);
+        this.importBackupButton = button("importBackupButton", tr("data.backup.import"), this::importJsonBackup);
     }
 
     List<Button> exportButtons() {
@@ -58,8 +67,8 @@ final class DataActions {
             button("exportReportButton", tr("data.report"), this::exportReport),
             button("exportWordsCsvButton", tr("data.wordsCsv"), this::exportWordsCsv),
             button("exportReviewLogsCsvButton", tr("data.reviewLogsCsv"), this::exportReviewLogsCsv),
-            button("exportBackupButton", tr("data.backup.export"), this::exportJsonBackup),
-            button("importBackupButton", tr("data.backup.import"), this::importJsonBackup)
+            exportBackupButton,
+            importBackupButton
         );
     }
 
@@ -100,12 +109,16 @@ final class DataActions {
     }
 
     private void exportJsonBackup() {
-        exportFile(tr("data.backup.export"), "vocaboost-backup.json", "JSON", "*.json", backupService::exportJsonBackup);
+        exportFile(tr("data.backup.export"), "vocaboost-backup.json", "JSON", "*.json", backupService::exportJsonBackup,
+            exportBackupButton, importBackupButton);
     }
 
-    /** Exports the deck that is current when the user picks the file; the export runs in the background. */
+    /**
+     * Exports the deck that is current when the user picks the file; the export runs in the
+     * background, with the {@code triggers} disabled.
+     */
     private void exportFile(String title, String fileName, String extensionName, String extension,
-                            BiFunction<Long, Path, Path> exporter) {
+                            BiFunction<Long, Path, Path> exporter, Node... triggers) {
         Optional<Path> file = context.dialogs().chooseSaveFile(context.window().get(), title, fileName,
             List.of(new FileChooser.ExtensionFilter(extensionName, extension)));
         if (file.isEmpty()) {
@@ -118,10 +131,15 @@ final class DataActions {
             exported -> context.errors().showInfo(tr("export.done", exported.toAbsolutePath().toString())),
             error -> context.errors().showError(tr("export.failed"), UiErrors.rootMessage(error)),
             status,
-            tr("export.running")
+            tr("export.running"),
+            triggers
         );
     }
 
+    /**
+     * Restores a backup in the background. The restore is one transaction, which holds the database
+     * until it is done, so saving pauses on the Review tab meanwhile instead of waiting and failing.
+     */
     private void importJsonBackup() {
         Optional<Path> file = context.dialogs().chooseOpenFile(context.window().get(), tr("data.backup.import"),
             List.of(new FileChooser.ExtensionFilter("JSON", "*.json")));
@@ -134,9 +152,19 @@ final class DataActions {
             return;
         }
         Path backup = file.get();
+        LongWrites.Running restoring = context.longWrites().begin(tr("review.paused.restore"));
+        try {
+            startRestore(backup, choice.get(), targetDeck, restoring);
+        } catch (RuntimeException e) {
+            restoring.end();
+            throw e;
+        }
+    }
+
+    private void startRestore(Path backup, RestoreChoice choice, Deck targetDeck, LongWrites.Running restoring) {
         context.async().run(
             () -> {
-                BackupRestoreResult result = switch (choice.get()) {
+                BackupRestoreResult result = switch (choice) {
                     case NEW_DECK -> backupService.importJsonBackupIntoNewDeck(backup);
                     case USE_BACKUP_PROGRESS -> backupService.importJsonBackup(backup, targetDeck.getId(),
                         BackupService.ExistingWordPolicy.OVERWRITE_SCHEDULE);
@@ -146,10 +174,17 @@ final class DataActions {
                 bringReviewsBeforeExams();
                 return result;
             },
-            this::afterRestore,
-            error -> context.errors().showError(tr("import.failed"), UiErrors.rootMessage(error)),
+            result -> {
+                restoring.end();
+                afterRestore(result);
+            },
+            error -> {
+                restoring.end();
+                context.errors().showError(tr("import.failed"), UiErrors.rootMessage(error));
+            },
             status,
-            tr("data.backup.importing")
+            tr("data.backup.importing"),
+            exportBackupButton, importBackupButton
         );
     }
 
