@@ -1,5 +1,6 @@
 package com.vocabtrainer.ui.review;
 
+import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
@@ -26,6 +27,7 @@ import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBase;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ComboBoxBase;
 import javafx.scene.control.Label;
@@ -84,6 +86,9 @@ import static com.vocabtrainer.util.Messages.tr;
  * "Undo" takes back the last of these or the last rating. After a rating made a card a leech, a
  * notice under the result offers to suspend it and, with an AI provider, a memory aid.
  *
+ * <p>"All decks" reviews the due words of every active deck together; each card names its deck, and
+ * the new-words-per-day spinner, which sets the current deck's limit, is disabled meanwhile.
+ *
  * <p>The rating buttons stay at the bottom of the tab, always in view; what is above them scrolls
  * when the window is too short for it, e.g. on a 1366 x 768 laptop.
  */
@@ -97,6 +102,7 @@ public final class ReviewView {
     private final ReviewSessionPresenter presenter;
 
     private final ComboBox<ReviewMode> reviewModeSelector = new ComboBox<>();
+    private final CheckBox allDecksToggle = new CheckBox(tr("review.allDecks"));
     private final ComboBox<String> sessionSizeSelector = new ComboBox<>();
     private final TextField customSessionSizeField = new TextField();
     private final Spinner<Integer> newCardsPerDaySpinner = new Spinner<>();
@@ -149,6 +155,11 @@ public final class ReviewView {
         this.presenter = new ReviewSessionPresenter(reviewService, goalService, configured::ai, context.async(),
             context.changes(), context.errors()::reportFailure, clock);
         presenter.setAutoExplain(settingsService::getAutoExplain);
+        presenter.setDeckNames(id -> context.decks().activeDecks().stream()
+            .filter(deck -> deck.getId() == id)
+            .map(Deck::getName)
+            .findFirst()
+            .orElse(""));
         this.tab = Widgets.tab("reviewTab", tr("review.tab"), createContent());
         presenter.addListener(this::render);
         // Answers are only timed while the tab is shown; the first card is loaded behind the Dashboard.
@@ -161,6 +172,10 @@ public final class ReviewView {
             }
             if (changes.contains(DataChange.WORDS)) {
                 presenter.wordsChanged();
+            }
+            if (changes.contains(DataChange.DECKS)) {
+                // In All decks: a deck may have been archived, restored or renamed.
+                presenter.decksChanged();
             }
             if (changes.contains(DataChange.REVIEW_SETTINGS)) {
                 // The Dashboard may have applied a new-words-per-day plan, or the Settings tab a limit.
@@ -280,6 +295,14 @@ public final class ReviewView {
         });
         configureSessionSize();
         configureNewWordsPerDay();
+        allDecksToggle.setId("reviewAllDecksToggle");
+        allDecksToggle.setTooltip(new Tooltip(tr("review.allDecks.tooltip")));
+        allDecksToggle.setSelected(presenter.isAllDecks());
+        allDecksToggle.selectedProperty().addListener((observable, wasSelected, selected) -> {
+            if (!rendering) {
+                context.errors().guard(tr("review.allDecks.failed"), () -> presenter.setAllDecks(selected));
+            }
+        });
         Button startSessionButton = new Button(tr("review.start"));
         startSessionButton.setId("startSessionButton");
         startSessionButton.setOnAction(event -> context.errors().guard(tr("review.start.failed"),
@@ -290,7 +313,7 @@ public final class ReviewView {
         sessionProgressLabel.setId("sessionProgressLabel");
         sessionProgressLabel.getStyleClass().add("secondary-text");
         HBox modeBox = new HBox(10, Widgets.formLabel(tr("review.mode"), reviewModeSelector), reviewModeSelector,
-            sessionProgressLabel);
+            allDecksToggle, sessionProgressLabel);
         modeBox.setAlignment(Pos.CENTER_LEFT);
         HBox sessionBox = new HBox(10, Widgets.formLabel(tr("review.size"), sessionSizeSelector), sessionSizeSelector,
             customSessionSizeField, startSessionButton, resetSessionButton,
@@ -607,9 +630,13 @@ public final class ReviewView {
             if (newCardsPerDaySpinner.getValue() == null || newCardsPerDaySpinner.getValue() != presenter.newCardsPerDay()) {
                 newCardsPerDaySpinner.getValueFactory().setValue(presenter.newCardsPerDay());
             }
+            allDecksToggle.setSelected(presenter.isAllDecks());
         } finally {
             rendering = false;
         }
+        newCardsPerDaySpinner.setDisable(!presenter.canChangeNewCardsPerDay());
+        newCardsPerDaySpinner.getTooltip().setText(presenter.canChangeNewCardsPerDay() ? tr("review.newPerDay.tooltip")
+            : tr("review.newPerDay.allDecksTooltip"));
         reviewWordLabel.setText(presenter.question());
         reviewWordLabel.pseudoClassStateChanged(SENTENCE, presenter.isSentenceQuestion());
         reviewHintLabel.setText(presenter.hint());

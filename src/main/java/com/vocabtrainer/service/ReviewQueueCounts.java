@@ -6,6 +6,7 @@ import com.vocabtrainer.service.scheduling.StudyDay;
 
 import java.sql.SQLException;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * What a deck has to study today: the due reviews and the new cards the new-cards-per-day limit
@@ -37,6 +38,28 @@ public record ReviewQueueCounts(
     /** The due reviews and the new cards available today: what an All Due session shows. */
     public int dueToday() {
         return dueReviews() + newAvailableToday();
+    }
+
+    /**
+     * The counts of several decks together: the sums, except that the new cards available today are
+     * those each deck's own limit allows, so {@link #newAvailableToday()} is their sum too.
+     */
+    static ReviewQueueCounts sum(List<ReviewQueueCounts> decks) {
+        if (decks.size() == 1) {
+            return decks.get(0);
+        }
+        int learning = 0;
+        int reviews = 0;
+        int newCards = 0;
+        int available = 0;
+        for (ReviewQueueCounts deck : decks) {
+            learning += deck.learningDue();
+            reviews += deck.reviewsDue();
+            newCards += deck.newCardsDue();
+            available += deck.newAvailableToday();
+        }
+        // As if one deck had a limit of exactly what the decks still let in today.
+        return new ReviewQueueCounts(learning, reviews, newCards, available, 0);
     }
 
     /** The counts of the deck at {@code now}; new cards introduced count from the start of the study day. */

@@ -345,6 +345,35 @@ public class WordRepository {
         return found;
     }
 
+    /** The ids of the active decks, in the deck selector's order (by name). */
+    public List<Long> findActiveDeckIds() throws SQLException {
+        List<Long> ids = new ArrayList<>();
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT id FROM decks WHERE archived = 0 ORDER BY lower(name), id");
+             ResultSet rs = statement.executeQuery()) {
+            while (rs.next()) {
+                ids.add(rs.getLong(1));
+            }
+        }
+        return ids;
+    }
+
+    /** Whether the word exists, is not suspended and its deck is active: whether a review can show it. */
+    public boolean isReviewable(long wordId) throws SQLException {
+        String sql = """
+            SELECT 1 FROM words w JOIN decks d ON d.id = w.deck_id
+            WHERE w.id = ? AND w.archived = 0 AND d.archived = 0
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, wordId);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
     /**
      * The deck's English words in lower case, for duplicate checks without one query per word.
      * Suspended words are included, because the unique index on (deck_id, english) covers them too.

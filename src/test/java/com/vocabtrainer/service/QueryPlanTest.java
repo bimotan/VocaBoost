@@ -138,6 +138,10 @@ class QueryPlanTest {
         wordRepository.findFirstInOtherDecks(List.of(words.get(1).getEnglish(), "wordzz"), other.getId());
         wordRepository.findTagged(List.of(deck.getId()), "UNCHECKED");
         wordRepository.updateTagsIfUnchanged(words.get(1).getId(), "", "VERIFIED", "");
+        // Reviewing every deck at once, and whether the card on screen may still be shown.
+        review.startSession(ReviewService.ALL_DECKS, ReviewMode.EN_TO_ZH, 0);
+        review.nextWord(ReviewService.ALL_DECKS, ReviewMode.EN_TO_ZH);
+        review.isReviewable(words.get(2).getId());
 
         List<String> problems = new ArrayList<>();
         for (String sql : databaseManager.statements) {

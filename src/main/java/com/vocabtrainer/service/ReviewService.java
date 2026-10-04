@@ -102,6 +102,12 @@ import static com.vocabtrainer.util.Messages.tr;
  * completion and the badges the rating earned are taken back. The session's counts go back too, and
  * the submitted answer is kept again, so the card can be rated again without typing the answer. A new
  * session (another deck or mode, or a reset) starts without anything to undo.
+ *
+ * <p><b>All decks.</b> A session on {@link #ALL_DECKS} reviews the active decks together: each queue
+ * takes the best card of every deck (the soonest learning step, the review card most likely
+ * forgotten, a new card from the deck with the most of its daily allowance left), and every card
+ * keeps its own deck's schedule, new-cards-per-day limit, goals and XP. A deck archived during the
+ * session is left out from the next card on.
  */
 public class ReviewService {
     /** How many weak words the next one is chosen from, besides those the session already showed. */
@@ -112,6 +118,11 @@ public class ReviewService {
     static final int LARGE_BACKLOG = 100;
     /** How many of the session's last actions can be undone. */
     public static final int UNDO_LIMIT = 100;
+    /** The deck id that stands for every active deck: a session on it reviews them all; see the class comment. */
+    public static final long ALL_DECKS = 0L;
+    /** The soonest due first: how learning steps are taken. */
+    private static final Comparator<WordCard> SOONEST = Comparator.comparing(WordCard::getNextReviewAt,
+        Comparator.nullsFirst(Comparator.naturalOrder())).thenComparingLong(WordCard::getId);
 
     private static final Logger LOGGER = Logger.getLogger(ReviewService.class.getName());
 
@@ -223,9 +234,10 @@ public class ReviewService {
         try {
             ensureSession(deckId, mode);
             LocalDateTime now = LocalDateTime.now(clock);
+            List<Long> decks = decksOf(deckId);
             Optional<WordCard> selected = isSessionTargetReached()
-                ? sessionCardStillLearning(deckId, now)
-                : nextCandidate(deckId, now);
+                ? sessionCardStillLearning(decks, now)
+                : nextCandidate(decks, now);
             currentCloze = null;
             selected.ifPresent(word -> {
                 currentQuestionMode = questionModeFor(activeSessionMode);
@@ -239,31 +251,104 @@ public class ReviewService {
         }
     }
 
-    private Optional<WordCard> nextCandidate(long deckId, LocalDateTime now) throws SQLException {
+    /** The decks a session on {@code deckId} reviews: that one, or every active deck for {@link #ALL_DECKS}. */
+    private List<Long> decksOf(long deckId) throws SQLException {
+        return deckId == ALL_DECKS ? wordRepository.findActiveDeckIds() : List.of(deckId);
+    }
+
+    /** The decks a session on {@code deckId} reviews: that one, or every active deck for {@link #ALL_DECKS}. */
+    public List<Long> sessionDecks(long deckId) {
+        try {
+            return decksOf(deckId);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot read the active decks", e);
+        }
+    }
+
+    private Optional<WordCard> nextCandidate(List<Long> decks, LocalDateTime now) throws SQLException {
         LocalDateTime dayEnd = scheduler.studyDay().end(now);
         if (activeSessionMode == ReviewMode.WEAK_WORDS) {
-            Optional<WordCard> weak = nextWeakWord(deckId, now, dayEnd);
-            return weak.isPresent() ? weak : sessionCardStillLearning(deckId, now);
+            Optional<WordCard> weak = nextWeakWord(decks, now, dayEnd);
+            return weak.isPresent() ? weak : sessionCardStillLearning(decks, now);
         }
         // Learning cards come first and soonest first, so their steps keep their length.
-        Optional<WordCard> learning = first(limit -> wordRepository.findLearningDueBy(deckId, now, limit),
-            word -> true, 0);
+        Optional<WordCard> learning = best(decks, SOONEST,
+            deck -> first(limit -> wordRepository.findLearningDueBy(deck, now, limit), word -> true, 0));
         if (learning.isPresent()) {
             return learning;
         }
-        Optional<WordCard> review = first(limit -> wordRepository.findDueReviews(deckId, now, dayEnd, limit),
-            this::notShownYet, sessionWords.size());
-        Optional<WordCard> newCard = newCardsLeftToday(deckId, now) > 0
-            ? first(limit -> wordRepository.findNewCards(deckId, dayEnd, limit), this::notShownYet, sessionWords.size())
-            : Optional.empty();
+        Optional<WordCard> review = best(decks, mostLikelyForgotten(now),
+            deck -> first(limit -> wordRepository.findDueReviews(deck, now, dayEnd, limit), this::notShownYet,
+                sessionWords.size()));
+        Optional<WordCard> newCard = nextNewCard(decks, now, dayEnd);
         if (review.isPresent() && newCard.isPresent()) {
-            return introducesNewCard(deckId, now, dayEnd) ? newCard : review;
+            return introducesNewCard(decks, now, dayEnd) ? newCard : review;
         }
         Optional<WordCard> either = review.or(() -> newCard);
         if (either.isPresent()) {
             return either;
         }
-        return first(limit -> wordRepository.findLearningDueBy(deckId, learnAheadLimit(now), limit), word -> true, 0);
+        return best(decks, SOONEST,
+            deck -> first(limit -> wordRepository.findLearningDueBy(deck, learnAheadLimit(now), limit), word -> true, 0));
+    }
+
+    /** The first card of one deck's queue. */
+    @FunctionalInterface
+    private interface DeckQueue {
+        Optional<WordCard> first(long deckId) throws SQLException;
+    }
+
+    /** The first card of {@code queue} in each of the decks, the best of them by {@code order}. */
+    private static Optional<WordCard> best(List<Long> decks, Comparator<WordCard> order, DeckQueue queue)
+        throws SQLException {
+        Optional<WordCard> best = Optional.empty();
+        for (long deck : decks) {
+            Optional<WordCard> candidate = queue.first(deck);
+            if (candidate.isPresent() && (best.isEmpty() || order.compare(candidate.get(), best.get()) < 0)) {
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * The review queue's order across decks, as {@link WordRepository#findDueReviews} orders one
+     * deck: the highest elapsed time over stability (the lowest retrievability) first.
+     */
+    private static Comparator<WordCard> mostLikelyForgotten(LocalDateTime now) {
+        return Comparator.comparingDouble((WordCard word) -> -elapsedOverStability(word, now)).thenComparing(SOONEST);
+    }
+
+    private static double elapsedOverStability(WordCard word, LocalDateTime now) {
+        if (word.getLastReviewedAt() == null) {
+            return 1.0;
+        }
+        double elapsedDays = Duration.between(word.getLastReviewedAt(), now).toMillis() / 86_400_000.0;
+        return elapsedDays / Math.max(word.getStability(), 0.01);
+    }
+
+    /**
+     * The next new card of the decks that may still introduce one today: from the deck with the most
+     * of its new-cards-per-day limit left (the first in the decks' order when several have as much),
+     * so new cards come from every deck in turn.
+     */
+    private Optional<WordCard> nextNewCard(List<Long> decks, LocalDateTime now, LocalDateTime dayEnd)
+        throws SQLException {
+        Optional<WordCard> chosen = Optional.empty();
+        int chosenLeft = 0;
+        for (long deck : decks) {
+            int left = newCardsLeftToday(deck, now);
+            if (left <= chosenLeft) {
+                continue;
+            }
+            Optional<WordCard> card = first(limit -> wordRepository.findNewCards(deck, dayEnd, limit),
+                this::notShownYet, sessionWords.size());
+            if (card.isPresent()) {
+                chosen = card;
+                chosenLeft = left;
+            }
+        }
+        return chosen;
     }
 
     /** Reads the first {@code limit} cards of a queue, in its order. */
@@ -319,11 +404,14 @@ public class ReviewService {
      * reviews, unless the due reviews fill the rest of the session (more than {@value #LARGE_BACKLOG}
      * of them in an All Due session).
      */
-    private boolean introducesNewCard(long deckId, LocalDateTime now, LocalDateTime dayEnd) throws SQLException {
+    private boolean introducesNewCard(List<Long> decks, LocalDateTime now, LocalDateTime dayEnd) throws SQLException {
         if (reviewsSinceNewCard < REVIEWS_PER_NEW_CARD) {
             return false;
         }
-        int reviewsDue = wordRepository.countDueByState(deckId, now, dayEnd).review();
+        int reviewsDue = 0;
+        for (long deck : decks) {
+            reviewsDue += wordRepository.countDueByState(deck, now, dayEnd).review();
+        }
         return sessionTarget > 0 ? reviewsDue < sessionTarget - sessionWords.size() : reviewsDue <= LARGE_BACKLOG;
     }
 
@@ -332,8 +420,12 @@ public class ReviewService {
      * practice that is not due yet; each shown once. Learning cards that are not due wait for their
      * step instead of being practiced.
      */
-    private Optional<WordCard> nextWeakWord(long deckId, LocalDateTime now, LocalDateTime dayEnd) throws SQLException {
-        List<WordCard> weak = wordRepository.findWeak(deckId, CANDIDATES + sessionWords.size());
+    private Optional<WordCard> nextWeakWord(List<Long> decks, LocalDateTime now, LocalDateTime dayEnd)
+        throws SQLException {
+        List<WordCard> weak = new ArrayList<>();
+        for (long deck : decks) {
+            weak.addAll(wordRepository.findWeak(deck, CANDIDATES + sessionWords.size()));
+        }
         Optional<WordCard> step = weak.stream()
             .filter(word -> word.getState().isLearning() && word.isDue(now, dayEnd))
             .min(Comparator.comparing(WordCard::getNextReviewAt).thenComparingLong(WordCard::getId));
@@ -356,9 +448,14 @@ public class ReviewService {
      * After the target, or when nothing else is left: a card this session rated that is still being
      * learned and due within the learn-ahead window.
      */
-    private Optional<WordCard> sessionCardStillLearning(long deckId, LocalDateTime now) throws SQLException {
-        return wordRepository.findLearningDueBy(deckId, learnAheadLimit(now), CANDIDATES + sessionWords.size()).stream()
+    private Optional<WordCard> sessionCardStillLearning(List<Long> decks, LocalDateTime now) throws SQLException {
+        List<WordCard> learning = new ArrayList<>();
+        for (long deck : decks) {
+            learning.addAll(wordRepository.findLearningDueBy(deck, learnAheadLimit(now), CANDIDATES + sessionWords.size()));
+        }
+        return learning.stream()
             .filter(word -> sessionWords.contains(word.getId()))
+            .sorted(SOONEST)
             .filter(this::canAsk)
             .findFirst();
     }
@@ -393,6 +490,7 @@ public class ReviewService {
         remember(() -> {
             settings.saveMode(activeSessionMode);
             settings.saveSessionSize(sessionTarget);
+            settings.saveAllDecks(deckId == ALL_DECKS);
         });
     }
 
@@ -418,6 +516,19 @@ public class ReviewService {
     /** The session's mode, or before the first session the mode it will start with. */
     public ReviewMode sessionMode() {
         return activeSessionMode;
+    }
+
+    /** Whether the last session reviewed every deck ({@link #ALL_DECKS}), so the next one starts so too. */
+    public boolean sessionAllDecks() {
+        if (settings == null) {
+            return sessionStarted && activeSessionDeckId == ALL_DECKS;
+        }
+        try {
+            return settings.allDecks();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Cannot read whether to review every deck", e);
+            return false;
+        }
     }
 
     public ReviewMode currentQuestionMode() {
@@ -466,11 +577,37 @@ public class ReviewService {
         }
     }
 
-    /** What the deck has to study today: due reviews and the new cards the daily limit still allows. */
+    /**
+     * What the deck has to study today: due reviews and the new cards the daily limit still allows.
+     * For {@link #ALL_DECKS}, the sums over the active decks, each with its own limit.
+     */
     public ReviewQueueCounts queueCounts(long deckId) {
         try {
-            return ReviewQueueCounts.read(wordRepository, reviewLogRepository, scheduler.studyDay(), deckId,
-                LocalDateTime.now(clock), newCardsPerDay(deckId));
+            List<ReviewQueueCounts> counts = new ArrayList<>();
+            for (long deck : decksOf(deckId)) {
+                counts.add(ReviewQueueCounts.read(wordRepository, reviewLogRepository, scheduler.studyDay(), deck,
+                    LocalDateTime.now(clock), newCardsPerDay(deck)));
+            }
+            return ReviewQueueCounts.sum(counts);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot count the due words", e);
+        }
+    }
+
+    /**
+     * Whether new cards are due in one of the decks but its new-cards-per-day limit lets none in
+     * today, which is why nothing new is shown.
+     */
+    public boolean newCardsHeldBackByLimit(long deckId) {
+        try {
+            for (long deck : decksOf(deckId)) {
+                ReviewQueueCounts counts = ReviewQueueCounts.read(wordRepository, reviewLogRepository,
+                    scheduler.studyDay(), deck, LocalDateTime.now(clock), newCardsPerDay(deck));
+                if (counts.newCardsDue() > 0 && counts.newAvailableToday() == 0) {
+                    return true;
+                }
+            }
+            return false;
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot count the due words", e);
         }
@@ -541,10 +678,13 @@ public class ReviewService {
         return clozeMaker.highlight(word.getExampleSentence(), word.getEnglish());
     }
 
-    /** Whether the word still exists and is not suspended; false once it was deleted or suspended elsewhere. */
+    /**
+     * Whether the word still exists, is not suspended and its deck is active; false once it was
+     * deleted, suspended or its deck archived elsewhere.
+     */
     public boolean isReviewable(long wordId) {
         try {
-            return wordRepository.findById(wordId).filter(word -> !word.isSuspended()).isPresent();
+            return wordRepository.isReviewable(wordId);
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot read word " + wordId, e);
         }
@@ -644,7 +784,9 @@ public class ReviewService {
 
         // Committed: only in-memory session state is updated from here on, so nothing below can fail.
         pendingAnswers.remove(wordId);
-        activeSessionDeckId = saved.word().getDeckId();
+        if (activeSessionDeckId != ALL_DECKS) {
+            activeSessionDeckId = saved.word().getDeckId();
+        }
         sessionReviewed++;
         boolean firstInSession = sessionWords.add(wordId);
         pushUndo(new UndoEntry(
