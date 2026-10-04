@@ -129,8 +129,17 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
-      - name: Smoke-test the app image
+      # Starts the packaged launcher with --smoke-test: a new database in a temporary folder, the main
+      # window shown, exit code 0.
+      - name: Smoke-test the Windows app image
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./scripts/smoke-test.ps1 target/dist/VocaBoost/VocaBoost.exe
+
+      - name: Smoke-test the Linux app image
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: xvfb-run -a -s "-screen 0 1400x900x24" scripts/smoke-test.sh target/dist/VocaBoost/bin/VocaBoost
 
       - name: Upload the Windows app image

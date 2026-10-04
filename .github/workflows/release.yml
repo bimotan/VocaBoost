@@ -44,6 +44,12 @@ jobs:
         shell: pwsh
         run: ./scripts/package-windows.ps1
 
+      # The packaged launcher shows the main window on a new database in a temporary folder and exits with 0.
+      - name: Smoke-test the app image
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./scripts/smoke-test.ps1 target/dist/VocaBoost/VocaBoost.exe
+
       - name: Zip the app image
         shell: pwsh
         run: |

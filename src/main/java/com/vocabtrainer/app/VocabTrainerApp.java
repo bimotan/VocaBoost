@@ -16,6 +16,8 @@ import javafx.scene.Scene;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 
+import java.nio.file.Path;
+import java.sql.SQLException;
 import java.util.Locale;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -31,21 +33,30 @@ public class VocabTrainerApp extends Application {
     public void start(Stage stage) {
         AppLogging.initialize();
         ErrorDialogs.installUncaughtExceptionHandler();
-        // The database can hold the AI API key: keep the folder private where the system allows it.
-        DataFolder.prepare(DateTimeUtil.defaultDatabasePath().toAbsolutePath().getParent());
-        // Until the saved language is read, e.g. for a database that cannot be opened, follow the computer's.
-        useLanguage(LanguageSettings.Language.AUTO, SYSTEM_LOCALE);
         try {
-            services = AppServices.builder(DateTimeUtil.defaultDatabasePath()).open();
-            useLanguage(new LanguageSettings(services.settingsService()).language(), SYSTEM_LOCALE);
-            // The dialogs show their text at the size the Settings tab saved, read when each one opens.
-            DisplaySettings display = new DisplaySettings(services.settingsService());
-            showMainWindow(stage, services.createMainWindow(new JavaFxDialogs(display::textSizePercent), SYSTEM_LOCALE));
+            openMainWindow(stage, DateTimeUtil.defaultDatabasePath());
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Startup failed", e);
             ErrorDialogs.exceptionAlert(Messages.tr("startup.failed.title"), Messages.tr("startup.failed.header"), e)
                 .showAndWait();
         }
+    }
+
+    /**
+     * Opens the database at {@code databasePath} and shows the main window on {@code stage}, in the
+     * saved language; {@link #stop()} closes the database. {@link SmokeTest} starts the app the same
+     * way on a temporary folder.
+     */
+    void openMainWindow(Stage stage, Path databasePath) throws SQLException {
+        // The database can hold the AI API key: keep the folder private where the system allows it.
+        DataFolder.prepare(databasePath.toAbsolutePath().getParent());
+        // Until the saved language is read, e.g. for a database that cannot be opened, follow the computer's.
+        useLanguage(LanguageSettings.Language.AUTO, SYSTEM_LOCALE);
+        services = AppServices.builder(databasePath).open();
+        useLanguage(new LanguageSettings(services.settingsService()).language(), SYSTEM_LOCALE);
+        // The dialogs show their text at the size the Settings tab saved, read when each one opens.
+        DisplaySettings display = new DisplaySettings(services.settingsService());
+        showMainWindow(stage, services.createMainWindow(new JavaFxDialogs(display::textSizePercent), SYSTEM_LOCALE));
     }
 
     /**
@@ -85,6 +96,9 @@ public class VocabTrainerApp extends Application {
     }
 
     public static void main(String[] args) {
+        if (SmokeTest.requested(args)) {
+            System.exit(SmokeTest.run(System.out, System.err));
+        }
         launch(args);
     }
 }
