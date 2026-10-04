@@ -182,6 +182,54 @@ public class WordRepository {
         }
     }
 
+    /**
+     * Replaces the word's tags with {@code tags} and fills its phonetic with {@code phonetic} when it
+     * has none, but only while its tags are still {@code expectedTags}: an edit made since they were
+     * read wins, and nothing else of the word (its schedule above all) is written. Returns whether
+     * the word was changed.
+     */
+    public boolean updateTagsIfUnchanged(long id, String expectedTags, String tags, String phonetic)
+        throws SQLException {
+        String sql = """
+            UPDATE words
+            SET tags = ?,
+                phonetic = CASE WHEN TRIM(COALESCE(phonetic, '')) = '' AND ? <> '' THEN ? ELSE phonetic END
+            WHERE id = ? AND COALESCE(tags, '') = ?
+            """;
+        String newPhonetic = phonetic == null ? "" : phonetic.strip();
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, nullable(tags));
+            statement.setString(2, newPhonetic);
+            statement.setString(3, newPhonetic);
+            statement.setLong(4, id);
+            statement.setString(5, expectedTags == null ? "" : expectedTags);
+            return statement.executeUpdate() == 1;
+        }
+    }
+
+    /**
+     * The words of the decks tagged {@code tag} (one of their tags, ignoring case), suspended ones
+     * too, in the decks' order and then by English word.
+     */
+    public List<WordCard> findTagged(Collection<Long> deckIds, String tag) throws SQLException {
+        List<WordCard> tagged = new ArrayList<>();
+        for (long deckId : new LinkedHashSet<>(deckIds)) {
+            String sql = "SELECT * FROM words WHERE deck_id = ? AND lower(COALESCE(tags, '')) LIKE ? "
+                + "ORDER BY lower(english), id";
+            try (Connection connection = databaseManager.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setLong(1, deckId);
+                statement.setString(2, "%" + tag.toLowerCase(Locale.ROOT) + "%");
+                try (ResultSet rs = statement.executeQuery()) {
+                    // LIKE narrows the rows down; WordCard.hasTag decides, so "unchecked-later" is not "unchecked".
+                    mapList(rs).stream().filter(word -> word.hasTag(tag)).forEach(tagged::add);
+                }
+            }
+        }
+        return tagged;
+    }
+
     public void deleteById(long id) throws SQLException {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement("DELETE FROM words WHERE id = ?")) {
@@ -287,6 +335,70 @@ public class WordRepository {
             statement.setLong(2, deckId);
             try (ResultSet rs = statement.executeQuery()) {
                 return mapList(rs);
+            }
+        }
+    }
+
+    /**
+     * For each of {@code englishKeys} (lower case) that an active deck other than {@code deckId} has,
+     * that word in the oldest such deck, by its lower-case English: what importing the words into
+     * {@code deckId} (0 for a deck that does not exist yet) would duplicate elsewhere. Asked
+     * {@value #IDS_PER_STATEMENT} words at a time through the unique index on (deck_id, english).
+     */
+    public Map<String, WordCard> findFirstInOtherDecks(Collection<String> englishKeys, long deckId)
+        throws SQLException {
+        Map<String, WordCard> found = new HashMap<>();
+        List<String> keys = List.copyOf(new LinkedHashSet<>(englishKeys));
+        for (int from = 0; from < keys.size(); from += IDS_PER_STATEMENT) {
+            List<String> chunk = keys.subList(from, Math.min(keys.size(), from + IDS_PER_STATEMENT));
+            String sql = """
+                SELECT w.* FROM decks d
+                JOIN words w ON w.deck_id = d.id AND w.english COLLATE NOCASE IN (%s)
+                WHERE d.archived = 0 AND d.id <> ?
+                ORDER BY d.id, w.id
+                """.formatted(String.join(", ", Collections.nCopies(chunk.size(), "?")));
+            try (Connection connection = databaseManager.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(sql)) {
+                int index = 1;
+                for (String key : chunk) {
+                    statement.setString(index++, key);
+                }
+                statement.setLong(index, deckId);
+                try (ResultSet rs = statement.executeQuery()) {
+                    for (WordCard word : mapList(rs)) {
+                        found.putIfAbsent(word.getEnglish().trim().toLowerCase(Locale.ROOT), word);
+                    }
+                }
+            }
+        }
+        return found;
+    }
+
+    /** The ids of the active decks, in the deck selector's order (by name). */
+    public List<Long> findActiveDeckIds() throws SQLException {
+        List<Long> ids = new ArrayList<>();
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT id FROM decks WHERE archived = 0 ORDER BY lower(name), id");
+             ResultSet rs = statement.executeQuery()) {
+            while (rs.next()) {
+                ids.add(rs.getLong(1));
+            }
+        }
+        return ids;
+    }
+
+    /** Whether the word exists, is not suspended and its deck is active: whether a review can show it. */
+    public boolean isReviewable(long wordId) throws SQLException {
+        String sql = """
+            SELECT 1 FROM words w JOIN decks d ON d.id = w.deck_id
+            WHERE w.id = ? AND w.archived = 0 AND d.archived = 0
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, wordId);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next();
             }
         }
     }

@@ -18,6 +18,8 @@ import static com.vocabtrainer.util.Messages.tr;
  * @param mapping          which file column holds which word field
  * @param fileColumns      the file's columns, with their names and first values
  * @param rows             the first rows as they would be imported
+ * @param inOtherDecks     rows to import whose word another active deck already has
+ * @param otherDeckIds     those decks, oldest first
  */
 public record ImportPreview(
     int totalRows,
@@ -32,12 +34,15 @@ public record ImportPreview(
     String format,
     WordColumns mapping,
     List<WordListFile.FileColumn> fileColumns,
-    List<Row> rows
+    List<Row> rows,
+    int inOtherDecks,
+    List<Long> otherDeckIds
 ) {
     public ImportPreview {
         firstErrors = List.copyOf(firstErrors);
         fileColumns = List.copyOf(fileColumns);
         rows = List.copyOf(rows);
+        otherDeckIds = List.copyOf(otherDeckIds);
     }
 
     /**
@@ -55,6 +60,9 @@ public record ImportPreview(
                 invalidCount)
             : tr("import.preview.counts", totalRows, importableCount, duplicateCount, invalidCount));
         builder.append(System.lineSeparator()).append(tr("import.preview.format", encoding, delimiter, columns));
+        if (inOtherDecks > 0) {
+            builder.append(System.lineSeparator()).append(tr("import.preview.inOtherDecks", inOtherDecks));
+        }
         if (!format.isBlank()) {
             builder.append(" | ").append(format);
         }

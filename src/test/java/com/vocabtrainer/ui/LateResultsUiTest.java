@@ -170,7 +170,8 @@ class LateResultsUiTest extends MainWindowUiTest {
         click("chooseImportFileButton");
         words.gate.hold();
         click("importCsvButton");
-        assertEquals("Importing...", text("importStatusLabel"));
+        // The file is read first (for words other decks have), then the import starts and waits.
+        waitForText("importStatusLabel", "Importing...");
     }
 
     /** Lets background work wait until the test releases it. */

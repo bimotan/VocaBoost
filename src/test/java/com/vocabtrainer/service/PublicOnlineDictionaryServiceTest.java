@@ -10,13 +10,18 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * dictionaryapi.dev and Wiktionary against a local HTTP server that answers like them (review
- * findings D5, D9, F4).
+ * findings D4, D5, D9, F4): asked at the same time, in priority order by a common deadline.
  */
 class PublicOnlineDictionaryServiceTest {
     private static final String LUCID = """
@@ -42,8 +47,11 @@ class PublicOnlineDictionaryServiceTest {
     }
 
     @Test
-    void dictionaryApiDevAnswersFirstAndWiktionaryIsNotAsked() {
-        server.answer("/dictapi/lucid", 200, LUCID);
+    void dictionaryApiDevAnswersFirstEvenWhenWiktionaryIsFaster() {
+        server.answer("/dictapi/lucid", StubHttpServer.Answer.json(200, LUCID).after(Duration.ofMillis(300)));
+        server.answer("/wiki/lucid", 200, """
+            {"en":[{"partOfSpeech":"Adjective","definitions":[{"definition":"Clear."}]}]}
+            """);
 
         DictionaryLookupResult result = service.lookup("lucid");
 
@@ -53,9 +61,86 @@ class PublicOnlineDictionaryServiceTest {
                 PublicOnlineDictionaryService.DICTIONARY_API_SOURCE, "Clear; easily understood."),
             new DictionaryEntry("lucid", "", "adjective", "/ˈluːsɪd/", "",
                 PublicOnlineDictionaryService.DICTIONARY_API_SOURCE, "Mentally sound.")), result.entries());
-        assertEquals(List.of("/dictapi/lucid"), server.paths());
+        StubHttpServer.Request dictionaryApi = server.requests().stream()
+            .filter(request -> request.path().equals("/dictapi/lucid")).findFirst().orElseThrow();
         assertEquals("VocaBoost/1.0 (https://github.com/bimotan/VocaBoost)",
-            server.requests().get(0).headers().getFirst("User-Agent"));
+            dictionaryApi.headers().getFirst("User-Agent"));
+    }
+
+    @Test
+    void aSlowDictionaryApiDevDelaysAWiktionaryAnswerOnlyUntilTheDeadline() {
+        PublicOnlineDictionaryService withDeadline = new PublicOnlineDictionaryService(StubHttpServer.client(),
+            server.uri("/dictapi/"), server.uri("/wiki/"), Duration.ofSeconds(5), Duration.ofMillis(800));
+        server.answer("/dictapi/petrichor", StubHttpServer.Answer.json(200, LUCID).after(Duration.ofSeconds(4)));
+        server.answer("/wiki/petrichor", 200, """
+            {"en":[{"partOfSpeech":"Noun","definitions":[{"definition":"The smell of rain on dry earth."}]}]}
+            """);
+
+        long start = System.nanoTime();
+        DictionaryLookupResult result = withDeadline.lookup("petrichor");
+        Duration took = Duration.ofNanos(System.nanoTime() - start);
+
+        assertEquals(LookupOutcome.FOUND, result.outcome());
+        assertEquals(PublicOnlineDictionaryService.WIKTIONARY_SOURCE, result.entries().get(0).source());
+        assertTrue(took.compareTo(Duration.ofMillis(700)) >= 0, "dictionaryapi.dev is waited for until the deadline: " + took);
+        assertTrue(took.compareTo(Duration.ofMillis(2500)) < 0, "but not for its 4 seconds: " + took);
+    }
+
+    @Test
+    void aSlowWiktionaryDoesNotDelayADictionaryApiDevAnswer() {
+        server.answer("/dictapi/lucid", 200, LUCID);
+        server.answer("/wiki/lucid", StubHttpServer.Answer.json(200, "{}").after(Duration.ofSeconds(4)));
+
+        long start = System.nanoTime();
+        DictionaryLookupResult result = new PublicOnlineDictionaryService(StubHttpServer.client(),
+            server.uri("/dictapi/"), server.uri("/wiki/"), Duration.ofSeconds(5)).lookup("lucid");
+        Duration took = Duration.ofNanos(System.nanoTime() - start);
+
+        assertEquals(LookupOutcome.FOUND, result.outcome());
+        assertTrue(took.compareTo(Duration.ofSeconds(2)) < 0, "not waiting for Wiktionary: " + took);
+    }
+
+    @Test
+    void aDictionaryThatMissesTheDeadlineMeansTheWordCouldNotBeChecked() {
+        PublicOnlineDictionaryService withDeadline = new PublicOnlineDictionaryService(StubHttpServer.client(),
+            server.uri("/dictapi/"), server.uri("/wiki/"), Duration.ofSeconds(5), Duration.ofMillis(600));
+        server.answer("/dictapi/petrichor", StubHttpServer.Answer.json(200, LUCID).after(Duration.ofSeconds(4)));
+        server.answer("/wiki/petrichor", 404, "{}");
+
+        DictionaryLookupResult result = withDeadline.lookup("petrichor");
+
+        assertEquals(LookupOutcome.TIMEOUT, result.outcome(), "not NOT_FOUND: dictionaryapi.dev may have it");
+        assertEquals("dictionaryapi.dev: no answer within 0.6 seconds. | Not found: Wiktionary does not have this word.",
+            result.message());
+        assertEquals(VerificationStatus.UNCHECKED, withDeadline.verify("petrichor").status());
+    }
+
+    @Test
+    void dictionaryApiDevGivesSynonymsAntonymsAndARecording() {
+        server.answer("/dictapi/abate", 200, """
+            [{"word":"abate","phonetics":[{"text":"/əˈbeɪt/","audio":""},
+                {"audio":"https://api.dictionaryapi.dev/media/pronunciations/en/abate-uk.mp3"},
+                {"text":"/əˈbeɪt/","audio":"https://api.dictionaryapi.dev/media/pronunciations/en/abate-us.mp3"}],
+              "meanings":[{"partOfSpeech":"verb","synonyms":["subside","diminish"],"antonyms":["intensify"],
+                "definitions":[{"definition":"To lessen in force or intensity.","synonyms":["wane","subside"],
+                                "antonyms":[]}]},
+                {"partOfSpeech":"noun","synonyms":[],"antonyms":[],"definitions":[{"definition":"Abatement."}]}]}]
+            """);
+
+        DictionaryLookupResult result = service.lookup("abate");
+
+        assertEquals(LookupOutcome.FOUND, result.outcome());
+        DictionaryEntry verb = result.entries().get(0);
+        assertEquals("/əˈbeɪt/", verb.phonetic(), "from phonetics when there is no phonetic");
+        assertEquals(List.of("wane", "subside", "diminish"), verb.synonyms());
+        assertEquals(List.of("intensify"), verb.antonyms());
+        assertEquals("https://api.dictionaryapi.dev/media/pronunciations/en/abate-us.mp3", verb.audioUrl(),
+            "the American recording when there are several");
+        DictionaryEntry noun = result.entries().get(1);
+        assertEquals(List.of(), noun.synonyms());
+        assertEquals(verb.audioUrl(), noun.audioUrl(), "the recording is the word's");
+        assertEquals(new WordExtras(List.of("wane", "subside", "diminish"), List.of("intensify"), verb.audioUrl()),
+            WordExtras.of("abate", result.entries()));
     }
 
     @Test
@@ -131,15 +216,15 @@ class PublicOnlineDictionaryServiceTest {
         DictionaryLookupResult result = service.lookup("Lucid");
 
         assertEquals(LookupOutcome.FOUND, result.outcome());
-        assertEquals(List.of("/dictapi/Lucid", "/wiki/Lucid", "/wiki/lucid"), server.paths());
+        assertEquals(Set.of("/dictapi/Lucid", "/wiki/Lucid", "/wiki/lucid"), Set.copyOf(server.paths()));
     }
 
     @Test
     void aPhraseIsSentAsOneEncodedPathSegment() {
         service.lookup("give up");
 
-        assertEquals(List.of("/dictapi/give%20up", "/wiki/give_up"),
-            server.requests().stream().map(StubHttpServer.Request::rawPath).toList());
+        assertEquals(Set.of("/dictapi/give%20up", "/wiki/give_up"),
+            server.requests().stream().map(StubHttpServer.Request::rawPath).collect(Collectors.toSet()));
     }
 
     @Test
@@ -177,7 +262,7 @@ class PublicOnlineDictionaryServiceTest {
     }
 
     @Test
-    void anInterruptedLookupDoesNotGoOnToWiktionary() {
+    void anInterruptedLookupAsksNothing() {
         server.answer("/dictapi/lucid", 200, LUCID);
         Thread.currentThread().interrupt();
         DictionaryLookupResult result;
@@ -188,7 +273,30 @@ class PublicOnlineDictionaryServiceTest {
         }
 
         assertEquals(LookupOutcome.INTERRUPTED, result.outcome());
-        assertTrue(server.paths().stream().noneMatch(path -> path.startsWith("/wiki/")), server.paths().toString());
+        assertEquals(List.of(), server.paths());
+    }
+
+    @Test
+    void interruptingAWaitingLookupStopsItAndKeepsTheFlag() throws Exception {
+        server.answer("/dictapi/lucid", StubHttpServer.Answer.json(200, LUCID).after(Duration.ofSeconds(4)));
+        server.answer("/wiki/lucid", StubHttpServer.Answer.json(200, "{}").after(Duration.ofSeconds(4)));
+        PublicOnlineDictionaryService slow = new PublicOnlineDictionaryService(StubHttpServer.client(),
+            server.uri("/dictapi/"), server.uri("/wiki/"), Duration.ofSeconds(5));
+        AtomicReference<DictionaryLookupResult> result = new AtomicReference<>();
+        AtomicBoolean keptFlag = new AtomicBoolean();
+        Thread lookup = new Thread(() -> {
+            result.set(slow.lookup("lucid"));
+            keptFlag.set(Thread.currentThread().isInterrupted());
+        });
+        lookup.start();
+        server.awaitRequest();
+
+        lookup.interrupt();
+        lookup.join(2000);
+
+        assertFalse(lookup.isAlive(), "the lookup stopped waiting");
+        assertEquals(LookupOutcome.INTERRUPTED, result.get().outcome());
+        assertTrue(keptFlag.get(), "the interrupt flag must be kept");
     }
 
     @Test

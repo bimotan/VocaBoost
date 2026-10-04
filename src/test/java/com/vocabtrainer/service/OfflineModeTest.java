@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -74,7 +75,8 @@ class OfflineModeTest {
 
     @Test
     void offlineTheDictionariesAskNoServerButTheLocalOnesAndTheCacheStillAnswer() {
-        server.answer("/dictapi/quokka", 200, QUOKKA);
+        // dictionaryapi.dev answers a little later, so the Wiktionary request asked with it has surely arrived.
+        server.answer("/dictapi/quokka", StubHttpServer.Answer.json(200, QUOKKA).after(Duration.ofMillis(300)));
         DictionaryService chain = DictionaryServiceFactory.compose(new LocalDictionaryService(),
             new HttpDictionaryService(server.uri("/api").toString(), "key", StubHttpServer.client()),
             new PublicOnlineDictionaryService(StubHttpServer.client(), server.uri("/dictapi/"), server.uri("/wiki/"),
@@ -83,7 +85,8 @@ class OfflineModeTest {
         // Online, the public dictionary's answer is cached (the configured API does not have the word).
         assertTrue(chain.lookup("quokka").success());
         int onlineRequests = server.requests().size();
-        assertEquals(2, onlineRequests, "the configured API, then dictionaryapi.dev: " + server.paths());
+        assertEquals(Set.of("/api", "/dictapi/quokka", "/wiki/quokka"), Set.copyOf(server.paths()),
+            "the configured API, then dictionaryapi.dev and Wiktionary together");
 
         settings.saveOfflineMode(true);
         DictionaryLookupResult unknown = chain.lookup("petrichor");

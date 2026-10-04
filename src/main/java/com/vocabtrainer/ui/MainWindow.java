@@ -5,6 +5,7 @@ import com.vocabtrainer.service.DisplaySettings;
 import com.vocabtrainer.service.LanguageSettings;
 import com.vocabtrainer.service.ReviewSettings;
 import com.vocabtrainer.service.SchedulingSettings;
+import com.vocabtrainer.service.UncheckedWordsService;
 import com.vocabtrainer.ui.dashboard.DashboardView;
 import com.vocabtrainer.ui.decks.DecksView;
 import com.vocabtrainer.ui.importing.AddImportView;
@@ -20,6 +21,7 @@ import javafx.stage.Screen;
 
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.Objects;
 
 /**
  * The main window: the deck header above one tab per area. Each tab is its own view class; this
@@ -31,6 +33,7 @@ public class MainWindow {
     private final AppServices services;
     private final Dialogs dialogs;
     private final Locale systemLocale;
+    private AudioPlayer audioPlayer = new JavaFxAudioPlayer();
 
     /**
      * The main window on {@code services}; {@code dialogs} shows every modal dialog and file chooser.
@@ -41,6 +44,11 @@ public class MainWindow {
         this.services = services;
         this.dialogs = dialogs;
         this.systemLocale = systemLocale;
+    }
+
+    /** Plays pronunciation recordings with {@code player} instead of JavaFX Media; call before {@link #createScene}. */
+    public void useAudioPlayer(AudioPlayer player) {
+        this.audioPlayer = Objects.requireNonNull(player, "player");
     }
 
     public Scene createScene() {
@@ -62,7 +70,7 @@ public class MainWindow {
         DecksView decksView = new DecksView(context, services.deckService(), services.statsService(),
             services.ecdictTagDecks());
         ReviewView review = new ReviewView(context, services.reviewService(), services.goalService(), configured,
-            services.clock());
+            services.settingsService(), services.wordExtras(), audioPlayer, services.clock());
         AddImportView addImport = new AddImportView(context, services.wordRepository(), services.validationService(),
             services.importExportService(), services.settingsService(), configured);
         StatisticsView statistics = new StatisticsView(context, services.statsService(), services.goalService(),
@@ -70,7 +78,9 @@ public class MainWindow {
             () -> services.reviewScheduler().options().desiredRetention());
         WordListView wordList = new WordListView(context, services.wordRepository(), services.reviewLogRepository(),
             services.validationService(), services.clock(), services.reviewScheduler()::studyDay,
-            services.clozeMaker());
+            services.clozeMaker(), services.wordExtras(), audioPlayer,
+            new UncheckedWordsService(services.wordRepository(), configured::dictionary,
+                services.settingsService()::isOfflineMode));
         SettingsView settings = new SettingsView(context, services.settingsService(),
             new SchedulingSettings(services.settingsService(), services.reviewScheduler()),
             new ReviewSettings(services.settingsService()), services.goalService().settings(),

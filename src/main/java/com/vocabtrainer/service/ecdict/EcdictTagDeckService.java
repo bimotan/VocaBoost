@@ -9,6 +9,7 @@ import com.vocabtrainer.repository.EcdictRepository;
 import com.vocabtrainer.repository.TransactionRunner;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.DeckService;
+import com.vocabtrainer.service.InOtherDecks;
 import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.util.ErrorMessages;
@@ -21,8 +22,10 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
@@ -41,6 +44,12 @@ import static com.vocabtrainer.util.Messages.tr;
  * limit adds the next words. Words without a Chinese
  * meaning or whose spelling the app does not accept ("a.m.") are skipped. Adding words earns no XP
  * and counts no new words.
+ *
+ * <p>A word another active deck already has is added with ECDICT's details, with that deck's meaning,
+ * part of speech, example and phonetic, or not at all, as the request says ({@link InOtherDecks});
+ * {@link #countInOtherDecks} tells beforehand how many words that concerns. A skipped word does not
+ * count towards the limit. Which words those are, and the details copied, is settled before the first
+ * batch is written.
  *
  * <p>The words are written in batches of {@value #BATCH_SIZE}, each in a short transaction of its own
  * (the first one also creates a new deck), with a short pause between them: a rating or another write
@@ -111,11 +120,25 @@ public class EcdictTagDeckService {
     /**
      * What to build.
      *
-     * @param deckName the deck to create, or the active deck to fill
-     * @param limit    the most words to add; 0 for every word of the tag
+     * @param deckName     the deck to create, or the active deck to fill
+     * @param limit        the most words to add; 0 for every word of the tag
+     * @param inOtherDecks what to do with a word another active deck has; null reads as
+     *                     {@link InOtherDecks#KEEP_IMPORTED}
      */
-    public record Request(Tag tag, String deckName, int limit, EcdictRepository.TagOrder order) {
+    public record Request(Tag tag, String deckName, int limit, EcdictRepository.TagOrder order,
+                          InOtherDecks inOtherDecks) {
+        /** Words other decks have are added with ECDICT's details. */
+        public Request(Tag tag, String deckName, int limit, EcdictRepository.TagOrder order) {
+            this(tag, deckName, limit, order, InOtherDecks.KEEP_IMPORTED);
+        }
+
+        /** This request with {@code choice} for the words other decks have. */
+        public Request with(InOtherDecks choice) {
+            return new Request(tag, deckName, limit, order, choice);
+        }
+
         public Request {
+            inOtherDecks = inOtherDecks == null ? InOtherDecks.KEEP_IMPORTED : inOtherDecks;
             if (tag == null || order == null) {
                 throw new IllegalArgumentException(tr("ecdict.deck.error.tagOrder"));
             }
@@ -132,7 +155,7 @@ public class EcdictTagDeckService {
      * What was built.
      *
      * @param deck          the deck created or filled; null when no deck was created because there was
-     *                      no word to add to it
+     *                      no word to add to it (or the build stopped before the first batch)
      * @param created       whether the deck was created; false when an active deck was filled
      * @param added         words added to the deck
      * @param alreadyInDeck tagged words the deck already had, which were skipped
@@ -140,14 +163,38 @@ public class EcdictTagDeckService {
      * @param tagged        words ECDICT tags with the exam
      * @param canceled      whether the build was canceled before every word was added; the words added
      *                      until then stay
+     * @param inOtherDecks  words to add that another active deck has, which the build adds with their
+     *                      details copied, adds as ECDICT has them, or skips, as {@code choice} says
+     * @param choice        what was done with those words; null reads as {@link InOtherDecks#KEEP_IMPORTED}
      */
     public record Result(Deck deck, boolean created, int added, int alreadyInDeck, int skipped, int tagged,
-                         boolean canceled) {
-        public Result(Deck deck, boolean created, int added, int alreadyInDeck, int skipped, int tagged) {
-            this(deck, created, added, alreadyInDeck, skipped, tagged, false);
+                         boolean canceled, int inOtherDecks, InOtherDecks choice) {
+        public Result {
+            choice = choice == null ? InOtherDecks.KEEP_IMPORTED : choice;
         }
 
-        /** For example "Added 7,504 GRE words to GRE (ECDICT) (new deck). 12 already in the deck." */
+        /** A build that ran to the end and found no word another deck has. */
+        public Result(Deck deck, boolean created, int added, int alreadyInDeck, int skipped, int tagged) {
+            this(deck, created, added, alreadyInDeck, skipped, tagged, false, 0, InOtherDecks.KEEP_IMPORTED);
+        }
+
+        /** A build, canceled or not, that found no word another deck has. */
+        public Result(Deck deck, boolean created, int added, int alreadyInDeck, int skipped, int tagged,
+                      boolean canceled) {
+            this(deck, created, added, alreadyInDeck, skipped, tagged, canceled, 0, InOtherDecks.KEEP_IMPORTED);
+        }
+
+        /** A build that ran to the end. */
+        public Result(Deck deck, boolean created, int added, int alreadyInDeck, int skipped, int tagged,
+                      int inOtherDecks, InOtherDecks choice) {
+            this(deck, created, added, alreadyInDeck, skipped, tagged, false, inOtherDecks, choice);
+        }
+
+        /**
+         * For example "Added 7,504 GRE words to GRE (ECDICT) (new deck). 12 already in the deck. 3 skipped:
+         * already in other decks."; a canceled build says only how many words it added before it stopped,
+         * since the counts of the words it left out were made for the whole deck.
+         */
         public String toDisplayText(Tag tag) {
             if (canceled) {
                 return deck == null || added == 0 ? tr("ecdict.deck.canceled")
@@ -162,6 +209,11 @@ public class EcdictTagDeckService {
             }
             if (skipped > 0) {
                 text.add(tr("ecdict.deck.skipped", skipped));
+            }
+            if (inOtherDecks > 0 && choice == InOtherDecks.COPY_DETAILS) {
+                text.add(tr("ecdict.deck.inOtherDecks.copied", inOtherDecks));
+            } else if (inOtherDecks > 0 && choice == InOtherDecks.SKIP) {
+                text.add(tr("ecdict.deck.inOtherDecks.skipped", inOtherDecks));
             }
             if (tagged == 0) {
                 text.add(tr("ecdict.deck.noTagged", tag.code()));
@@ -233,6 +285,35 @@ public class EcdictTagDeckService {
     }
 
     /**
+     * The words a build of {@code request} would add (by its limit, as if words other decks have were
+     * kept) that another active deck already has: how many, and those decks' ids, oldest first.
+     */
+    public record OtherDecks(int words, List<Long> deckIds) {
+        public OtherDecks {
+            deckIds = List.copyOf(deckIds);
+        }
+    }
+
+    /** See {@link OtherDecks}; reads ECDICT and the decks, writes nothing. */
+    public OtherDecks countInOtherDecks(Request request) {
+        if (!isAvailable()) {
+            throw new IllegalStateException(tr("ecdict.error.notImported"));
+        }
+        try {
+            List<EcdictRow> rows = ecdict.findByTag(request.tag().code(), request.order());
+            Optional<Deck> existing = deckService.findActiveDeck(request.deckName());
+            long deckId = existing.map(Deck::getId).orElse(0L);
+            List<WordCard> words = select(request.with(InOtherDecks.KEEP_IMPORTED), rows, existing, Map.of()).words();
+            Map<String, WordCard> elsewhere = wordRepository.findFirstInOtherDecks(
+                words.stream().map(word -> word.getEnglish().toLowerCase(Locale.ROOT)).toList(), deckId);
+            return new OtherDecks(elsewhere.size(),
+                new TreeSet<>(elsewhere.values().stream().map(WordCard::getDeckId).toList()).stream().toList());
+        } catch (SQLException e) {
+            throw new IllegalStateException(tr("ecdict.error.read", ErrorMessages.rootMessage(e)), e);
+        }
+    }
+
+    /**
      * Creates or fills the deck; see the class comment.
      *
      * @param progress  called from the calling thread as ECDICT is read and words are added
@@ -253,7 +334,7 @@ public class EcdictTagDeckService {
             throw new IllegalStateException(tr("ecdict.error.read", ErrorMessages.rootMessage(e)), e);
         }
         if (isCancelled(cancelled)) {
-            return new Result(null, false, 0, 0, 0, rows.size(), true);
+            return new Result(null, false, 0, 0, 0, rows.size(), true, 0, request.inOtherDecks());
         }
         Plan plan;
         try {
@@ -261,9 +342,11 @@ public class EcdictTagDeckService {
         } catch (SQLException e) {
             throw new IllegalStateException(tr("ecdict.deck.error.add", ErrorMessages.rootMessage(e)), e);
         }
-        if (plan.existing() == null && plan.words().isEmpty()) {
+        Selection selection = plan.selection();
+        if (plan.existing() == null && selection.words().isEmpty()) {
             // An empty deck would only be in the way.
-            return new Result(null, false, 0, plan.alreadyInDeck(), plan.skipped(), rows.size());
+            return new Result(null, false, 0, selection.alreadyInDeck(), selection.skipped(), rows.size(),
+                selection.inOtherDecks(), request.inOtherDecks());
         }
         Result result = write(request, plan, rows.size(), progress, cancelled);
         if (result.deck() != null) {
@@ -274,19 +357,42 @@ public class EcdictTagDeckService {
     }
 
     /**
-     * The words to add, in order, and what was left out.
+     * The words to add, in order, and what was left out or changed.
      *
      * @param existing the active deck to fill; null when the deck is to be created
      */
-    private record Plan(Deck existing, List<WordCard> words, int alreadyInDeck, int skipped) {
+    private record Plan(Deck existing, Selection selection) {
     }
 
+    /**
+     * Finds the deck to fill and, unless ECDICT's details are kept, the words other active decks have,
+     * and selects the words to add; writes nothing.
+     */
     private Plan plan(Request request, List<EcdictRow> rows) throws SQLException {
         Optional<Deck> existing = deckService.findActiveDeck(request.deckName());
+        Map<String, WordCard> elsewhere = request.inOtherDecks() == InOtherDecks.KEEP_IMPORTED ? Map.of()
+            : wordRepository.findFirstInOtherDecks(rows.stream()
+                .map(row -> validationService.normalizeEnglish(row.word()).toLowerCase(Locale.ROOT)).toList(),
+                existing.map(Deck::getId).orElse(0L));
+        return new Plan(existing.orElse(null), select(request, rows, existing, elsewhere));
+    }
+
+    /** The words a build adds, and the tagged words it leaves out or changes and why. */
+    private record Selection(List<WordCard> words, int alreadyInDeck, int skipped, int inOtherDecks) {
+    }
+
+    /**
+     * The words to add, in ECDICT's order up to the limit: not those the deck has, nor those the app
+     * cannot take; a word in {@code elsewhere} (another deck's word by lower-case English) is copied
+     * from it or left out, as the request says.
+     */
+    private Selection select(Request request, List<EcdictRow> rows, Optional<Deck> existing,
+                             Map<String, WordCard> elsewhere) throws SQLException {
         Set<String> inDeck = existing.isPresent() ? wordRepository.findEnglishKeys(existing.get().getId()) : new HashSet<>();
         List<WordCard> words = new ArrayList<>();
         int alreadyInDeck = 0;
         int skipped = 0;
+        int inOtherDecks = 0;
         for (EcdictRow row : rows) {
             if (request.limit() > 0 && words.size() >= request.limit()) {
                 break;
@@ -302,24 +408,34 @@ public class EcdictTagDeckService {
                 skipped++;
                 continue;
             }
+            WordCard other = elsewhere.get(key);
+            if (other != null) {
+                inOtherDecks++;
+                if (request.inOtherDecks() == InOtherDecks.SKIP) {
+                    continue;
+                }
+                InOtherDecks.copyDetails(other, word.get());
+            }
             inDeck.add(word.get().getEnglish().toLowerCase(Locale.ROOT));
             words.add(word.get());
         }
-        return new Plan(existing.orElse(null), words, alreadyInDeck, skipped);
+        return new Selection(words, alreadyInDeck, skipped, inOtherDecks);
     }
 
     /** Writes the planned words batch by batch; see the class comment. */
     private Result write(Request request, Plan plan, int tagged, Consumer<Progress> progress,
                          BooleanSupplier cancelled) {
-        List<WordCard> words = plan.words();
+        Selection selection = plan.selection();
+        List<WordCard> words = selection.words();
         Deck deck = plan.existing();
         boolean create = deck == null;
         int added = 0;
-        int alreadyInDeck = plan.alreadyInDeck();
+        int alreadyInDeck = selection.alreadyInDeck();
         progress.accept(new Progress(0, words.size()));
         for (int start = 0; start < words.size(); start += BATCH_SIZE) {
             if ((start > 0 && !pause()) || isCancelled(cancelled)) {
-                return new Result(deck, create && deck != null, added, alreadyInDeck, plan.skipped(), tagged, true);
+                return new Result(deck, create && deck != null, added, alreadyInDeck, selection.skipped(), tagged,
+                    true, selection.inOtherDecks(), request.inOtherDecks());
             }
             List<WordCard> batch = words.subList(start, Math.min(words.size(), start + BATCH_SIZE));
             Deck target = deck;
@@ -332,7 +448,8 @@ public class EcdictTagDeckService {
                     return new Batch(into, wordRepository.insertAllIfAbsent(batch));
                 });
             } catch (SQLException | RuntimeException e) {
-                Result partial = new Result(deck, create && deck != null, added, alreadyInDeck, plan.skipped(), tagged);
+                Result partial = new Result(deck, create && deck != null, added, alreadyInDeck, selection.skipped(),
+                    tagged, selection.inOtherDecks(), request.inOtherDecks());
                 // A deck name the deck service refuses explains itself.
                 String message = e instanceof IllegalArgumentException ? e.getMessage()
                     : tr("ecdict.deck.error.add", ErrorMessages.rootMessage(e));
@@ -343,7 +460,8 @@ public class EcdictTagDeckService {
             alreadyInDeck += batch.size() - written.inserted();
             progress.accept(new Progress(start + batch.size(), words.size()));
         }
-        return new Result(deck, create, added, alreadyInDeck, plan.skipped(), tagged);
+        return new Result(deck, create, added, alreadyInDeck, selection.skipped(), tagged,
+            selection.inOtherDecks(), request.inOtherDecks());
     }
 
     /** One batch as written: into which deck, and how many of its words were not in the deck yet. */

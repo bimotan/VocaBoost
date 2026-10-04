@@ -33,6 +33,7 @@ import com.vocabtrainer.service.SettingsService;
 import com.vocabtrainer.service.SimilarityService;
 import com.vocabtrainer.service.StarterImportService;
 import com.vocabtrainer.service.StatsService;
+import com.vocabtrainer.service.WordExtrasService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.service.cloze.ClozeMaker;
 import com.vocabtrainer.service.ecdict.EcdictImportService;
@@ -62,6 +63,8 @@ import java.util.logging.Logger;
  * @param clozeMaker         finds a word and its inflected forms (also those ECDICT lists) in its example
  * @param dictionaryServices builds the dictionary service (offline dictionaries, then online ones,
  *                           which are skipped while offline mode is on)
+ * @param wordExtras         a word's synonyms, antonyms and pronunciation recording from the public
+ *                           online dictionaries, cached with their lookups
  * @param aiServices         builds the AI service from the saved settings; called again when the
  *                           AI settings change
  * @param startupDeck        the deck the main window opens on
@@ -96,6 +99,7 @@ public record AppServices(
     LocalDictionaryService localDictionary,
     ClozeMaker clozeMaker,
     Supplier<DictionaryService> dictionaryServices,
+    WordExtrasService wordExtras,
     Supplier<AiService> aiServices,
     Deck startupDeck,
     ReviewScheduler reviewScheduler,
@@ -148,6 +152,8 @@ public record AppServices(
         /** Null for the app's chain, whose online dictionaries follow the saved offline mode. */
         private BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> dictionaryServiceFactory;
         private BiFunction<AiCacheRepository, SettingsService, AiService> aiServiceFactory = AiServiceFactory::create;
+        /** Null for the app's, which asks the public online dictionaries unless the dictionary chain is replaced. */
+        private BiFunction<DictionaryCacheRepository, SettingsService, WordExtrasService> wordExtrasFactory;
         private Clock clock = Clock.systemDefaultZone();
 
         private Builder(Path databasePath) {
@@ -167,6 +173,15 @@ public record AppServices(
         /** Replaces the dictionary chain; {@code factory} gets the lookup cache and the offline dictionaries. */
         public Builder dictionaryService(BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> factory) {
             this.dictionaryServiceFactory = Objects.requireNonNull(factory);
+            return this;
+        }
+
+        /**
+         * Replaces where synonyms, antonyms and recordings come from. Without it a replaced dictionary
+         * chain also means they are only read from the cache, so a test never reaches the network.
+         */
+        public Builder wordExtras(BiFunction<DictionaryCacheRepository, SettingsService, WordExtrasService> factory) {
+            this.wordExtrasFactory = Objects.requireNonNull(factory);
             return this;
         }
 
@@ -259,6 +274,13 @@ public record AppServices(
                 goalRepository, achievementRepository, databaseManager, validationService, clock, cardStates,
                 snapshots);
             BiFunction<AiCacheRepository, SettingsService, AiService> aiFactory = aiServiceFactory;
+            WordExtrasService wordExtras = wordExtrasFactory != null
+                ? wordExtrasFactory.apply(dictionaryCacheRepository, settingsService)
+                : new WordExtrasService(dictionaryCacheRepository,
+                    dictionaryServiceFactory != null ? null
+                        : DictionaryServiceFactory.publicOnline(dictionaryCacheRepository, settingsService::isOfflineMode,
+                            clock),
+                    settingsService::isOfflineMode, DictionaryServiceFactory.audioClient());
 
             return new AppServices(
                 databaseManager,
@@ -284,6 +306,7 @@ public record AppServices(
                 localDictionary,
                 clozeMaker,
                 () -> dictionaryFactory.apply(dictionaryCacheRepository, localDictionary),
+                wordExtras,
                 () -> aiFactory.apply(aiCacheRepository, settingsService),
                 startupDeck,
                 reviewScheduler,

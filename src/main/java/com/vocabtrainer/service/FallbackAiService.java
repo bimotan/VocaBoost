@@ -7,14 +7,22 @@ import java.util.logging.Logger;
 
 import static com.vocabtrainer.util.Messages.tr;
 
+/**
+ * The provider's explanation, or the mock text when the provider is not configured, answers with
+ * nothing or fails. A failure is noted under the mock text with its category ({@link AiFailure}), such
+ * as a refused key or a timeout, and a pointer to the AI settings' Test button; the details, which
+ * may quote the provider's error message, go to the log only.
+ */
 public class FallbackAiService implements AiService {
     private static final Logger LOGGER = Logger.getLogger(FallbackAiService.class.getName());
+
     /**
-     * Appended to the mock text when the provider fails, in the app's language. Older versions cached
-     * the English text in {@code ai_cache}; {@code SchemaMigrations} deletes such rows.
+     * Appended to the mock text when the provider fails, in the app's language: what went wrong and
+     * where to look further. Older versions cached their English note in {@code ai_cache};
+     * {@code SchemaMigrations} deletes such rows.
      */
-    static String providerFailedNote() {
-        return tr("ai.note.providerFailed");
+    static String providerFailedNote(Throwable error) {
+        return tr("ai.note.providerFailed", AiFailure.reason(error));
     }
 
     private final AiService primary;
@@ -56,8 +64,8 @@ public class FallbackAiService implements AiService {
             }
             return fallback.explain(request);
         } catch (RuntimeException e) {
-            LOGGER.log(Level.WARNING, "AI provider failed; using the mock explanation instead", e);
-            return fallback.explain(request) + System.lineSeparator() + providerFailedNote();
+            LOGGER.log(Level.WARNING, "AI provider failed (" + AiFailure.of(e) + "); using the mock explanation instead", e);
+            return fallback.explain(request) + System.lineSeparator() + providerFailedNote(e);
         }
     }
 }

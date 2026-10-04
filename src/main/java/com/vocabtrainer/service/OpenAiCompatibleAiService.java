@@ -93,10 +93,16 @@ public class OpenAiCompatibleAiService implements AiService {
         return explain(ExplanationRequest.of(word));
     }
 
+    /**
+     * Asks the provider to explain {@code request}.
+     *
+     * @throws AiRequestException when no answer comes, with its category ({@link AiFailure}) and HTTP
+     *                            status; the message never contains the API key
+     */
     @Override
     public String explain(ExplanationRequest request) {
         if (!isAvailable()) {
-            throw new IllegalStateException(tr("ai.error.notConfigured"));
+            throw new AiRequestException(AiFailure.SETTINGS, tr("ai.error.notConfigured"));
         }
         URI endpoint;
         try {
@@ -105,8 +111,9 @@ public class OpenAiCompatibleAiService implements AiService {
             ApiKeys.requireSendable(apiKey, tr("ai.name.apiKey"));
         } catch (IllegalArgumentException e) {
             // Our own messages, which never contain the key.
-            throw new IllegalStateException(e.getMessage(), e);
+            throw new AiRequestException(AiFailure.SETTINGS, e.getMessage(), e);
         }
+        HttpResponse<String> response;
         try {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("model", model);
@@ -123,27 +130,36 @@ public class OpenAiCompatibleAiService implements AiService {
                 .header("Authorization", "Bearer " + apiKey)
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
                 .build();
-            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                String detail = errorDetail(response.body());
-                String status = String.valueOf(response.statusCode());
-                throw new IllegalStateException(detail.isBlank() ? tr("ai.error.http", status)
-                    : tr("ai.error.httpDetail", status, detail));
-            }
-            String content = parseContent(response.body());
-            if (content.isBlank()) {
-                throw new IllegalStateException(tr("ai.error.empty"));
-            }
-            return AiExplanation.parse(content).text();
+            response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
         } catch (IOException e) {
-            throw new IllegalStateException(tr("ai.error.network"), e);
+            AiFailure failure = AiFailure.of(e);
+            throw new AiRequestException(failure, failure == AiFailure.TIMEOUT ? tr("ai.error.timeout")
+                : tr("ai.error.network"), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException(tr("ai.error.interrupted"), e);
+            throw new AiRequestException(AiFailure.INTERRUPTED, tr("ai.error.interrupted"), e);
         } catch (IllegalArgumentException e) {
             // The JDK quotes an invalid header value, which would be the key, so the cause is dropped.
-            throw new IllegalStateException(tr("ai.error.buildRequest", ApiKeys.redact(e.getMessage(), apiKey)));
+            throw new AiRequestException(AiFailure.SETTINGS,
+                tr("ai.error.buildRequest", ApiKeys.redact(e.getMessage(), apiKey)));
         }
+        int status = response.statusCode();
+        if (status < 200 || status >= 300) {
+            String detail = errorDetail(response.body());
+            String code = String.valueOf(status);
+            throw new AiRequestException(AiFailure.ofStatus(status), status,
+                detail.isBlank() ? tr("ai.error.http", code) : tr("ai.error.httpDetail", code, detail), null);
+        }
+        String content;
+        try {
+            content = parseContent(response.body());
+        } catch (IOException e) {
+            throw new AiRequestException(AiFailure.BAD_RESPONSE, tr("ai.error.unreadable"), e);
+        }
+        if (content.isBlank()) {
+            throw new AiRequestException(AiFailure.BAD_RESPONSE, tr("ai.error.empty"));
+        }
+        return AiExplanation.parse(content).text();
     }
 
     /**

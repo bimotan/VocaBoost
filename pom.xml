@@ -35,6 +35,12 @@
             <artifactId>javafx-controls</artifactId>
             <version>${javafx.version}</version>
         </dependency>
+        <!-- Plays the pronunciation recordings of dictionaryapi.dev (mp3, which javax.sound cannot play). -->
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-media</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
         <!-- Logs through java.util.logging (the app's log file) when SLF4J is not on the class path. -->
         <dependency>
             <groupId>org.xerial</groupId>

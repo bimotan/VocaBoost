@@ -6,17 +6,23 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.ReviewLogRepository;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.ReviewScheduler;
+import com.vocabtrainer.service.UncheckedWordsService;
+import com.vocabtrainer.service.WordExtrasService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.service.cloze.ClozeMaker;
 import com.vocabtrainer.service.scheduling.StudyDay;
+import com.vocabtrainer.ui.AudioPlayer;
 import com.vocabtrainer.ui.CellValue;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.Formats;
 import com.vocabtrainer.ui.LazyRefresh;
+import com.vocabtrainer.ui.UiAsync;
+import com.vocabtrainer.ui.UiErrors;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import com.vocabtrainer.ui.WordDetails;
 import com.vocabtrainer.ui.WordDetailsCard;
+import com.vocabtrainer.ui.WordExtrasController;
 import com.vocabtrainer.util.DateTimeUtil;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.property.SimpleStringProperty;
@@ -25,14 +31,17 @@ import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
+import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.Tab;
@@ -60,6 +69,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -72,7 +83,12 @@ import static com.vocabtrainer.util.Messages.tr;
  * active deck's ("All decks", which adds a Deck column); edit one, and suspend, unsuspend or delete
  * the selected ones. Deleting asks first, says that the words' review history goes with them and
  * offers to suspend them instead. Under the table a card shows the selected word's phonetic, part
- * of speech, example (the word in bold), note and tags.
+ * of speech, example (the word in bold), note and tags, and the synonyms, antonyms and recording an
+ * online dictionary gave for it. The table's menu button (top right) hides and shows columns.
+ *
+ * <p>"Re-check unchecked words" verifies the words added while the dictionaries could not be asked
+ * (tag UNCHECKED) again, in the current deck or, with "All decks", every active deck, in the
+ * background with a progress bar and Cancel ({@link UncheckedWordsService}).
  *
  * <p>The words are read from the database when the tab is refreshed (a data change, a deck switch,
  * "All decks" or Refresh); the search box and the filters only filter those rows in memory, and the
@@ -89,6 +105,7 @@ public final class WordListView {
     private final WordEditDialog editDialog;
     private final ClozeMaker examples;
     private final WordDetailsCard detailsCard = new WordDetailsCard("wordDetails");
+    private final WordExtrasController extrasController;
     /** Every word read from the database; the table shows the ones that pass the filters, sorted. */
     private final ObservableList<WordCard> words = FXCollections.observableArrayList();
     private final FilteredList<WordCard> filteredWords = new FilteredList<>(words);
@@ -102,12 +119,22 @@ public final class WordListView {
     private final CheckBox allDecksToggle = new CheckBox(tr("words.allDecks"));
     private final Button suspendButton = new Button(tr("review.suspend"));
     private final Button unsuspendButton = new Button(tr("words.unsuspend"));
+    private final Button recheckButton = new Button(tr("recheck.button"));
+    private final ProgressBar recheckProgress = new ProgressBar(0);
+    private final Button cancelRecheckButton = new Button(tr("common.cancel"));
+    private final Label recheckStatus = new Label();
+    private final UncheckedWordsService uncheckedWords;
     private final Tab tab;
     private final LazyRefresh lazy;
     /** The cell values computed since the last refresh, by row; see {@link #computeOnce}. */
     private final List<Map<?, ?>> cellValueCaches = new ArrayList<>();
     /** The names of the active decks, for the Deck column. */
     private Map<Long, String> deckNames = Map.of();
+    /**
+     * Whether the list holds every active deck's words. Not read from the Deck column, which the
+     * table's menu button can hide or show.
+     */
+    private boolean listedAllDecks;
     /** When the words were read: the time their status and memory are shown for. */
     private LocalDateTime listedAt = LocalDateTime.MIN;
     /** The end of the study day the words were read on, which decides which ones are due today. */
@@ -116,12 +143,16 @@ public final class WordListView {
     /**
      * {@code clock} and {@code studyDays} (the scheduler's study day, read at every refresh) decide which
      * words are due today and how strong their memory is; {@code examples} finds the word in its example
-     * sentence.
+     * sentence; {@code wordExtras} and {@code audioPlayer} give the selected word's synonyms and recording;
+     * {@code uncheckedWords} checks the unchecked words again.
      */
     public WordListView(ViewContext context, WordRepository wordRepository, ReviewLogRepository reviewLogRepository,
                         WordValidationService validationService, Clock clock, Supplier<StudyDay> studyDays,
-                        ClozeMaker examples) {
+                        ClozeMaker examples, WordExtrasService wordExtras, AudioPlayer audioPlayer,
+                        UncheckedWordsService uncheckedWords) {
         this.context = context;
+        this.uncheckedWords = uncheckedWords;
+        this.extrasController = new WordExtrasController(detailsCard, context, wordExtras, audioPlayer);
         this.examples = examples;
         this.wordRepository = wordRepository;
         this.reviewLogRepository = reviewLogRepository;
@@ -134,6 +165,10 @@ public final class WordListView {
             if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
                 || changes.contains(DataChange.REVIEW_SETTINGS) || changes.contains(DataChange.DECKS)) {
                 lazy.markStale();
+            }
+            if (changes.contains(DataChange.SETTINGS)) {
+                // Offline mode may have changed.
+                extrasController.settingsChanged();
             }
         });
         context.decks().onSwitch(deck -> lazy.markStale());
@@ -203,7 +238,7 @@ public final class WordListView {
         Label selectionHint = Widgets.styled(new Label(tr("words.selectionHint")), "muted-text");
         HBox actions = new HBox(10, editButton, suspendButton, unsuspendButton, deleteButton, selectionHint);
         actions.setAlignment(Pos.CENTER_LEFT);
-        VBox controls = new VBox(8, filters, actions);
+        VBox controls = new VBox(8, filters, actions, recheckRow());
 
         wordTable.setId("wordTable");
         wordTable.setAccessibleText(tr("words.table.accessible"));
@@ -223,6 +258,12 @@ public final class WordListView {
         TableColumn<WordCard, String> chineseCol = new TableColumn<>(tr("import.mapping.column.chinese"));
         chineseCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getChinese()));
         chineseCol.setComparator(collated());
+        TableColumn<WordCard, String> phoneticCol = new TableColumn<>(tr("word.phonetic"));
+        phoneticCol.setCellValueFactory(data -> new SimpleStringProperty(clean(data.getValue().getPhonetic())));
+        phoneticCol.setComparator(collated());
+        TableColumn<WordCard, String> posCol = new TableColumn<>(tr("import.mapping.column.pos"));
+        posCol.setCellValueFactory(data -> new SimpleStringProperty(clean(data.getValue().getPartOfSpeech())));
+        posCol.setComparator(collated());
         TableColumn<WordCard, CellValue<LocalDateTime>> nextCol = new TableColumn<>(tr("words.column.next"));
         computeOnce(nextCol, word -> new CellValue<>(word.getNextReviewAt(),
             DateTimeUtil.toDisplay(word.getNextReviewAt())));
@@ -239,7 +280,9 @@ public final class WordListView {
         deckCol.setComparator(collated());
         deckCol.setVisible(false);
         wordTable.getColumns().addAll(List.of(englishCol, chineseCol, nextCol, intervalCol, strengthCol, statusCol,
-            deckCol));
+            phoneticCol, posCol, deckCol));
+        // Columns can be hidden and shown again from the menu button at the top right of the table.
+        wordTable.setTableMenuButtonVisible(true);
 
         wordTable.getSelectionModel().selectedItemProperty().addListener(
             (observable, oldWord, word) -> showDetails(word));
@@ -249,6 +292,95 @@ public final class WordListView {
         content.setPadding(new Insets(24));
         VBox.setVgrow(wordTable, Priority.ALWAYS);
         return content;
+    }
+
+    /** "Re-check unchecked words", with its progress bar, Cancel and the result. */
+    private HBox recheckRow() {
+        recheckButton.setId("recheckUncheckedButton");
+        recheckButton.setTooltip(new Tooltip(tr("recheck.button.tooltip")));
+        recheckButton.setMinWidth(Region.USE_PREF_SIZE);
+        recheckButton.setOnAction(event -> recheckUncheckedWords());
+        recheckProgress.setId("recheckProgressBar");
+        recheckProgress.setPrefWidth(160);
+        cancelRecheckButton.setId("cancelRecheckButton");
+        recheckStatus.setId("recheckStatusLabel");
+        recheckStatus.setWrapText(true);
+        recheckStatus.setMinHeight(Region.USE_PREF_SIZE);
+        for (Node node : List.of(recheckProgress, cancelRecheckButton)) {
+            node.managedProperty().bind(node.visibleProperty());
+            node.setVisible(false);
+        }
+        HBox row = new HBox(10, recheckButton, recheckProgress, cancelRecheckButton, recheckStatus);
+        row.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(recheckStatus, Priority.ALWAYS);
+        return row;
+    }
+
+    /**
+     * Checks the unchecked words of the decks the list shows in the background; each word is saved
+     * as it is checked, so Cancel keeps what was done. The decks are captured when it starts.
+     */
+    private void recheckUncheckedWords() {
+        List<Long> deckIds = allDecksToggle.isSelected()
+            ? context.decks().activeDecks().stream().map(Deck::getId).toList()
+            : List.of(context.decks().currentId());
+        String decks = allDecksToggle.isSelected() ? tr("recheck.allDecks") : context.decks().current().getName();
+        AtomicBoolean cancelRequested = new AtomicBoolean();
+        String startMessage = tr("recheck.running", decks);
+        Task<UncheckedWordsService.Result> task = new Task<>() {
+            @Override
+            protected UncheckedWordsService.Result call() {
+                return uncheckedWords.recheck(deckIds, progress -> {
+                    updateProgress(progress.checked(), Math.max(1, progress.total()));
+                    updateMessage(progress.toDisplayText());
+                }, cancelRequested::get);
+            }
+        };
+        recheckStatus.setText(startMessage);
+        task.messageProperty().addListener((observable, oldMessage, progressMessage) -> {
+            if (!cancelRequested.get() && progressMessage != null && !progressMessage.isBlank()) {
+                recheckStatus.setText(startMessage + " " + progressMessage);
+            }
+        });
+        recheckProgress.progressProperty().bind(task.progressProperty());
+        cancelRecheckButton.setDisable(false);
+        cancelRecheckButton.setOnAction(event -> {
+            cancelRequested.set(true);
+            cancelRecheckButton.setDisable(true);
+            recheckStatus.setText(tr("common.canceling"));
+        });
+        showRecheckProgress(true);
+        task.setOnSucceeded(event -> {
+            showRecheckProgress(false);
+            recheckStatus.setText(task.getValue().toDisplayText());
+            if (task.getValue().verified() + task.getValue().unverified() > 0) {
+                context.errors().guard(tr("common.refreshFailed"), () -> context.changes().publish(DataChange.WORDS));
+            }
+        });
+        task.setOnFailed(event -> {
+            showRecheckProgress(false);
+            // Words checked before a cancel or a failure are saved.
+            context.errors().guard(tr("common.refreshFailed"), () -> context.changes().publish(DataChange.WORDS));
+            Throwable error = task.getException();
+            if (error instanceof CancellationException) {
+                recheckStatus.setText(tr("recheck.canceled"));
+                return;
+            }
+            context.errors().logFailure(tr("recheck.failed"), error);
+            recheckStatus.setText(tr("task.failed", UiErrors.rootMessage(error)));
+        });
+        Thread thread = new Thread(task, UiAsync.THREAD_NAME);
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void showRecheckProgress(boolean running) {
+        if (!running) {
+            recheckProgress.progressProperty().unbind();
+        }
+        recheckProgress.setVisible(running);
+        cancelRecheckButton.setVisible(running);
+        recheckButton.setDisable(running);
     }
 
     /**
@@ -269,6 +401,10 @@ public final class WordListView {
         Map<WordCard, V> computed = new IdentityHashMap<>();
         cellValueCaches.add(computed);
         column.setCellValueFactory(data -> new ReadOnlyObjectWrapper<>(computed.computeIfAbsent(data.getValue(), value)));
+    }
+
+    private static String clean(String value) {
+        return value == null ? "" : value.strip();
     }
 
     /** New words first ("-"), then the words in their learning steps, then by review interval. */
@@ -307,6 +443,7 @@ public final class WordListView {
             WordCard selected = wordTable.getSelectionModel().getSelectedItem();
             Set<Long> selectedIds = selectedIds();
             deckNames = names;
+            listedAllDecks = allDecks;
             deckCol.setVisible(allDecks);
             listedAt = LocalDateTime.now(clock);
             listedDayEnd = studyDays.get().end(listedAt);
@@ -380,11 +517,12 @@ public final class WordListView {
     }
 
     private void showDetails(WordCard word) {
+        extrasController.show(word == null ? null : word.getEnglish());
         if (word == null) {
             detailsCard.showMessage(tr("words.details.select"));
             return;
         }
-        String deck = deckCol.isVisible() ? "   (" + deckNames.getOrDefault(word.getDeckId(), "") + ")" : "";
+        String deck = listedAllDecks ? "   (" + deckNames.getOrDefault(word.getDeckId(), "") + ")" : "";
         detailsCard.show(word.getEnglish() + "   " + word.getChinese() + deck,
             WordDetails.of(word, examples.highlight(word.getExampleSentence(), word.getEnglish())),
             tr("words.details.empty"));
@@ -473,7 +611,7 @@ public final class WordListView {
     private String deleteHeader(List<WordCard> selected) {
         boolean one = selected.size() == 1;
         Object what = one ? selected.get(0).getEnglish() : selected.size();
-        if (!deckCol.isVisible()) {
+        if (!listedAllDecks) {
             return one ? tr("words.delete.header.one", what) : tr("words.delete.header.many", what);
         }
         Set<Long> decks = selected.stream().map(WordCard::getDeckId).collect(Collectors.toSet());

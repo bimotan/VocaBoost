@@ -9,6 +9,7 @@ import com.vocabtrainer.domain.ReviewSessionSummary;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.service.AiService;
 import com.vocabtrainer.service.AnswerGrade;
+import com.vocabtrainer.service.AutoExplain;
 import com.vocabtrainer.service.ExplanationRequest;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ReviewAnswer;
@@ -41,6 +42,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.LongFunction;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -65,12 +67,22 @@ import static com.vocabtrainer.util.Messages.tr;
  * answer counts as, at most Good. When the check capped the ratings the user may override it ("I was
  * right"): the rating they choose then counts as it is, and the log says so.
  *
+ * Once an answer is checked, the AI provider explains it by itself when {@link AutoExplain} says so
+ * (after every answer, only after a mistake, or never); otherwise {@link #explain()} asks for it.
+ * Without a provider, or while offline mode is on, the offline mock text is shown at once, since
+ * nothing is sent.
+ *
  * Before the answer is submitted, only what cannot give the answer away is shown with the question
  * ({@link #hint()}); once it is checked, the card's phonetic, part of speech, example (the word in
  * bold), note and tags are shown too ({@link #revealedDetails()}).
  *
  * In Cloze mode the question is the card's example with the word blanked out and the hint its
  * Chinese meaning; the session progress counts the cards skipped for want of a usable example.
+ *
+ * With "All decks" the session reviews every active deck ({@link ReviewService#ALL_DECKS}): each
+ * card names its deck and keeps that deck's schedule, new-cards-per-day limit and goals, a deck
+ * switch in the header does not interrupt the session, and a card of a deck archived meanwhile is
+ * replaced by the next one.
  *
  * A new card can be marked as already known instead of answered, and the card on screen can be
  * suspended. {@link #undo()} takes back the session's last rating, Already known or suspension, one
@@ -135,8 +147,17 @@ public final class ReviewSessionPresenter {
     private ExplanationRequest explanationRequest;
     private String checkedText = "";
     private boolean explanationLoading;
+    /** Whether the answered card's explanation was asked for, by itself or with Explain. */
+    private boolean explanationAsked;
+    /** When a checked answer is explained without Explain; read at every answer. */
+    private Supplier<AutoExplain> autoExplain = () -> AutoExplain.ALWAYS;
 
+    /** The deck the header shows; the session's deck unless every deck is reviewed. */
     private long deckId;
+    /** Whether the session reviews every active deck. */
+    private boolean allDecks;
+    /** Names a deck on the card in All decks; "" for one it does not know. */
+    private LongFunction<String> deckNames = id -> "";
     private ReviewMode mode;
     /** Whether the user chose Custom, so a custom size of 10, 20 or 50 still shows as Custom. */
     private boolean customSizeChosen;
@@ -203,6 +224,20 @@ public final class ReviewSessionPresenter {
         this.failures = failures;
         this.clock = clock;
         this.mode = reviewService.sessionMode();
+        this.allDecks = reviewService.sessionAllDecks();
+    }
+
+    /** How a card in All decks names its deck. */
+    public void setDeckNames(LongFunction<String> deckNames) {
+        this.deckNames = Objects.requireNonNull(deckNames, "deckNames");
+    }
+
+    /**
+     * Sets when a checked answer is explained by the AI provider without Explain; asked at every
+     * answer, so a changed setting applies to the next one. {@link AutoExplain#ALWAYS} until set.
+     */
+    public void setAutoExplain(Supplier<AutoExplain> autoExplain) {
+        this.autoExplain = Objects.requireNonNull(autoExplain, "autoExplain");
     }
 
     /** Called after every change of the state or of a displayed text. */
@@ -236,10 +271,51 @@ public final class ReviewSessionPresenter {
 
     // ---- Input ----
 
-    /** Starts a new session on {@code deckId}, with the current mode and size, and shows its first card. */
+    /**
+     * The header shows {@code deckId} now: a new session on it starts, with the current mode and size,
+     * and shows its first card. While every deck is reviewed, the running session goes on instead.
+     */
     public void showDeck(long deckId) {
         this.deckId = deckId;
+        if (allDecks && state != State.IDLE) {
+            newCardsPerDay = reviewService.newCardsPerDay(deckId);
+            decksChanged();
+            return;
+        }
         resetSession();
+    }
+
+    /**
+     * Reviews every active deck at once, or only the header's deck again: a new session starts, and
+     * the next launch starts the same way.
+     */
+    public void setAllDecks(boolean all) {
+        if (all == allDecks) {
+            return;
+        }
+        allDecks = all;
+        resetSession();
+    }
+
+    /**
+     * Decks were created, renamed, archived or restored. While every deck is reviewed, a card of a
+     * deck that is no longer active is replaced by the next card, a session that ran out of cards
+     * looks again, and the card shows its deck's new name.
+     */
+    public void decksChanged() {
+        if (!allDecks) {
+            return;
+        }
+        boolean cardGone = card != null && !reviewService.isReviewable(card.getId());
+        try {
+            if (cardGone || state == State.IDLE || state == State.COMPLETE) {
+                loadNextCard();
+            } else if (card != null) {
+                details = describe(card, LocalDateTime.now(clock));
+            }
+        } finally {
+            fireChanged();
+        }
     }
 
     /** Starts a new session in {@code mode}, with the current size; the next launch starts in this mode. */
@@ -257,7 +333,7 @@ public final class ReviewSessionPresenter {
         try {
             clearLeechNotice();
             newCardsPerDay = reviewService.newCardsPerDay(deckId);
-            reviewService.startSession(deckId, mode, reviewService.sessionTarget());
+            reviewService.startSession(sessionDeck(), mode, reviewService.sessionTarget());
             loadNextCard();
         } finally {
             fireChanged();
@@ -274,7 +350,7 @@ public final class ReviewSessionPresenter {
         try {
             clearLeechNotice();
             customSizeChosen = CUSTOM.equals(sizeChoice);
-            reviewService.startSession(deckId, mode, target);
+            reviewService.startSession(sessionDeck(), mode, target);
             loadNextCard();
         } finally {
             fireChanged();
@@ -381,7 +457,7 @@ public final class ReviewSessionPresenter {
 
     /**
      * Checks the typed answer, shows the correct one and the interval each rating would give, and
-     * asks the AI service for an explanation.
+     * asks the AI service for an explanation when {@link AutoExplain} says so.
      */
     public void submit() {
         if (state != State.AWAITING_ANSWER) {
@@ -398,7 +474,8 @@ public final class ReviewSessionPresenter {
 
     /**
      * Shows the checked answer of {@code answered}, with {@code note} above it when not empty, and the
-     * interval each rating would give, and asks the AI service for an explanation.
+     * interval each rating would give, and asks the AI service for an explanation when it is to be
+     * explained by itself ({@link #explainsAutomatically}).
      */
     private void showChecked(WordCard answered, ReviewAnswer answerChecked, String note) {
         checked = answerChecked;
@@ -412,7 +489,42 @@ public final class ReviewSessionPresenter {
             + verdict(checked);
         state = State.ANSWERED;
         explanationRequest = new ExplanationRequest(answered, checked.userAnswer(), checked.direction());
-        requestExplanation(false);
+        explanationAsked = false;
+        if (explainsAutomatically(checked)) {
+            requestExplanation(false);
+        } else {
+            result = checkedText;
+            fireChanged();
+        }
+    }
+
+    /**
+     * Whether {@code answer} is explained without Explain: always by the offline mock text, which
+     * sends nothing; by the AI provider when {@link AutoExplain} says so, a mistake being an answer
+     * whose rating the check capped. A setting that cannot be read counts as its default.
+     */
+    private boolean explainsAutomatically(ReviewAnswer answer) {
+        if (!usesAiProvider()) {
+            return true;
+        }
+        AutoExplain choice;
+        try {
+            choice = autoExplain.get();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Cannot read when to explain answers; using the default", e);
+            choice = AutoExplain.DEFAULT;
+        }
+        return (choice == null ? AutoExplain.DEFAULT : choice).explainsAutomatically(answer.canOverride());
+    }
+
+    /**
+     * Asks the AI provider for the answered card's explanation, which was not asked for by itself.
+     * Does nothing unless {@link #canExplain()}.
+     */
+    public void explain() {
+        if (canExplain()) {
+            requestExplanation(false);
+        }
     }
 
     /**
@@ -799,6 +911,19 @@ public final class ReviewSessionPresenter {
         return newCardsPerDay;
     }
 
+    /** Whether the session reviews every active deck. */
+    public boolean isAllDecks() {
+        return allDecks;
+    }
+
+    /**
+     * Whether the current deck's new-cards-per-day limit can be set here: not while every deck is
+     * reviewed, where each deck's own limit applies.
+     */
+    public boolean canChangeNewCardsPerDay() {
+        return !allDecks;
+    }
+
     /** The card on screen; empty when the session is complete or nothing is loaded. */
     public Optional<WordCard> card() {
         return Optional.ofNullable(card);
@@ -938,11 +1063,28 @@ public final class ReviewSessionPresenter {
     }
 
     /**
-     * Whether the explanation of the answered card can be asked for again: it has arrived, and an AI
-     * provider is configured and may be used.
+     * Whether the explanation of the answered card can be asked for again: it was asked for and has
+     * arrived, and an AI provider is configured and may be used.
      */
     public boolean canRegenerateExplanation() {
-        return canRate() && explanationRequest != null && !explanationLoading && usesAiProvider();
+        return canRate() && explanationRequest != null && explanationAsked && !explanationLoading
+            && usesAiProvider();
+    }
+
+    /**
+     * Whether the answered card's explanation can be asked for with Explain: an AI provider may be
+     * used and it was not asked for yet.
+     */
+    public boolean canExplain() {
+        return canRate() && explanationRequest != null && !explanationAsked && usesAiProvider();
+    }
+
+    /**
+     * Whether Explain is offered rather than Regenerate: an AI provider may be used, and the card on
+     * screen has no explanation asked for (also before its answer is checked).
+     */
+    public boolean offersExplain() {
+        return !explanationAsked && usesAiProvider();
     }
 
     /** Whether explanations come from an AI provider, rather than the offline mock text. */
@@ -1042,7 +1184,7 @@ public final class ReviewSessionPresenter {
         clearCard();
         Optional<WordCard> next;
         try {
-            next = reviewService.nextWord(deckId, mode);
+            next = reviewService.nextWord(sessionDeck(), mode);
         } catch (RuntimeException e) {
             state = State.IDLE;
             throw e;
@@ -1055,6 +1197,7 @@ public final class ReviewSessionPresenter {
         explanations.invalidate();
         explanationRequest = null;
         explanationLoading = false;
+        explanationAsked = false;
         card = null;
         answer = "";
         result = "";
@@ -1092,7 +1235,18 @@ public final class ReviewSessionPresenter {
             default -> card.getEnglish();
         };
         hint = hint(card, questionMode);
-        details = Labels.mode(questionMode) + " | " + cardDetails(card, now);
+        details = describe(card, now);
+    }
+
+    /** The deck the session reviews: the header's, or {@link ReviewService#ALL_DECKS}. */
+    private long sessionDeck() {
+        return allDecks ? ReviewService.ALL_DECKS : deckId;
+    }
+
+    /** The question direction, in All decks the card's deck, and the card's schedule. */
+    private String describe(WordCard shown, LocalDateTime now) {
+        String deck = allDecks ? tr("review.details.deck", deckNames.apply(shown.getDeckId())) + " | " : "";
+        return Labels.mode(questionMode) + " | " + deck + cardDetails(shown, now);
     }
 
     /**
@@ -1236,7 +1390,7 @@ public final class ReviewSessionPresenter {
     }
 
     private void showCompletion(ReviewSessionSummary session) {
-        DailyGoalProgress progress = goalService.getTodayProgress(deckId);
+        String today = allDecks ? todayInEveryDeck() : today(goalService.getTodayProgress(deckId));
         state = State.COMPLETE;
         question = tr("review.complete");
         boolean targetReached = session.sessionGoal() > 0 && session.cardsReviewed() >= session.sessionGoal();
@@ -1246,15 +1400,36 @@ public final class ReviewSessionPresenter {
         completionMetrics = (session.sessionGoal() > 0
                 ? tr("review.complete.done", session.cardsReviewed(), session.sessionGoal(), accuracy, session.xpEarned())
                 : tr("review.complete.doneAllDue", session.cardsReviewed(), accuracy, session.xpEarned()))
-            + System.lineSeparator() + tr("review.complete.today", progress.reviewedCount(), progress.reviewGoal(),
-                progress.newWordsCount(), progress.newWordGoal())
+            + System.lineSeparator() + today
             + System.lineSeparator() + tr("format.achievements.unlocked",
                 Formats.achievementNames(session.unlockedAchievements()));
         int skipped = reviewService.clozeSkippedCount();
         if (skipped > 0) {
             completionMetrics += System.lineSeparator() + tr("review.complete.skipped", skippedWithoutExamples(skipped));
         }
-        result = mode == ReviewMode.WEAK_WORDS ? tr("review.complete.nextWeakWords") : tr("review.complete.next");
+        result = mode == ReviewMode.WEAK_WORDS ? tr("review.complete.nextWeakWords")
+            : allDecks ? tr("review.complete.nextAllDecks") : tr("review.complete.next");
+    }
+
+    private static String today(DailyGoalProgress progress) {
+        return tr("review.complete.today", progress.reviewedCount(), progress.reviewGoal(), progress.newWordsCount(),
+            progress.newWordGoal());
+    }
+
+    /** Today's reviews and new words of every active deck and their goals, added up. */
+    private String todayInEveryDeck() {
+        int reviewed = 0;
+        int reviewGoal = 0;
+        int newWords = 0;
+        int newWordGoal = 0;
+        for (long deck : reviewService.sessionDecks(ReviewService.ALL_DECKS)) {
+            DailyGoalProgress progress = goalService.getTodayProgress(deck);
+            reviewed += progress.reviewedCount();
+            reviewGoal += progress.reviewGoal();
+            newWords += progress.newWordsCount();
+            newWordGoal += progress.newWordGoal();
+        }
+        return tr("review.complete.todayAllDecks", reviewed, reviewGoal, newWords, newWordGoal);
     }
 
     /** Why a session that did not reach its target has no card left. */
@@ -1266,6 +1441,10 @@ public final class ReviewSessionPresenter {
         if (skipped > 0) {
             return tr("review.nothingLeft.cloze", skippedWithoutExamples(skipped));
         }
+        if (allDecks) {
+            return reviewService.newCardsHeldBackByLimit(ReviewService.ALL_DECKS)
+                ? tr("review.nothingLeft.newLimitAllDecks") : tr("review.nothingLeft");
+        }
         ReviewQueueCounts queue = reviewService.queueCounts(deckId);
         if (queue.newCardsDue() > 0 && queue.newAvailableToday() == 0) {
             return tr("review.nothingLeft.newLimit", queue.newCardsPerDay());
@@ -1273,13 +1452,14 @@ public final class ReviewSessionPresenter {
         return tr("review.nothingLeft");
     }
 
-    /** Shows the checked answer with "loading" and asks the AI service for its explanation. */
+    /** Shows the checked answer with "loading" and asks the AI service for its explanation, or again for it. */
     private void requestExplanation(boolean regenerate) {
         String separator = System.lineSeparator() + System.lineSeparator();
         String shownAnswer = checkedText;
         ExplanationRequest request = explanationRequest;
         result = shownAnswer + separator + tr("review.explanation.loading");
         explanationLoading = true;
+        explanationAsked = true;
         long ticket = explanations.next();
         AiService ai = aiServices.get();
         fireChanged();

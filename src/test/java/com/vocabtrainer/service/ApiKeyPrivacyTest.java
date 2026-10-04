@@ -82,7 +82,7 @@ class ApiKeyPrivacyTest {
         }
 
         assertEquals("Bearer " + KEY, server.requests().get(0).headers().getFirst("Authorization"));
-        assertTrue(shown.endsWith("AI provider failed; mock fallback was used."), shown);
+        assertTrue(shown.contains("AI provider failed: the API key was refused (HTTP 401). "), shown);
         assertFalse(shown.contains(SECRET), shown);
         assertTrue(records.stream().anyMatch(record -> LogCapture.allText(record).contains("HTTP 401")),
             "the provider's refusal is logged");
@@ -120,7 +120,8 @@ class ApiKeyPrivacyTest {
         for (Throwable cause = error; cause != null; cause = cause.getCause()) {
             assertFalse(String.valueOf(cause.getMessage()).contains(SECRET), cause.toString());
         }
-        assertTrue(shown.endsWith("AI provider failed; mock fallback was used."), shown);
+        assertTrue(shown.contains("AI provider failed: the saved AI settings cannot be used. "), shown);
+        assertFalse(shown.contains(SECRET), shown);
         assertEquals(1, records.size());
         assertFalse(LogCapture.allText(records.get(0)).contains(SECRET), LogCapture.allText(records.get(0)));
         assertEquals(List.of(), server.requests(), "nothing was sent");

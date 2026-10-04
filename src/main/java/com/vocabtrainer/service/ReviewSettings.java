@@ -11,7 +11,8 @@ import static com.vocabtrainer.util.Messages.tr;
  * The review settings kept in the {@code settings} table: the new-cards-per-day limit of every deck
  * ({@code review.newCardsPerDay}, set on the Settings tab), a deck's own limit
  * ({@code review.newCardsPerDay.<deckId>}, set on the Review tab) and the session size and mode the
- * user last chose ({@code review.sessionSize}, {@code review.mode}), which the Review tab starts with.
+ * user last chose ({@code review.sessionSize}, {@code review.mode}), and whether the Review tab
+ * reviews every deck at once ({@code review.allDecks}), which the Review tab starts with.
  * A saved value that is not valid is logged and the default is used.
  */
 public class ReviewSettings {
@@ -27,6 +28,7 @@ public class ReviewSettings {
     static final String NEW_CARDS_PER_DAY_KEY_PREFIX = DEFAULT_NEW_CARDS_PER_DAY_KEY + ".";
     static final String SESSION_SIZE_KEY = "review.sessionSize";
     static final String MODE_KEY = "review.mode";
+    static final String ALL_DECKS_KEY = "review.allDecks";
 
     private static final Logger LOGGER = Logger.getLogger(ReviewSettings.class.getName());
 
@@ -113,6 +115,15 @@ public class ReviewSettings {
 
     public void saveMode(ReviewMode mode) {
         settings.save(MODE_KEY, (mode == null ? ReviewMode.EN_TO_ZH : mode).name());
+    }
+
+    /** Whether the Review tab last reviewed every active deck at once; false until chosen. */
+    public boolean allDecks() {
+        return settings.get(ALL_DECKS_KEY).map(value -> value.trim().equalsIgnoreCase("true")).orElse(false);
+    }
+
+    public void saveAllDecks(boolean allDecks) {
+        settings.save(ALL_DECKS_KEY, String.valueOf(allDecks));
     }
 
     private int intSetting(String key, int defaultValue, int min, int max) {

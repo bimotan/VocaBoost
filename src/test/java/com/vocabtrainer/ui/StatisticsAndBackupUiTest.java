@@ -154,6 +154,8 @@ class StatisticsAndBackupUiTest extends MainWindowUiTest {
         selectTab("addImportTab");
         dialogs.openFile(words);
         click("chooseImportFileButton");
+        // Every word is in the starter deck too; the file's fields are kept.
+        dialogs.chooseButton("Keep the imported");
         click("importCsvButton");
         waitForBackgroundTasks();
 

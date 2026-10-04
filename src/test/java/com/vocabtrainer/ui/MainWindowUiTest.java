@@ -110,6 +110,8 @@ abstract class MainWindowUiTest {
     final ScriptedDialogs dialogs = new ScriptedDialogs();
     /** The clock of the services and the views; a test may set it or move it forward. */
     final TestClock clock = new TestClock(TEST_START);
+    /** Takes the place of JavaFX Media, so no test plays sound. */
+    final RecordingAudioPlayer audio = new RecordingAudioPlayer();
     AppServices services;
     private Stage stage;
     private String testName;
@@ -146,7 +148,9 @@ abstract class MainWindowUiTest {
             }
             VocabTrainerApp.useLanguage(new LanguageSettings(services.settingsService()).language(), systemLocale);
             stage = new Stage();
-            VocabTrainerApp.showMainWindow(stage, services.createMainWindow(dialogs, systemLocale));
+            MainWindow window = services.createMainWindow(dialogs, systemLocale);
+            window.useAudioPlayer(audio);
+            VocabTrainerApp.showMainWindow(stage, window);
         });
     }
 
@@ -609,10 +613,17 @@ abstract class MainWindowUiTest {
      * the FX thread.
      */
     void waitForBackgroundTasks() {
-        Fx.waitUntil("background tasks finish", () -> Thread.getAllStackTraces().keySet().stream()
-            .noneMatch(thread -> thread.isAlive() && BACKGROUND_THREAD_NAME.equals(thread.getName())));
-        // A finished task has already queued its result handler; run it.
-        Fx.flush();
+        do {
+            Fx.waitUntil("background tasks finish", () -> !backgroundTaskRunning());
+            // A finished task has already queued its result handler; run it. The handler may start the
+            // next step in the background (a preview before an import), which is waited for too.
+            Fx.flush();
+        } while (backgroundTaskRunning());
+    }
+
+    private static boolean backgroundTaskRunning() {
+        return Thread.getAllStackTraces().keySet().stream()
+            .anyMatch(thread -> thread.isAlive() && BACKGROUND_THREAD_NAME.equals(thread.getName()));
     }
 
     /** Saves the window as target/ui-snapshots/{TestClass}-{test}-{name}.png for manual inspection. */

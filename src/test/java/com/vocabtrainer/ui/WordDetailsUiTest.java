@@ -37,7 +37,9 @@ class WordDetailsUiTest extends MainWindowUiTest {
     static final String PHONETIC = "/əˈbeɪt/";
     static final String NOTE = "English definition: become less intense. 也作“减轻”。";
     static final String TAGS = "gre; starter; weather";
-    static final String EXAMPLE = "The storm began to abate.";
+    /** The bundled starter example of abate. */
+    static final String EXAMPLE = "By late afternoon the storm had begun to abate, and the stranded hikers finally felt"
+        + " safe enough to descend.";
 
     private WordCard abate;
 
@@ -76,7 +78,8 @@ class WordDetailsUiTest extends MainWindowUiTest {
         }
 
         selectMode(ReviewMode.CLOZE);
-        assertEquals("The storm began to _____.", text("reviewWordLabel"));
+        assertEquals("By late afternoon the storm had begun to _____, and the stranded hikers finally felt safe enough"
+            + " to descend.", text("reviewWordLabel"));
         assertEquals("Hint: 减弱; 减少 · verb", text("reviewHintLabel"));
         assertNoEnglishShown("Cloze", "abate");
         snapshot("cloze");

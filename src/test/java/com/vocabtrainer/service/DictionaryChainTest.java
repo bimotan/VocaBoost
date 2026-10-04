@@ -174,7 +174,7 @@ class DictionaryChainTest {
         online.found("petrichor", "", "the smell of rain");
 
         DictionaryLookupResult result;
-        try (LogCapture log = LogCapture.of(CachingDictionaryService.class)) {
+        try (LogCapture log = LogCapture.of(DictionaryCachePayload.class)) {
             result = chain(null).lookup("petrichor");
             assertEquals(1, log.warnings().size());
         }

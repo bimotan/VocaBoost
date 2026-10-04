@@ -157,6 +157,8 @@ class WordListImportUiTest extends MainWindowUiTest {
         showImportSection();
         snapshot("word-list");
 
+        // lucid and prodigal are starter words too: the import asks, and keeps the meanings it finds.
+        dialogs.chooseButton("Keep the imported");
         click("importCsvButton");
         waitForBackgroundTasks();
 

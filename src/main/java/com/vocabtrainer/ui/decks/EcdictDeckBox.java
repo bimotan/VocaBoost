@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.repository.EcdictRepository;
 import com.vocabtrainer.service.ecdict.EcdictTagDeckService;
 import com.vocabtrainer.ui.DataChange;
+import com.vocabtrainer.ui.OtherDecksQuestion;
 import com.vocabtrainer.ui.UiAsync;
 import com.vocabtrainer.ui.UiErrors;
 import com.vocabtrainer.ui.ViewContext;
@@ -74,8 +75,33 @@ final class EcdictDeckBox {
             context.errors().showInfo(tr("ecdict.deck.needsEcdict"));
             return;
         }
-        Optional<EcdictTagDeckService.Request> request = askRequest();
-        request.ifPresent(this::build);
+        askRequest().ifPresent(this::askAboutOtherDecksThenBuild);
+    }
+
+    /**
+     * Counts in the background the words to add that other active decks already have; when there are
+     * some, the user chooses whether to copy their meanings, keep ECDICT's or skip them, or cancels.
+     */
+    private void askAboutOtherDecksThenBuild(EcdictTagDeckService.Request request) {
+        context.async().run(
+            () -> service.countInOtherDecks(request),
+            counted -> {
+                if (counted.words() == 0) {
+                    build(request);
+                    return;
+                }
+                OtherDecksQuestion.ask(context, counted.words(), counted.deckIds()).ifPresentOrElse(
+                    choice -> build(request.with(choice)),
+                    () -> statusLabel.setText(tr("ecdict.deck.canceled")));
+            },
+            error -> {
+                context.errors().logFailure(tr("ecdict.deck.failed"), error);
+                statusLabel.setText(tr("ecdict.deck.failedNothingAdded", UiErrors.rootMessage(error)));
+            },
+            statusLabel,
+            tr("ecdict.deck.counting"),
+            createButton
+        );
     }
 
     /** The form; empty when it is cancelled or not filled in correctly (which is shown). */

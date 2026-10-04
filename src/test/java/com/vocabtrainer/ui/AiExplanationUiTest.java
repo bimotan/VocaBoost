@@ -5,13 +5,17 @@ import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
+import com.vocabtrainer.service.AiFailure;
+import com.vocabtrainer.service.AiRequestException;
 import com.vocabtrainer.service.AiService;
+import com.vocabtrainer.service.AutoExplain;
 import com.vocabtrainer.service.CachingAiService;
 import com.vocabtrainer.service.ExplanationRequest;
 import com.vocabtrainer.service.FallbackAiService;
 import com.vocabtrainer.service.MockAiService;
 import org.junit.jupiter.api.Tag;
 import javafx.scene.control.ButtonBase;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.input.KeyCode;
 import org.junit.jupiter.api.Test;
 
@@ -71,36 +75,104 @@ class AiExplanationUiTest extends MainWindowUiTest {
     }
 
     @Test
-    void afterRegenerateTheKeyboardStaysOnTheSuggestedRating() throws Exception {
+    void aRightAnswerIsExplainedOnlyWithExplainAndTheKeyboardStaysOnTheSuggestedRating() throws Exception {
         selectTab("reviewTab");
         WordCard word = questionWord();
+        assertTrue(isVisible("explainButton"), "Explain is offered before the answer");
+        assertTrue(isDisabled("explainButton"), "but there is nothing to explain yet");
         // A right answer, so the suggested rating is Good rather than Again.
         type("answerField", correctAnswer(word));
         click("submitAnswerButton");
         waitForBackgroundTasks();
         assertEquals("rateGoodButton", focusOwnerId());
+        assertEquals(List.of(), provider.requests, "only a mistake is explained by itself");
+        assertFalse(text("reviewResultArea").contains("AI explanation"), text("reviewResultArea"));
+        assertTrue(isVisible("explainButton"));
+        assertFalse(isVisible("regenerateExplanationButton"));
+        snapshot("explain-offered");
 
         // A mouse click focuses the button, which is then disabled while the provider answers.
         provider.hold = new CountDownLatch(1);
         Fx.run(() -> {
-            ButtonBase button = find("regenerateExplanationButton", ButtonBase.class);
+            ButtonBase button = find("explainButton", ButtonBase.class);
             button.requestFocus();
             button.fire();
         });
         Fx.flush();
         try {
-            assertTrue(isDisabled("regenerateExplanationButton"), "disabled while the provider answers");
+            assertTrue(isDisabled("explainButton") || !isVisible("explainButton"), "not twice while the provider answers");
             assertEquals("rateGoodButton", focusOwnerId(), "Space must not land on Again");
         } finally {
             provider.hold.countDown();
         }
         waitForBackgroundTasks();
+        assertEquals(1, provider.requests.size());
+        assertTrue(text("reviewResultArea").endsWith("Explanation 1 of " + word.getEnglish() + " for "
+            + correctAnswer(word)), text("reviewResultArea"));
+        assertFalse(isVisible("explainButton"), "Regenerate takes its place");
+        assertTrue(isVisible("regenerateExplanationButton"));
+
+        click("regenerateExplanationButton");
+        waitForBackgroundTasks();
+        assertEquals(2, provider.requests.size());
+        assertEquals("rateGoodButton", focusOwnerId());
         pressKey(null, KeyCode.SPACE);
 
         List<ReviewLog> logs = services.reviewLogRepository().findByDeck(currentDeck().getId());
         assertEquals(1, logs.size());
         assertEquals(word.getId(), logs.get(0).getWordId());
         assertEquals(ReviewRating.GOOD, logs.get(0).getRating());
+    }
+
+    @Test
+    void theSettingsChooseWhenAnswersAreExplainedByThemselves() throws Exception {
+        selectTab("settingsTab");
+        assertEquals("Only after a mistake (the answer check counts it as Again or Hard, or caps its rating)",
+            shownValue("aiAutoExplainSelector"));
+        this.<AutoExplain>select("aiAutoExplainSelector", choice -> choice == AutoExplain.ALWAYS);
+        assertEquals(AutoExplain.ALWAYS, services.settingsService().getAutoExplain());
+        // The AI settings, near the end of the Settings tab.
+        Fx.run(() -> ((ScrollPane) tab("settingsTab").getContent()).setVvalue(1));
+        Fx.flush();
+        snapshot("settings");
+
+        selectTab("reviewTab");
+        type("answerField", correctAnswer(questionWord()));
+        click("submitAnswerButton");
+        waitForBackgroundTasks();
+        assertEquals(1, provider.requests.size(), "every answer is explained");
+
+        selectTab("settingsTab");
+        this.<AutoExplain>select("aiAutoExplainSelector", choice -> choice == AutoExplain.ON_DEMAND);
+        selectTab("reviewTab");
+        click("rateGoodButton");
+        type("answerField", "完全错误");
+        click("submitAnswerButton");
+        waitForBackgroundTasks();
+        assertEquals(1, provider.requests.size(), "not even a mistake is sent");
+        assertFalse(isDisabled("explainButton"));
+
+        click("explainButton");
+        waitForBackgroundTasks();
+        assertEquals(2, provider.requests.size());
+        assertEquals("完全错误", provider.requests.get(1).typedAnswer());
+    }
+
+    @Test
+    void aFailedRequestSaysWhyAndPointsToTheTestButton() {
+        provider.failure = new AiRequestException(AiFailure.AUTH, 401, "AI provider returned HTTP 401: Incorrect API key"
+            + " provided: sk-test-SECRET", null);
+        selectTab("reviewTab");
+        type("answerField", "完全错误");
+        click("submitAnswerButton");
+        waitForBackgroundTasks();
+
+        String shown = text("reviewResultArea");
+        assertTrue(shown.contains("Mock AI: "), shown);
+        assertTrue(shown.endsWith("AI provider failed: the API key was refused (HTTP 401). The offline mock explanation"
+            + " is shown instead; Settings → AI Explanation Provider → Test AI Explanation shows the details."), shown);
+        assertFalse(shown.contains("SECRET"), shown);
+        snapshot("failed");
     }
 
     @Test
@@ -147,6 +219,7 @@ class AiExplanationUiTest extends MainWindowUiTest {
 
         assertTrue(text("reviewResultArea").contains("Mock AI: "), text("reviewResultArea"));
         assertFalse(isVisible("regenerateExplanationButton"));
+        assertFalse(isVisible("explainButton"), "the mock text is shown at once; nothing to ask for");
     }
 
     @Test
@@ -174,6 +247,8 @@ class AiExplanationUiTest extends MainWindowUiTest {
         final List<ExplanationRequest> requests = new CopyOnWriteArrayList<>();
         /** When set, a request waits for it, like a slow network call. */
         volatile CountDownLatch hold;
+        /** When set, every request fails with it. */
+        volatile RuntimeException failure;
 
         @Override
         public boolean isAvailable() {
@@ -194,6 +269,9 @@ class AiExplanationUiTest extends MainWindowUiTest {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
+            }
+            if (failure != null) {
+                throw failure;
             }
             requests.add(request);
             return "Explanation " + requests.size() + " of " + request.word().getEnglish() + " for " + request.typedAnswer();

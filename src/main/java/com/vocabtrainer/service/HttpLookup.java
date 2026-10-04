@@ -147,7 +147,7 @@ final class HttpLookup {
     }
 
     /** "5" for five seconds, "0.3" for 300 milliseconds. */
-    private static String seconds(Duration duration) {
+    static String seconds(Duration duration) {
         return BigDecimal.valueOf(duration.toMillis()).movePointLeft(3).stripTrailingZeros().toPlainString();
     }
 

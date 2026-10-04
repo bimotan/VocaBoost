@@ -15,7 +15,16 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -29,6 +38,13 @@ import static com.vocabtrainer.util.Messages.tr;
  * a word in another language is not found, and neither is an entry that only says it is a
  * misspelling ("Misspelling of receive."). Wiktionary's definitions are HTML; their markup is
  * removed.
+ *
+ * <p>Both are asked at the same time, each with its own request timeout, and a lookup waits for them
+ * together at most {@link #DEADLINE}: the first in that order that has the word answers, so a slow
+ * or unreachable Wiktionary (often the case in mainland China) never delays a dictionaryapi.dev
+ * answer, and a slow dictionaryapi.dev delays a Wiktionary answer only until the deadline. A
+ * dictionary that has not answered by then counts as {@link LookupOutcome#TIMEOUT}; requests still
+ * running when the lookup ends are cancelled.
  */
 public class PublicOnlineDictionaryService implements DictionaryService {
     public static final URI DICTIONARY_API = URI.create("https://api.dictionaryapi.dev/api/v2/entries/en/");
@@ -36,7 +52,12 @@ public class PublicOnlineDictionaryService implements DictionaryService {
     public static final String DICTIONARY_API_SOURCE = "dictionaryapi.dev";
     public static final String WIKTIONARY_SOURCE = "Wiktionary";
 
+    /** How long a lookup waits for the online dictionaries together. */
+    public static final Duration DEADLINE = Duration.ofSeconds(6);
+
     private static final Logger LOGGER = Logger.getLogger(PublicOnlineDictionaryService.class.getName());
+    /** Runs the dictionaries' requests side by side; its threads never keep the app from quitting. */
+    private static final ExecutorService LOOKUPS = Executors.newCachedThreadPool(new LookupThreads());
     private static final int MAX_ENTRIES = 5;
     /** "Misspelling of receive.", also after usage labels such as "(nonstandard)" or "(proscribed, common)". */
     private static final Pattern MISSPELLING = Pattern.compile(
@@ -48,6 +69,7 @@ public class PublicOnlineDictionaryService implements DictionaryService {
     private final URI dictionaryApi;
     private final URI wiktionary;
     private final Duration timeout;
+    private final Duration deadline;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public PublicOnlineDictionaryService() {
@@ -64,10 +86,17 @@ public class PublicOnlineDictionaryService implements DictionaryService {
      * @param timeout       how long one request may take
      */
     public PublicOnlineDictionaryService(HttpClient httpClient, URI dictionaryApi, URI wiktionary, Duration timeout) {
+        this(httpClient, dictionaryApi, wiktionary, timeout, DEADLINE);
+    }
+
+    /** @param deadline how long a lookup waits for both dictionaries together, see the class comment */
+    public PublicOnlineDictionaryService(HttpClient httpClient, URI dictionaryApi, URI wiktionary, Duration timeout,
+                                         Duration deadline) {
         this.httpClient = httpClient;
         this.dictionaryApi = dictionaryApi;
         this.wiktionary = wiktionary;
         this.timeout = timeout;
+        this.deadline = deadline;
     }
 
     @Override
@@ -76,15 +105,79 @@ public class PublicOnlineDictionaryService implements DictionaryService {
         if (clean.isBlank()) {
             return DictionaryLookupResult.notFound(tr("dictionary.enterWord"));
         }
-        DictionaryLookupResult dictionaryApiResult = lookupDictionaryApi(clean);
-        if (dictionaryApiResult.success() || dictionaryApiResult.outcome() == LookupOutcome.INTERRUPTED) {
-            return dictionaryApiResult;
+        if (Thread.currentThread().isInterrupted()) {
+            return DictionaryLookupResult.interrupted();
         }
-        DictionaryLookupResult wiktionaryResult = lookupWiktionary(clean);
-        if (wiktionaryResult.success() || wiktionaryResult.outcome() == LookupOutcome.INTERRUPTED) {
-            return wiktionaryResult;
+        return askTogether(List.of(
+            new Source(DICTIONARY_API_SOURCE, () -> lookupDictionaryApi(clean)),
+            new Source(WIKTIONARY_SOURCE, () -> lookupWiktionary(clean))));
+    }
+
+    /** A dictionary as messages name it, and its lookup. */
+    private record Source(String name, Supplier<DictionaryLookupResult> lookup) {
+    }
+
+    /**
+     * Starts every source's lookup at once and takes, in the order of {@code sources}, the first
+     * that found the word by the deadline. When none did, the misses are combined
+     * ({@link CompositeDictionaryService#combine}), a source that did not answer in time being a
+     * {@link LookupOutcome#TIMEOUT}. An interrupt stops the wait and cancels every request.
+     */
+    private DictionaryLookupResult askTogether(List<Source> sources) {
+        long deadlineNanos = System.nanoTime() + deadline.toNanos();
+        List<Future<DictionaryLookupResult>> running = new ArrayList<>();
+        try {
+            for (Source source : sources) {
+                running.add(LOOKUPS.submit(() -> source.lookup().get()));
+            }
+            List<DictionaryLookupResult> misses = new ArrayList<>();
+            for (int index = 0; index < sources.size(); index++) {
+                DictionaryLookupResult result = await(running.get(index), sources.get(index).name(), deadlineNanos);
+                if (result.success() || result.outcome() == LookupOutcome.INTERRUPTED) {
+                    return result;
+                }
+                misses.add(result);
+            }
+            return CompositeDictionaryService.combine(misses);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return DictionaryLookupResult.interrupted();
+        } finally {
+            running.forEach(future -> future.cancel(true));
         }
-        return CompositeDictionaryService.combine(List.of(dictionaryApiResult, wiktionaryResult));
+    }
+
+    /** What {@code lookup} of {@code dictionary} gives by the deadline; a timeout when it is still running then. */
+    private DictionaryLookupResult await(Future<DictionaryLookupResult> lookup, String dictionary, long deadlineNanos)
+        throws InterruptedException {
+        try {
+            return lookup.get(Math.max(0, deadlineNanos - System.nanoTime()), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException e) {
+            LOGGER.warning(dictionary + " did not answer within the lookup's deadline of " + deadline);
+            return DictionaryLookupResult.unavailable(LookupOutcome.TIMEOUT,
+                tr("dictionary.http.timeout", dictionary, HttpLookup.seconds(deadline)));
+        } catch (ExecutionException e) {
+            // A lookup reports what went wrong in its result; anything thrown is a bug, passed on as before.
+            if (e.getCause() instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            if (e.getCause() instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException(e.getCause());
+        }
+    }
+
+    /** Daemon threads named after what they do, for thread dumps and logs. */
+    private static final class LookupThreads implements ThreadFactory {
+        private final AtomicInteger count = new AtomicInteger();
+
+        @Override
+        public Thread newThread(Runnable work) {
+            Thread thread = new Thread(work, "vocaboost-online-lookup-" + count.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        }
     }
 
     @Override
@@ -138,19 +231,33 @@ public class PublicOnlineDictionaryService implements DictionaryService {
         }
     }
 
+    /**
+     * Reads dictionaryapi.dev's entries: {@code [{"word", "phonetic", "phonetics": [{"text", "audio"}],
+     * "meanings": [{"partOfSpeech", "synonyms", "antonyms", "definitions": [{"definition", "example",
+     * "synonyms", "antonyms"}]}]}]}. Each definition is an entry with the synonyms and antonyms of its
+     * meaning and its own, and the word's recording (an American one when there are several).
+     */
     private DictionaryLookupResult parseDictionaryApi(String english, JsonNode root) {
         List<DictionaryEntry> entries = new ArrayList<>();
         // A word it does not know is HTTP 404; any other shape than an array of entries has none.
         JsonNode words = root.isArray() ? root : objectMapper.createArrayNode();
         for (JsonNode wordNode : words) {
             String phonetic = HttpLookup.text(wordNode, "phonetic");
+            if (phonetic.isEmpty()) {
+                phonetic = firstPhoneticText(wordNode.path("phonetics"));
+            }
+            String audio = recording(wordNode.path("phonetics"));
             for (JsonNode meaning : wordNode.path("meanings")) {
                 String pos = HttpLookup.text(meaning, "partOfSpeech");
+                List<String> meaningSynonyms = words(meaning.path("synonyms"));
+                List<String> meaningAntonyms = words(meaning.path("antonyms"));
                 for (JsonNode definitionNode : meaning.path("definitions")) {
                     String definition = HttpLookup.text(definitionNode, "definition");
                     if (!definition.isBlank() && entries.size() < MAX_ENTRIES) {
                         entries.add(new DictionaryEntry(english, "", pos, phonetic,
-                            HttpLookup.text(definitionNode, "example"), DICTIONARY_API_SOURCE, definition));
+                            HttpLookup.text(definitionNode, "example"), DICTIONARY_API_SOURCE, definition, "",
+                            joined(words(definitionNode.path("synonyms")), meaningSynonyms),
+                            joined(words(definitionNode.path("antonyms")), meaningAntonyms), audio));
                     }
                 }
             }
@@ -159,6 +266,50 @@ public class PublicOnlineDictionaryService implements DictionaryService {
             return DictionaryLookupResult.notFound(tr("dictionary.notFoundIn", DICTIONARY_API_SOURCE));
         }
         return DictionaryLookupResult.success(loadedEnglishOnly(DICTIONARY_API_SOURCE), entries);
+    }
+
+    private static String firstPhoneticText(JsonNode phonetics) {
+        for (JsonNode phonetic : phonetics) {
+            String text = HttpLookup.text(phonetic, "text");
+            if (!text.isEmpty()) {
+                return text;
+            }
+        }
+        return "";
+    }
+
+    /** The URL of the word's recording, an American one ("-us.mp3") when there are several; empty without one. */
+    private static String recording(JsonNode phonetics) {
+        String first = "";
+        for (JsonNode phonetic : phonetics) {
+            String audio = HttpLookup.text(phonetic, "audio");
+            if (!audio.startsWith("https://") && !audio.startsWith("http://")) {
+                continue;
+            }
+            if (audio.toLowerCase(Locale.ROOT).contains("-us.")) {
+                return audio;
+            }
+            first = first.isEmpty() ? audio : first;
+        }
+        return first;
+    }
+
+    /** The words of a JSON array of strings, each once, in order. */
+    private static List<String> words(JsonNode array) {
+        List<String> words = new ArrayList<>();
+        for (JsonNode word : array) {
+            String text = word.isTextual() ? word.asText().strip() : "";
+            if (!text.isEmpty() && !words.contains(text)) {
+                words.add(text);
+            }
+        }
+        return words;
+    }
+
+    private static List<String> joined(List<String> first, List<String> then) {
+        List<String> all = new ArrayList<>(first);
+        then.stream().filter(word -> !all.contains(word)).forEach(all::add);
+        return all;
     }
 
     /**
