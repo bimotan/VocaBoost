@@ -56,8 +56,8 @@ class ExamSchedulingTest {
 
     @Test
     void aWordMarkedAsKnownIsDueBeforeTheExamWithTheSameMemory() {
-        WordCard free = WordCard.createNew(1, "lucid", "清楚的");
-        WordCard beforeExam = WordCard.createNew(1, "lucid", "清楚的");
+        WordCard free = WordCard.createNew(1, "lucid", "清楚的", MONDAY);
+        WordCard beforeExam = WordCard.createNew(1, "lucid", "清楚的", MONDAY);
         LocalDate exam = TODAY.plusDays(20);
 
         CardScheduler.Outcome unclamped = scheduler.markKnown(free, 60, MONDAY);
@@ -74,7 +74,7 @@ class ExamSchedulingTest {
         assertEquals(free.getDifficulty(), beforeExam.getDifficulty());
         assertEquals(CardState.REVIEW, beforeExam.getState());
 
-        WordCard later = WordCard.createNew(1, "lucid", "清楚的");
+        WordCard later = WordCard.createNew(1, "lucid", "清楚的", MONDAY);
         assertEquals(unclamped, scheduler.markKnown(later, 60, MONDAY, TODAY.plusDays(400)),
             "an exam after the interval changes nothing");
     }
@@ -120,7 +120,7 @@ class ExamSchedulingTest {
 
     @Test
     void newAndLearningCardsKeepTheirSteps() {
-        WordCard card = WordCard.createNew(1, "word", "词");
+        WordCard card = WordCard.createNew(1, "word", "词", MONDAY);
         card.setId(11);
         LocalDate exam = TODAY.plusDays(5);
         Map<ReviewRating, CardScheduler.Outcome> free = scheduler.outcomes(card, MONDAY);
@@ -167,7 +167,7 @@ class ExamSchedulingTest {
     }
 
     private static WordCard reviewCard(long id, double stability, double difficulty, LocalDateTime lastReview) {
-        WordCard card = WordCard.createNew(1, "word" + id, "词");
+        WordCard card = WordCard.createNew(1, "word" + id, "词", MONDAY);
         card.setId(id);
         card.setAddedAt(lastReview.minusDays(1));
         card.setState(CardState.REVIEW);

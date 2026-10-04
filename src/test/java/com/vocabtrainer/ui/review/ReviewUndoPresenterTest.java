@@ -1,5 +1,6 @@
 package com.vocabtrainer.ui.review;
 
+import com.vocabtrainer.TestClock;
 import com.vocabtrainer.app.AppServices;
 import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.Deck;
@@ -38,6 +39,8 @@ class ReviewUndoPresenterTest {
     @RegisterExtension
     final TestDatabases databases = new TestDatabases();
 
+    /** The clock of the services and the presenter: a weekday at 10:00, far from midnight and the 4 am rollover. */
+    private final TestClock clock = new TestClock(LocalDateTime.of(2026, 3, 10, 10, 0));
     private final ReviewSessionPresenterTest.ManualTasks tasks = new ReviewSessionPresenterTest.ManualTasks();
     private final RecordingAi ai = new RecordingAi();
     private final DataChanges changes = new DataChanges();
@@ -49,11 +52,11 @@ class ReviewUndoPresenterTest {
 
     @BeforeEach
     void openDatabase() throws SQLException {
-        services = AppServices.builder(tempDir.resolve("vocab.db")).open();
+        services = AppServices.builder(tempDir.resolve("vocab.db")).clock(clock).open();
         databases.track(services.databaseManager());
         changes.subscribe(published::add);
         presenter = new ReviewSessionPresenter(services.reviewService(), services.goalService(), () -> ai, tasks,
-            changes, (title, error) -> failures.add(title + ": " + error.getMessage()));
+            changes, (title, error) -> failures.add(title + ": " + error.getMessage()), clock);
         deckId = services.startupDeck().getId();
     }
 
@@ -258,7 +261,7 @@ class ReviewUndoPresenterTest {
         Deck deck = services.deckService().createDeck("Leech");
         WordCard leech = services.wordRepository().insert(reviewCard(deck, "cavil", "挑剔", WordCard.LEECH_LAPSES - 1));
         WordCard other = reviewCard(deck, "lucid", "清晰的", 0);
-        other.setNextReviewAt(LocalDateTime.now().minusMinutes(30));
+        other.setNextReviewAt(clock.now().minusMinutes(30));
         services.wordRepository().insert(other);
         presenter.showDeck(deck.getId());
         assertEquals("cavil", presenter.question());
@@ -348,15 +351,15 @@ class ReviewUndoPresenterTest {
         return card.getChinese().split("[;；,，/、]")[0].trim();
     }
 
-    private static WordCard reviewCard(Deck deck, String english, String chinese, int lapses) {
-        WordCard card = WordCard.createNew(deck.getId(), english, chinese);
+    private WordCard reviewCard(Deck deck, String english, String chinese, int lapses) {
+        WordCard card = WordCard.createNew(deck.getId(), english, chinese, clock.now());
         card.setState(CardState.REVIEW);
         card.setStability(2);
         card.setDifficulty(9);
         card.setRepetitions(20);
         card.setLapses(lapses);
-        card.setLastReviewedAt(LocalDateTime.now().minusDays(3));
-        card.setNextReviewAt(LocalDateTime.now().minusDays(1));
+        card.setLastReviewedAt(clock.now().minusDays(3));
+        card.setNextReviewAt(clock.now().minusDays(1));
         return card;
     }
 

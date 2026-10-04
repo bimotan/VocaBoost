@@ -25,8 +25,8 @@ class CrossDeckUiTest extends MainWindowUiTest {
         dialogs.answerText("TOEFL");
         click("newDeckButton");
         long toeflId = currentDeck().getId();
-        services.wordRepository().insert(WordCard.createNew(toeflId, "abate", "减轻"));
-        services.wordRepository().insert(WordCard.createNew(toeflId, "zeugma", "轭式修辞"));
+        services.wordRepository().insert(WordCard.createNew(toeflId, "abate", "减轻", clock.now()));
+        services.wordRepository().insert(WordCard.createNew(toeflId, "zeugma", "轭式修辞", clock.now()));
         selectDeck("deckSelector", STARTER_DECK);
         selectTab("wordListTab");
         assertEquals(STARTER_WORDS, rowCount("wordTable"));
@@ -72,7 +72,7 @@ class CrossDeckUiTest extends MainWindowUiTest {
         dialogs.answerText("TOEFL");
         click("newDeckButton");
         long toeflId = currentDeck().getId();
-        services.wordRepository().insert(WordCard.createNew(toeflId, "abate", "减轻"));
+        services.wordRepository().insert(WordCard.createNew(toeflId, "abate", "减轻", clock.now()));
         selectDeck("deckSelector", STARTER_DECK);
         selectTab("wordListTab");
         click("wordAllDecksToggle");

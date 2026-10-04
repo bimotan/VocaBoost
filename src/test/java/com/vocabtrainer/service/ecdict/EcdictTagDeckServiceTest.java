@@ -1,5 +1,6 @@
 package com.vocabtrainer.service.ecdict;
 
+import com.vocabtrainer.TestClock;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.DatabaseManager;
@@ -42,6 +43,7 @@ class EcdictTagDeckServiceTest {
     private static final String AM = "a.m.,,,adv. 上午,,,,gre,100,100,,,";
     /** Tagged "ungre", which is not "gre". */
     private static final String GREGARIOUS = "gregarious,gri'gɛəriəs,,a. 群居的,,,,toefl ungre,20000,20000,,,";
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 3, 10, 10, 0);
 
     @TempDir
     Path tempDir;
@@ -54,15 +56,16 @@ class EcdictTagDeckServiceTest {
     private DeckService decks;
     private WordRepository words;
     private EcdictTagDeckService service;
+    private final TestClock clock = new TestClock(NOW);
 
     @BeforeEach
     void setUp() throws SQLException {
         ecdict = new EcdictRepository(tempDir.resolve("ecdict.db"));
         databaseManager = databases.open(tempDir.resolve("vocab.db"));
-        decks = new DeckService(new DeckRepository(databaseManager),
+        decks = new DeckService(new DeckRepository(databaseManager, clock),
             new SettingsService(new SettingsRepository(databaseManager)));
         words = new WordRepository(databaseManager);
-        service = new EcdictTagDeckService(ecdict, decks, words, new WordValidationService());
+        service = new EcdictTagDeckService(ecdict, decks, words, new WordValidationService(), clock);
     }
 
     @AfterEach
@@ -100,6 +103,9 @@ class EcdictTagDeckServiceTest {
 
         // New cards are introduced in the order they were added: the most common first.
         assertEquals(List.of("abandon", "abate", "lucid", "aberrant"), newCardOrder(result.deck()));
+        assertTrue(words.findAll(result.deck().getId()).stream()
+            .allMatch(word -> NOW.equals(word.getAddedAt()) && NOW.equals(word.getNextReviewAt())), "dated by the clock");
+        assertEquals(NOW, result.deck().getCreatedAt());
         WordCard abandon = words.findByEnglish(result.deck().getId(), "abandon").orElseThrow();
         assertEquals("放弃; 抛弃; 遗弃; 使屈从; 沉溺; 放纵; 放任; 无拘束; 狂热", abandon.getChinese());
         assertEquals("verb; noun", abandon.getPartOfSpeech());
@@ -137,7 +143,7 @@ class EcdictTagDeckServiceTest {
     void alphabeticalOrderAndAnExistingDeckWithSomeOfTheWords() throws Exception {
         importEcdict();
         Deck mine = decks.createDeck("Mine");
-        WordCard lucid = WordCard.createNew(mine.getId(), "Lucid", "清楚的");
+        WordCard lucid = WordCard.createNew(mine.getId(), "Lucid", "清楚的", NOW);
         lucid.setSuspended(true);
         words.insert(lucid);
 
@@ -162,7 +168,7 @@ class EcdictTagDeckServiceTest {
         Path csv = EcdictFixtures.write(tempDir.resolve("ecdict.csv"), false, List.of(single, doubled, inDeck));
         new EcdictImportService(ecdict).importCsv(csv, progress -> { }, () -> false);
         Deck mine = decks.createDeck("Mine");
-        words.insert(WordCard.createNew(mine.getId(), "En route", "途中"));
+        words.insert(WordCard.createNew(mine.getId(), "En route", "途中", NOW));
 
         EcdictTagDeckService.Result result = service.build(request("Mine", 0, EcdictRepository.TagOrder.FREQUENCY),
             progress -> { }, () -> false);
@@ -221,7 +227,7 @@ class EcdictTagDeckServiceTest {
     }
 
     private List<String> newCardOrder(Deck deck) throws SQLException {
-        return words.findNewCards(deck.getId(), LocalDateTime.now().plusDays(1), 100).stream()
+        return words.findNewCards(deck.getId(), NOW.plusDays(1), 100).stream()
             .map(WordCard::getEnglish)
             .toList();
     }

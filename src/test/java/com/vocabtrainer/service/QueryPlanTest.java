@@ -154,7 +154,7 @@ class QueryPlanTest {
             List<WordCard> words = new ArrayList<>();
             for (Deck each : List.of(deck, other)) {
                 for (int i = 0; i < 50; i++) {
-                    WordCard word = WordCard.createNew(each.getId(), "word" + (char) ('a' + i % 26) + (char) ('a' + i / 26), "释义");
+                    WordCard word = WordCard.createNew(each.getId(), "word" + (char) ('a' + i % 26) + (char) ('a' + i / 26), "释义", NOW);
                     word.setNextReviewAt(NOW.minusHours(i));
                     words.add(wordRepository.save(word));
                 }

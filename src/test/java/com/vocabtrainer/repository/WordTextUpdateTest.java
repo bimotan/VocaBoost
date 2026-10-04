@@ -31,7 +31,7 @@ class WordTextUpdateTest {
         DatabaseManager databaseManager = databases.open(tempDir.resolve("text.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository words = new WordRepository(databaseManager);
-        WordCard word = WordCard.createNew(deck.getId(), "querulous", "抱怨的");
+        WordCard word = WordCard.createNew(deck.getId(), "querulous", "抱怨的", NOW);
         word.setState(CardState.REVIEW);
         word.setStability(21.5);
         word.setDifficulty(6.25);

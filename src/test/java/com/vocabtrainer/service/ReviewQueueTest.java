@@ -175,7 +175,7 @@ class ReviewQueueTest {
         insertNew(10);
         Deck other = new DeckRepository(databaseManager).create("Other");
         for (int i = 0; i < 10; i++) {
-            WordCard card = WordCard.createNew(other.getId(), "other" + i, "释义");
+            WordCard card = WordCard.createNew(other.getId(), "other" + i, "释义", clock.now());
             card.setNextReviewAt(START.minusHours(1));
             words.insert(card);
         }
@@ -256,7 +256,7 @@ class ReviewQueueTest {
     private List<Long> insertLearned(int count) throws SQLException {
         List<Long> ids = new ArrayList<>();
         for (int i = 0; i < count; i++) {
-            WordCard card = WordCard.createNew(deck.getId(), "learned" + i, "已学" + i);
+            WordCard card = WordCard.createNew(deck.getId(), "learned" + i, "已学" + i, clock.now());
             card.setAddedAt(START.minusDays(30));
             card.setState(CardState.REVIEW);
             card.setStability(7);
@@ -281,7 +281,7 @@ class ReviewQueueTest {
     }
 
     private WordCard newWord(String english, LocalDateTime addedAt) {
-        WordCard card = WordCard.createNew(deck.getId(), english, "释义" + english);
+        WordCard card = WordCard.createNew(deck.getId(), english, "释义" + english, clock.now());
         card.setAddedAt(addedAt);
         card.setNextReviewAt(addedAt);
         return card;

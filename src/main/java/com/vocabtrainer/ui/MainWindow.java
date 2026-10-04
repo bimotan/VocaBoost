@@ -49,7 +49,7 @@ public class MainWindow {
         ConfiguredServices configured = new ConfiguredServices(services.dictionaryServices(), services.aiServices());
         BorderPane root = new BorderPane();
         ViewContext context = new ViewContext(dialogs, errors, new UiAsync(errors), new DataChanges(), decks,
-            () -> root.getScene().getWindow());
+            () -> root.getScene().getWindow(), services.clock());
         Path databasePath = services.databaseManager().getDatabasePath();
         OfflineMode offlineMode = new OfflineMode(context, services.settingsService());
         DisplaySettings display = new DisplaySettings(services.settingsService());

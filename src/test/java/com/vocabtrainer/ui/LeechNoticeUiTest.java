@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -89,14 +88,14 @@ class LeechNoticeUiTest extends MainWindowUiTest {
     private WordCard rateLeechAgain() throws SQLException {
         dialogs.answerText("Leech");
         click("newDeckButton");
-        WordCard card = WordCard.createNew(currentDeck().getId(), "cavil", "挑剔");
+        WordCard card = WordCard.createNew(currentDeck().getId(), "cavil", "挑剔", clock.now());
         card.setState(CardState.REVIEW);
         card.setStability(2);
         card.setDifficulty(9);
         card.setRepetitions(20);
         card.setLapses(WordCard.LEECH_LAPSES - 1);
-        card.setLastReviewedAt(LocalDateTime.now().minusDays(3));
-        card.setNextReviewAt(LocalDateTime.now().minusDays(1));
+        card.setLastReviewedAt(clock.now().minusDays(3));
+        card.setNextReviewAt(clock.now().minusDays(1));
         WordCard leech = services.wordRepository().insert(card);
         selectTab("reviewTab");
         click("resetSessionButton");

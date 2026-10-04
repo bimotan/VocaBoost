@@ -37,7 +37,7 @@ class CorrectAnswerAgreementTest {
     void sqlCountsTheSameAnswersAsCorrectAsTheDomain() throws Exception {
         DatabaseManager databaseManager = databases.open(tempDir.resolve("agreement.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
-        WordCard word = new WordRepository(databaseManager).insert(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
+        WordCard word = new WordRepository(databaseManager).insert(WordCard.createNew(deck.getId(), "lucid", "清晰的", DAY));
         ReviewLogRepository repository = new ReviewLogRepository(databaseManager);
         List<ReviewRating> effectiveRatings = new ArrayList<>(Arrays.asList(ReviewRating.values()));
         effectiveRatings.add(null);

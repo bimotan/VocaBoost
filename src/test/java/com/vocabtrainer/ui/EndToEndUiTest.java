@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -41,7 +41,7 @@ class EndToEndUiTest extends MainWindowUiTest {
         // The app's wiring, except that no AI provider is configured from the environment.
         return builder
             .dictionaryService((cache, local) -> DictionaryServiceFactory.create(cache, local, Map.of(),
-                Clock.systemDefaultZone(), () -> services.settingsService().isOfflineMode()))
+                clock, () -> services.settingsService().isOfflineMode()))
             .aiService((cache, settings) -> AiServiceFactory.create(cache, settings, Map.of()));
     }
 
@@ -74,6 +74,8 @@ class EndToEndUiTest extends MainWindowUiTest {
         assertEquals("lucid is already in " + STARTER_DECK, dialogs.last(ScriptedDialogs.Kind.CHOOSE).header());
         WordCard added = services.wordRepository().findByEnglish(deck.getId(), "lucid").orElseThrow();
         assertEquals(CardState.NEW, added.getState());
+        assertEquals(TEST_START, added.getAddedAt(), "dated by the app's clock");
+        assertEquals(TEST_START, added.getNextReviewAt());
         assertFalse(added.getTags().contains("UNCHECKED"), added.getTags());
         selectTab("dashboardTab");
         assertEquals("1", text("totalWordsLabel"));
@@ -94,8 +96,10 @@ class EndToEndUiTest extends MainWindowUiTest {
         assertEquals("rateGoodButton", focusOwnerId());
         pressKey(null, KeyCode.DIGIT3);
 
-        // The learning step brings the card back within the learn-ahead window; this time it is right.
+        // The learning step brings the card back within the learn-ahead window; this time, half a
+        // minute later, it is right.
         waitForText("reviewWordLabel", "lucid");
+        clock.advance(Duration.ofSeconds(30));
         assertTrue(text("reviewMetaLabel").contains(" | Learning | "), text("reviewMetaLabel"));
         assertEquals("answerField", focusOwnerId());
         type("answerField", "清晰的");

@@ -1,5 +1,6 @@
 package com.vocabtrainer.service;
 
+import com.vocabtrainer.TestClock;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewRating;
@@ -19,7 +20,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
-import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -38,6 +39,7 @@ class ReviewSessionSettingsTest {
     @RegisterExtension
     final TestDatabases databases = new TestDatabases();
 
+    private final TestClock clock = new TestClock(LocalDateTime.of(2026, 3, 10, 10, 0));
     private Deck deck;
     private Deck other;
     private WordRepository words;
@@ -55,19 +57,19 @@ class ReviewSessionSettingsTest {
         other = decks.create("Other");
         words = new WordRepository(databaseManager);
         logs = new ReviewLogRepository(databaseManager);
-        goals = new GoalService(new GoalRepository(databaseManager), logs, Clock.systemDefaultZone());
-        achievements = new AchievementService(new AchievementRepository(databaseManager), goals);
+        goals = new GoalService(new GoalRepository(databaseManager), logs, clock);
+        achievements = new AchievementService(new AchievementRepository(databaseManager), goals, clock);
         settingsService = new SettingsService(new SettingsRepository(databaseManager));
         for (String english : new String[] {"lucid", "abate", "laud"}) {
-            words.insert(WordCard.createNew(deck.getId(), english, "释义" + english));
-            words.insert(WordCard.createNew(other.getId(), english, "释义" + english));
+            words.insert(WordCard.createNew(deck.getId(), english, "释义" + english, clock.now()));
+            words.insert(WordCard.createNew(other.getId(), english, "释义" + english, clock.now()));
         }
         service = newService();
     }
 
     private ReviewService newService() {
         return new ReviewService(words, logs, new SimilarityService(), new ReviewScheduler(), goals, achievements,
-            Clock.systemDefaultZone(), new ReviewSettings(settingsService), new Random(1));
+            clock, new ReviewSettings(settingsService), new Random(1));
     }
 
     @Test

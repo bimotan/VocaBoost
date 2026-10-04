@@ -98,7 +98,7 @@ class StudyDayRolloverTest {
     }
 
     private WordCard reviewCard(String english, LocalDateTime due) {
-        WordCard card = WordCard.createNew(deck.getId(), english, "释义");
+        WordCard card = WordCard.createNew(deck.getId(), english, "释义", clock.now());
         card.setState(CardState.REVIEW);
         card.setStability(1);
         card.setDifficulty(5);

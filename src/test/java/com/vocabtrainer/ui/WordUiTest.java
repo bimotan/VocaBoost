@@ -5,7 +5,6 @@ import com.vocabtrainer.domain.WordCard;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Predicate;
@@ -183,9 +182,9 @@ class WordUiTest extends MainWindowUiTest {
     }
 
     /** A word in review: its memory, review counts and lapses, last reviewed when its stability says it is due. */
-    private static WordCard reviewed(long deckId, String english, String chinese, double stability, double difficulty,
+    private WordCard reviewed(long deckId, String english, String chinese, double stability, double difficulty,
                                      int repetitions, int consecutiveCorrect, int lapses) {
-        WordCard word = WordCard.createNew(deckId, english, chinese);
+        WordCard word = WordCard.createNew(deckId, english, chinese, clock.now());
         word.setPartOfSpeech("noun");
         word.setTags("mine");
         word.setState(CardState.REVIEW);
@@ -195,8 +194,8 @@ class WordUiTest extends MainWindowUiTest {
         word.setRepetitions(repetitions);
         word.setConsecutiveCorrect(consecutiveCorrect);
         word.setLapses(lapses);
-        word.setLastReviewedAt(LocalDateTime.now().minusDays(1));
-        word.setNextReviewAt(LocalDateTime.now().plusDays(Math.round(stability)));
+        word.setLastReviewedAt(clock.now().minusDays(1));
+        word.setNextReviewAt(clock.now().plusDays(Math.round(stability)));
         return word;
     }
 

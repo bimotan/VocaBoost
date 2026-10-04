@@ -21,7 +21,6 @@ import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -68,7 +67,7 @@ class OfflineModeUiTest extends MainWindowUiTest {
             .aiService((cache, settings) -> AiServiceFactory.create(cache, settings, aiConfig))
             // The app's chain with a counting stand-in for the public online dictionaries.
             .dictionaryService((cache, local) -> DictionaryServiceFactory.compose(local, null, online, cache,
-                Clock.systemDefaultZone(), () -> services.settingsService().isOfflineMode()));
+                clock, () -> services.settingsService().isOfflineMode()));
     }
 
     @AfterEach

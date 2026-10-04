@@ -135,7 +135,7 @@ class WordEditUiTest extends MainWindowUiTest {
         selectWordInList("abate");
         // The word is reviewed after the list was read (the list row still says it is new).
         WordCard reviewed = word("abate");
-        LocalDateTime now = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS);
+        LocalDateTime now = clock.now().truncatedTo(ChronoUnit.SECONDS);
         reviewed.setState(CardState.REVIEW);
         reviewed.setStability(12.5);
         reviewed.setRepetitions(4);

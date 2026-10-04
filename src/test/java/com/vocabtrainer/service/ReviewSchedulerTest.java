@@ -63,7 +63,7 @@ class ReviewSchedulerTest {
 
     @Test
     void thePreviewShowsWhatEachRatingWouldDoWithoutChangingTheCard() {
-        WordCard word = WordCard.createNew(1, "lucid", "清晰的");
+        WordCard word = WordCard.createNew(1, "lucid", "清晰的", NOW);
         word.setId(3);
 
         Map<ReviewRating, IntervalPreview> correct = scheduler.preview(word, 1.0, NOW);
@@ -107,7 +107,7 @@ class ReviewSchedulerTest {
     /** Learning steps change when a card comes back, not its memory, so a replay ends where the live reviews did. */
     @Test
     void replayingTheReviewLogsRebuildsTheSchedule() {
-        WordCard live = WordCard.createNew(1, "lucid", "清晰的");
+        WordCard live = WordCard.createNew(1, "lucid", "清晰的", NOW);
         live.setId(5);
         List<ReviewLog> history = new ArrayList<>();
         Object[][] reviews = {
@@ -123,7 +123,7 @@ class ReviewSchedulerTest {
             history.add(new ReviewLog(history.size() + 1, 5, at, "", "清晰的", similarity, rating, 1000));
         }
 
-        WordCard replayed = WordCard.createNew(1, "lucid", "清晰的");
+        WordCard replayed = WordCard.createNew(1, "lucid", "清晰的", NOW);
         replayed.setId(5);
         replayed.setRepetitions(17);
         replayed.setLapses(3);
@@ -153,7 +153,7 @@ class ReviewSchedulerTest {
             history.add(new ReviewLog(k + 1, 8, start.plusDays(4L * k), "", "挑剔", failed ? 0.1 : 1.0,
                 failed ? ReviewRating.AGAIN : ReviewRating.GOOD, 1000));
         }
-        WordCard word = WordCard.createNew(1, "cavil", "挑剔");
+        WordCard word = WordCard.createNew(1, "cavil", "挑剔", NOW);
         word.setId(8);
 
         scheduler.replay(word, history.subList(0, 9));
@@ -174,7 +174,7 @@ class ReviewSchedulerTest {
 
     @Test
     void retrievabilityIsEmptyForANewWordAndFallsWithTime() {
-        assertTrue(ReviewScheduler.retrievability(WordCard.createNew(1, "new", "新"), NOW).isEmpty());
+        assertTrue(ReviewScheduler.retrievability(WordCard.createNew(1, "new", "新", NOW), NOW).isEmpty());
 
         WordCard word = reviewCard(6, 120, 5, NOW.minusDays(3));
         // Review finding A8: the old hours-based strength put this card at 3%.
@@ -196,7 +196,7 @@ class ReviewSchedulerTest {
     }
 
     private static WordCard reviewCard(long id, double stability, double difficulty, LocalDateTime lastReview) {
-        WordCard card = WordCard.createNew(1, "word" + id, "词");
+        WordCard card = WordCard.createNew(1, "word" + id, "词", NOW);
         card.setId(id);
         card.setState(CardState.REVIEW);
         card.setStability(stability);

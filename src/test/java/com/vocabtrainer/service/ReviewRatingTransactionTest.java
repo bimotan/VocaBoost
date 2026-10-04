@@ -26,6 +26,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -63,7 +64,7 @@ class ReviewRatingTransactionTest {
         achievementService = new AchievementService(achievementRepository, goalService, CLOCK);
         service = new ReviewService(wordRepository, logRepository, new SimilarityService(), new ReviewScheduler(),
             goalService, achievementService, CLOCK);
-        word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
+        word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的", LocalDateTime.now(CLOCK)));
         service.startSession(deck.getId(), ReviewMode.EN_TO_ZH, 5);
     }
 
@@ -171,7 +172,7 @@ class ReviewRatingTransactionTest {
 
     private WordCard saveWord(String english) {
         try {
-            return wordRepository.save(WordCard.createNew(deck.getId(), english, "释义"));
+            return wordRepository.save(WordCard.createNew(deck.getId(), english, "释义", LocalDateTime.now(CLOCK)));
         } catch (SQLException e) {
             throw new IllegalStateException(e);
         }

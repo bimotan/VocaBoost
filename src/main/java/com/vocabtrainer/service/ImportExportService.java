@@ -29,6 +29,7 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -72,6 +73,7 @@ public class ImportExportService {
     private final DictionaryService localDictionary;
     private final Supplier<DictionaryService> onlineDictionary;
     private final BooleanSupplier offline;
+    private final Clock clock;
 
     /** Without dictionaries: a row without a meaning is skipped. */
     public ImportExportService(WordRepository wordRepository) {
@@ -94,11 +96,19 @@ public class ImportExportService {
     public ImportExportService(WordRepository wordRepository, WordValidationService validationService,
                                DictionaryService localDictionary, Supplier<DictionaryService> onlineDictionary,
                                BooleanSupplier offline) {
+        this(wordRepository, validationService, localDictionary, onlineDictionary, offline, Clock.systemDefaultZone());
+    }
+
+    /** With {@code clock}, which dates the words this imports, instead of the system clock. */
+    public ImportExportService(WordRepository wordRepository, WordValidationService validationService,
+                               DictionaryService localDictionary, Supplier<DictionaryService> onlineDictionary,
+                               BooleanSupplier offline, Clock clock) {
         this.wordRepository = wordRepository;
         this.validationService = validationService;
         this.localDictionary = localDictionary;
         this.onlineDictionary = onlineDictionary;
         this.offline = offline;
+        this.clock = clock;
     }
 
     public ImportResult importLegacyTxt(Path path, long deckId) {
@@ -504,8 +514,8 @@ public class ImportExportService {
         return rows;
     }
 
-    private static WordCard newWord(long deckId, ValidatedWord validated) {
-        WordCard word = WordCard.createNew(deckId, validated.english(), validated.chinese());
+    private WordCard newWord(long deckId, ValidatedWord validated) {
+        WordCard word = WordCard.createNew(deckId, validated.english(), validated.chinese(), LocalDateTime.now(clock));
         word.setPhonetic(validated.phonetic());
         word.setPartOfSpeech(validated.partOfSpeech());
         word.setExampleSentence(validated.exampleSentence());
@@ -657,14 +667,15 @@ public class ImportExportService {
             int intervalDays = Integer.parseInt(parts[5].trim());
             int consecutiveCorrect = Integer.parseInt(parts[6].trim());
 
-            WordCard card = WordCard.createNew(deckId, validated.english(), validated.chinese());
+            LocalDateTime now = LocalDateTime.now(clock);
+            WordCard card = WordCard.createNew(deckId, validated.english(), validated.chinese(), now);
             card.setAddedAt(addedAt);
             card.setLastReviewedAt(lastReviewedAt);
             card.setEasinessFactor(Math.max(1.3, easiness));
             card.setIntervalDays(Math.max(0, intervalDays));
             card.setConsecutiveCorrect(Math.max(0, consecutiveCorrect));
             card.setRepetitions(Math.max(0, consecutiveCorrect));
-            card.setNextReviewAt(intervalDays <= 0 ? LocalDateTime.now() : lastReviewedAt.plusDays(intervalDays));
+            card.setNextReviewAt(intervalDays <= 0 ? now : lastReviewedAt.plusDays(intervalDays));
             if (intervalDays > 0 || consecutiveCorrect > 0) {
                 // Reviewed before; a row without progress stays a new word.
                 card.estimateStateFromLegacySchedule();

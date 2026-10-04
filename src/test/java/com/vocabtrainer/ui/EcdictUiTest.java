@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -117,6 +118,7 @@ class EcdictUiTest extends MainWindowUiTest {
         assertTrue(text("ecdictStatusLabel").startsWith("Saved. Already imported, the file has not changed." + NEW_LINE
             + "ECDICT: 6 entries from "), text("ecdictStatusLabel"));
         assertEquals(imported, services.ecdictImportService().imported().orElseThrow());
+        clock.advance(Duration.ofMinutes(1));
         click("reimportEcdictButton");
         waitForBackgroundTasks();
         assertTrue(text("ecdictStatusLabel").startsWith("Imported 6 entries in "), text("ecdictStatusLabel"));

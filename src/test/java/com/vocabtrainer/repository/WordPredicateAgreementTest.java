@@ -66,7 +66,7 @@ class WordPredicateAgreementTest {
                     for (int[] history : histories) {
                         for (LocalDateTime next : dueTimes) {
                             for (boolean isSuspended : new boolean[] {false, true}) {
-                                WordCard card = WordCard.createNew(deck.getId(), "word" + index++, "词");
+                                WordCard card = WordCard.createNew(deck.getId(), "word" + index++, "词", NOW);
                                 card.setState(state);
                                 card.setStability(stability);
                                 card.setDifficulty(difficulty);
@@ -167,13 +167,13 @@ class WordPredicateAgreementTest {
         WordCard forgotten = words.insert(review(queue, "forgotten", 2, NOW.minusDays(5)));
         WordCard overdue = words.insert(review(queue, "overdue", 10, NOW.minusDays(20)));
         WordCard untimed = words.insert(review(queue, "untimed", 5, null));
-        WordCard later = WordCard.createNew(queue.getId(), "later", "词");
+        WordCard later = WordCard.createNew(queue.getId(), "later", "词", NOW);
         later.setAddedAt(NOW.minusDays(1));
         later.setNextReviewAt(NOW.minusDays(1));
-        WordCard earlier = WordCard.createNew(queue.getId(), "earlier", "词");
+        WordCard earlier = WordCard.createNew(queue.getId(), "earlier", "词", NOW);
         earlier.setAddedAt(NOW.minusDays(2));
         earlier.setNextReviewAt(NOW.minusDays(2));
-        WordCard sameTime = WordCard.createNew(queue.getId(), "same time", "词");
+        WordCard sameTime = WordCard.createNew(queue.getId(), "same time", "词", NOW);
         sameTime.setAddedAt(NOW.minusDays(1));
         sameTime.setNextReviewAt(NOW.minusDays(1));
         words.insert(later);
@@ -189,7 +189,7 @@ class WordPredicateAgreementTest {
     }
 
     private static WordCard review(Deck deck, String english, double stability, LocalDateTime lastReviewedAt) {
-        WordCard card = WordCard.createNew(deck.getId(), english, "词");
+        WordCard card = WordCard.createNew(deck.getId(), english, "词", NOW);
         card.setState(CardState.REVIEW);
         card.setStability(stability);
         card.setDifficulty(5);
@@ -221,7 +221,7 @@ class WordPredicateAgreementTest {
     @Test
     void perDeckCountsInOneQueryMatchTheSingleDeckCounts() throws SQLException {
         Deck other = decks.create("Other");
-        words.insert(WordCard.createNew(other.getId(), "lone", "孤独的"));
+        words.insert(WordCard.createNew(other.getId(), "lone", "孤独的", NOW));
         Deck empty = decks.create("Empty");
 
         Map<Long, WordRepository.DeckWordCounts> counts = words.countByDeck(NOW, DAY_END);
@@ -238,7 +238,7 @@ class WordPredicateAgreementTest {
     void theLatestReviewPerDeckIsTheNewestLogOfItsWords() throws SQLException {
         ReviewLogRepository logs = new ReviewLogRepository(databaseManager);
         Deck other = decks.create("Other");
-        WordCard otherWord = words.insert(WordCard.createNew(other.getId(), "lone", "孤独的"));
+        WordCard otherWord = words.insert(WordCard.createNew(other.getId(), "lone", "孤独的", NOW));
         logs.insert(log(active.get(0), NOW.minusDays(2)));
         logs.insert(log(active.get(1), NOW.minusHours(1)));
         logs.insert(log(otherWord, NOW.minusDays(5)));

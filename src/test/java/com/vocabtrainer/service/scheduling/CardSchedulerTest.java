@@ -237,7 +237,7 @@ class CardSchedulerTest {
     }
 
     private static WordCard newCard(long id) {
-        WordCard card = WordCard.createNew(1, "word" + id, "词");
+        WordCard card = WordCard.createNew(1, "word" + id, "词", MONDAY);
         card.setId(id);
         card.setAddedAt(MONDAY.minusDays(1));
         return card;

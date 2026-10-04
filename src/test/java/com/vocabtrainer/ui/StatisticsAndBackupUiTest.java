@@ -9,8 +9,6 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,10 +26,10 @@ class StatisticsAndBackupUiTest extends MainWindowUiTest {
         selectTab("statisticsTab");
 
         List<ChartPoint> reviewCounts = chartPoints("reviewCountChart");
-        // The study day, which starts at the rollover hour: before 4 am it is still yesterday.
-        LocalDate today = services.reviewScheduler().studyDay().of(LocalDateTime.now());
+        // Today is the study day of the harness's clock, 10 March (10:00, long after the 4 am rollover).
         assertEquals(7, reviewCounts.size());
-        assertEquals(new ChartPoint(today.getMonthValue() + "/" + today.getDayOfMonth(), 2), reviewCounts.get(6));
+        assertEquals(new ChartPoint("3/10", 2), reviewCounts.get(6));
+        assertEquals(new ChartPoint("3/4", 0), reviewCounts.get(0));
         assertTrue(reviewCounts.subList(0, 6).stream().allMatch(point -> point.y() == 0), reviewCounts.toString());
         List<ChartPoint> accuracy = chartPoints("accuracyChart");
         assertEquals(7, accuracy.size());

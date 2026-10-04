@@ -19,6 +19,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -31,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * server that records what it is asked.
  */
 class WordListOnlineLookupTest {
+    private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-01T09:00:00Z"), ZoneOffset.UTC);
     private static final String PETRICHOR = "[{\"word\":\"petrichor\",\"chinese\":\"雨后泥土的气味\",\"partOfSpeech\":\"noun\"}]";
 
     @TempDir
@@ -70,7 +73,7 @@ class WordListOnlineLookupTest {
             new HttpDictionaryService(server.uri("/api").toString(), "", StubHttpServer.client()),
             new PublicOnlineDictionaryService(StubHttpServer.client(), server.uri("/dictapi/"), server.uri("/wiki/"),
                 Duration.ofSeconds(2)),
-            cache, Clock.systemDefaultZone(), settings::isOfflineMode);
+            cache, CLOCK, settings::isOfflineMode);
     }
 
     private ImportExportService service(AtomicInteger chainsBuilt) {
@@ -134,11 +137,12 @@ class WordListOnlineLookupTest {
     @Test
     void theAppsImportFollowsTheSavedOfflineModeAndTheUsersChoice() throws Exception {
         try (AppServices services = AppServices.builder(tempDir.resolve("app.db"))
+            .clock(CLOCK)
             .dictionaryService((appCache, local) -> DictionaryServiceFactory.compose(local,
                 new HttpDictionaryService(server.uri("/api").toString(), "", StubHttpServer.client()),
                 new PublicOnlineDictionaryService(StubHttpServer.client(), server.uri("/dictapi/"),
                     server.uri("/wiki/"), Duration.ofSeconds(2)),
-                appCache, Clock.systemDefaultZone()))
+                appCache, CLOCK))
             .open()) {
             databases.track(services.databaseManager());
             long deckId = services.startupDeck().getId();

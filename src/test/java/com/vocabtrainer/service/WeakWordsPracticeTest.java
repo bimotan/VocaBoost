@@ -268,10 +268,10 @@ class WeakWordsPracticeTest {
         withPractice.add(log(first.plusDays(1), ReviewRating.AGAIN, ReviewKind.PRACTICE));
         withPractice.add(log(first.plusDays(2), ReviewRating.EASY, ReviewKind.PRACTICE));
 
-        WordCard replayed = WordCard.createNew(1, "abate", "减弱");
+        WordCard replayed = WordCard.createNew(1, "abate", "减弱", clock.now());
         replayed.setId(1);
         scheduler.replay(replayed, withPractice);
-        WordCard expected = WordCard.createNew(1, "abate", "减弱");
+        WordCard expected = WordCard.createNew(1, "abate", "减弱", clock.now());
         expected.setId(1);
         scheduler.replay(expected, reviews);
 
@@ -289,7 +289,7 @@ class WeakWordsPracticeTest {
 
     /** In review, last reviewed yesterday after a lapse, so weak; due at {@code due}. */
     private WordCard weakWord(String english, LocalDateTime due) {
-        WordCard card = WordCard.createNew(deck.getId(), english, "释义" + english);
+        WordCard card = WordCard.createNew(deck.getId(), english, "释义" + english, clock.now());
         card.setState(CardState.REVIEW);
         card.setStability(4);
         card.setDifficulty(6);

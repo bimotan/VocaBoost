@@ -164,8 +164,8 @@ class ExamPlanServiceTest {
 
     @Test
     void aWordMarkedAsKnownIsDueBeforeItsDecksExam() throws SQLException {
-        WordCard known = words.insert(WordCard.createNew(deck.getId(), "lucid", "清楚的"));
-        WordCard elsewhere = words.insert(WordCard.createNew(other.getId(), "lucid", "清楚的"));
+        WordCard known = words.insert(WordCard.createNew(deck.getId(), "lucid", "清楚的", clock.now()));
+        WordCard elsewhere = words.insert(WordCard.createNew(other.getId(), "lucid", "清楚的", clock.now()));
         plans.saveExam(deck.getId(), true, new Exam("GRE", TODAY.plusDays(20)));
         ReviewService review = new ReviewService(words, logs, new SimilarityService(), scheduler, null, null, clock,
             reviewSettings, new Random(1));
@@ -240,10 +240,10 @@ class ExamPlanServiceTest {
     @Test
     void theNewWordPlanCountsTheNewWordsAndTodaysIntroductions() throws SQLException {
         for (int i = 0; i < 100; i++) {
-            words.insert(WordCard.createNew(deck.getId(), "word" + (char) ('a' + i / 26) + (char) ('a' + i % 26), "释义"));
+            words.insert(WordCard.createNew(deck.getId(), "word" + (char) ('a' + i / 26) + (char) ('a' + i % 26), "释义", clock.now()));
         }
         words.insert(reviewCard(deck, "lucid", 10, NOW.minusDays(5), NOW.plusDays(5)));
-        WordCard suspended = WordCard.createNew(deck.getId(), "zeal", "热情");
+        WordCard suspended = WordCard.createNew(deck.getId(), "zeal", "热情", clock.now());
         suspended.setSuspended(true);
         words.insert(suspended);
         assertTrue(plans.newCardPlan(deck.getId()).isEmpty(), "no exam");
@@ -277,7 +277,7 @@ class ExamPlanServiceTest {
 
     private static WordCard reviewCard(Deck deck, String english, double stability, LocalDateTime lastReview,
                                        LocalDateTime due) {
-        WordCard card = WordCard.createNew(deck.getId(), english, "释义");
+        WordCard card = WordCard.createNew(deck.getId(), english, "释义", lastReview);
         card.setState(CardState.REVIEW);
         card.setStability(stability);
         card.setDifficulty(5);

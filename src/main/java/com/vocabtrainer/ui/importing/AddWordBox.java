@@ -38,6 +38,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
 import java.sql.SQLException;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -357,7 +358,8 @@ final class AddWordBox {
                 validated.note(),
                 tagging.apply(validated.tags())
             );
-            WordCard word = WordCard.createNew(targetDeck.getId(), wordToSave.english(), wordToSave.chinese());
+            WordCard word = WordCard.createNew(targetDeck.getId(), wordToSave.english(), wordToSave.chinese(),
+                LocalDateTime.now(context.clock()));
             WordFields.applyValidatedFields(word, wordToSave);
             wordRepository.save(word);
             // The word is saved: clear the form now so a later failure can't invite a duplicate add.

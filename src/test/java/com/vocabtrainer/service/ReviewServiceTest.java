@@ -35,15 +35,17 @@ class ReviewServiceTest {
     @RegisterExtension
     final TestDatabases databases = new TestDatabases();
 
+    private final TestClock clock = new TestClock(LocalDateTime.of(2026, 3, 10, 9, 0));
+
     @Test
     void chineseToEnglishModeChecksEnglishAnswer() throws Exception {
         DatabaseManager databaseManager = databases.open(tempDir.resolve("review.db"));
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewLogRepository reviewLogRepository = new ReviewLogRepository(databaseManager);
-        WordCard word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
+        WordCard word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的", clock.now()));
         ReviewService service = new ReviewService(wordRepository, reviewLogRepository,
-            new SimilarityService(), new ReviewScheduler());
+            new SimilarityService(), new ReviewScheduler(), clock);
 
         ReviewAnswer answer = service.submitAnswer(word.getId(), "lucid", ReviewMode.ZH_TO_EN);
 
@@ -57,15 +59,15 @@ class ReviewServiceTest {
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewService service = new ReviewService(wordRepository, new ReviewLogRepository(databaseManager),
-            new SimilarityService(), new ReviewScheduler());
+            new SimilarityService(), new ReviewScheduler(), clock);
 
-        WordCard weak = WordCard.createNew(deck.getId(), "abate", "减弱");
+        WordCard weak = WordCard.createNew(deck.getId(), "abate", "减弱", clock.now());
         weak.setState(CardState.REVIEW);
         weak.setStability(5);
         weak.setDifficulty(5);
         weak.setRepetitions(3);
-        weak.setLastReviewedAt(LocalDateTime.now().minusDays(1));
-        weak.setNextReviewAt(LocalDateTime.now().plusDays(5));
+        weak.setLastReviewedAt(clock.now().minusDays(1));
+        weak.setNextReviewAt(clock.now().plusDays(5));
         weak.setLapses(1);
         weak.setConsecutiveCorrect(0);
         wordRepository.save(weak);
@@ -80,10 +82,10 @@ class ReviewServiceTest {
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewService service = new ReviewService(wordRepository, new ReviewLogRepository(databaseManager),
-            new SimilarityService(), new ReviewScheduler());
+            new SimilarityService(), new ReviewScheduler(), clock);
 
-        WordCard word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
-        wordRepository.save(WordCard.createNew(deck.getId(), "abate", "减少"));
+        WordCard word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的", clock.now()));
+        wordRepository.save(WordCard.createNew(deck.getId(), "abate", "减少", clock.now()));
 
         service.startSession(deck.getId(), ReviewMode.EN_TO_ZH, 1);
         WordCard next = service.nextWord(deck.getId(), ReviewMode.EN_TO_ZH).orElseThrow();
@@ -108,9 +110,9 @@ class ReviewServiceTest {
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewService service = new ReviewService(wordRepository, new ReviewLogRepository(databaseManager),
-            new SimilarityService(), new ReviewScheduler());
+            new SimilarityService(), new ReviewScheduler(), clock);
 
-        WordCard word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
+        WordCard word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的", clock.now()));
 
         service.startSession(deck.getId(), ReviewMode.MIXED, 5);
         assertEquals("lucid", service.nextWord(deck.getId(), ReviewMode.MIXED).orElseThrow().getEnglish());
@@ -206,9 +208,8 @@ class ReviewServiceTest {
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         WordRepository words = new WordRepository(databaseManager);
         ReviewLogRepository logs = new ReviewLogRepository(databaseManager);
-        TestClock clock = new TestClock(LocalDateTime.of(2026, 3, 10, 9, 0));
         for (String word : english) {
-            WordCard card = WordCard.createNew(deck.getId(), word, "释义" + word);
+            WordCard card = WordCard.createNew(deck.getId(), word, "释义" + word, clock.now());
             card.setNextReviewAt(clock.now().minusDays(1));
             words.save(card);
         }

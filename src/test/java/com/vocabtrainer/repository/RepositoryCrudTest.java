@@ -10,8 +10,10 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,6 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RepositoryCrudTest {
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 5, 28, 9, 0);
+
     @TempDir
     Path tempDir;
 
@@ -32,13 +36,13 @@ class RepositoryCrudTest {
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewLogRepository logRepository = new ReviewLogRepository(databaseManager);
 
-        WordCard word = WordCard.createNew(deck.getId(), "querulous", "抱怨的");
+        WordCard word = WordCard.createNew(deck.getId(), "querulous", "抱怨的", NOW);
         wordRepository.save(word);
 
         assertTrue(word.getId() > 0);
         assertEquals(1, wordRepository.countAll(deck.getId()));
         assertTrue(wordRepository.findByEnglish(deck.getId(), "QUERULOUS").isPresent());
-        LocalDateTime soon = LocalDateTime.now().plusMinutes(1);
+        LocalDateTime soon = NOW.plusMinutes(1);
         assertEquals(1, wordRepository.countDue(deck.getId(), soon, soon.plusDays(1)));
 
         word.setChinese("爱抱怨的");
@@ -48,7 +52,7 @@ class RepositoryCrudTest {
         logRepository.insert(new ReviewLog(
             0,
             word.getId(),
-            LocalDateTime.now(),
+            NOW,
             "抱怨的",
             "爱抱怨的",
             0.75,
@@ -62,6 +66,18 @@ class RepositoryCrudTest {
 
         wordRepository.deleteById(word.getId());
         assertFalse(wordRepository.findById(word.getId()).isPresent());
+    }
+
+    @Test
+    void decksAreDatedByTheRepositorysClock() throws Exception {
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("decks.db"));
+        DeckRepository decks = new DeckRepository(databaseManager,
+            Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC));
+
+        Deck created = decks.create("GRE");
+
+        assertEquals(NOW, created.getCreatedAt());
+        assertEquals(NOW, decks.findByName("GRE").orElseThrow().getCreatedAt());
     }
 
     @Test

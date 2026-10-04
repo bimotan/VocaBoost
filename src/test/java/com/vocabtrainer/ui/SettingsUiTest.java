@@ -1,7 +1,5 @@
 package com.vocabtrainer.ui;
 
-import com.vocabtrainer.TestClock;
-import com.vocabtrainer.app.AppServices;
 import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.service.SettingsService;
@@ -16,8 +14,6 @@ import org.junit.jupiter.api.Test;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -33,16 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @Tag("ui")
 class SettingsUiTest extends MainWindowUiTest {
-    /** Tomorrow at 10 am: after the starter words were added, at an hour the rollover tests can rely on. */
-    private static final LocalDateTime NOW = LocalDate.now().plusDays(1).atTime(10, 0);
     private static final Pattern DAYS = Pattern.compile("· (\\d+)d$");
-
-    private final TestClock clock = new TestClock(NOW);
-
-    @Override
-    AppServices.Builder configure(AppServices.Builder builder) {
-        return builder.clock(clock);
-    }
 
     @Test
     void aHigherRetentionShortensTheIntervalsTheRatingButtonsShowAndGive() throws SQLException {
@@ -84,15 +71,15 @@ class SettingsUiTest extends MainWindowUiTest {
 
     @Test
     void anEarlierDayRolloverLeavesAWordDueAfterMidnightForTomorrow() throws SQLException {
-        WordCard dueAtTwo = WordCard.createNew(currentDeck().getId(), "obfuscate", "使模糊");
+        WordCard dueAtTwo = WordCard.createNew(currentDeck().getId(), "obfuscate", "使模糊", clock.now());
         dueAtTwo.setState(CardState.REVIEW);
         dueAtTwo.setStability(10);
         dueAtTwo.setDifficulty(5);
         dueAtTwo.setRepetitions(2);
         dueAtTwo.setConsecutiveCorrect(2);
         dueAtTwo.setIntervalDays(10);
-        dueAtTwo.setLastReviewedAt(NOW.minusDays(10));
-        dueAtTwo.setNextReviewAt(NOW.toLocalDate().plusDays(1).atTime(2, 0));
+        dueAtTwo.setLastReviewedAt(TEST_START.minusDays(10));
+        dueAtTwo.setNextReviewAt(TEST_START.toLocalDate().plusDays(1).atTime(2, 0));
         services.wordRepository().insert(dueAtTwo);
         selectTab("dashboardTab");
         click("refreshDashboardButton");

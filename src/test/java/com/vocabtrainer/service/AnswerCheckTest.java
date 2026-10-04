@@ -244,8 +244,8 @@ class AnswerCheckTest {
 
     @Test
     void replayingAHistoryUsesTheRecordedEffectiveRating() throws SQLException {
-        WordCard overridden = words.insert(WordCard.createNew(deck.getId(), "lucid", LUCID));
-        WordCard legacy = words.insert(WordCard.createNew(deck.getId(), "limpid", "清澈的"));
+        WordCard overridden = words.insert(WordCard.createNew(deck.getId(), "lucid", LUCID, clock.now()));
+        WordCard legacy = words.insert(WordCard.createNew(deck.getId(), "limpid", "清澈的", clock.now()));
         LocalDateTime first = NOW.minusDays(20);
         logs.insert(new ReviewLog(0, overridden.getId(), first, "清楚", LUCID, 0.25, ReviewRating.GOOD, 0,
             ReviewKind.LEARN, ReviewMode.EN_TO_ZH, ReviewRating.GOOD, true));
@@ -277,7 +277,7 @@ class AnswerCheckTest {
 
     /** A mature card, due today: last reviewed 45 days ago at a stability of 45 days. */
     private WordCard dueReview(String english, String chinese) {
-        WordCard card = WordCard.createNew(deck.getId(), english, chinese);
+        WordCard card = WordCard.createNew(deck.getId(), english, chinese, clock.now());
         card.setState(CardState.REVIEW);
         card.setStability(45);
         card.setDifficulty(5);

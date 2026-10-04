@@ -1,5 +1,6 @@
 package com.vocabtrainer.service;
 
+import com.vocabtrainer.TestClock;
 import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.repository.DatabaseManager;
@@ -18,6 +19,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -30,6 +32,9 @@ class DictionaryServiceTest {
 
     @RegisterExtension
     final TestDatabases databases = new TestDatabases();
+
+    /** The time the cache entries are saved and read at. */
+    private final TestClock clock = new TestClock(LocalDateTime.of(2026, 10, 1, 9, 0));
 
     @Test
     void mockDictionaryReturnsCandidate() {
@@ -81,7 +86,8 @@ class DictionaryServiceTest {
         };
         DictionaryService service = new CachingDictionaryService(
             delegate,
-            new DictionaryCacheRepository(databaseManager)
+            new DictionaryCacheRepository(databaseManager),
+            clock
         );
 
         service.lookup("lucid");
@@ -115,11 +121,12 @@ class DictionaryServiceTest {
         DictionaryCacheRepository cache = new DictionaryCacheRepository(databaseManager);
         // What earlier versions cached for ECDICT words: the raw translation.
         cache.save("abandon", String.join("\t", b64("abandon"), b64("vt. 放弃, 抛弃\\nn. 放任"), b64(""), b64(""), b64(""),
-            b64("ECDICT/local CSV"), b64("")), "dictionary", LocalDateTime.now());
+            b64("ECDICT/local CSV"), b64("")), "dictionary", clock.now());
         Path csv = EcdictFixtures.write(tempDir.resolve("ecdict.csv"), false, List.of(EcdictFixtures.ABANDON));
         try (EcdictRepository ecdict = new EcdictRepository(tempDir.resolve("ecdict.db"))) {
             new EcdictImportService(ecdict).importCsv(csv, progress -> { }, () -> false);
-            DictionaryService service = DictionaryServiceFactory.create(cache, new LocalDictionaryService(ecdict));
+            DictionaryService service = DictionaryServiceFactory.create(cache, new LocalDictionaryService(ecdict),
+                Map.of(), clock);
 
             DictionaryLookupResult result = service.lookup("abandon");
 
@@ -135,7 +142,7 @@ class DictionaryServiceTest {
         DatabaseManager databaseManager = databases.open(tempDir.resolve("leftover.db"));
         DictionaryCacheRepository cache = new DictionaryCacheRepository(databaseManager);
         cache.save("abandon", String.join("\t", b64("abandon"), b64("vt. 放弃, 抛弃\\nn. 放任"), b64(""), b64(""), b64(""),
-            b64("ECDICT/local CSV"), b64("")), "dictionary", LocalDateTime.now());
+            b64("ECDICT/local CSV"), b64("")), "dictionary", clock.now());
         DictionaryService online = new DictionaryService() {
             @Override
             public DictionaryLookupResult lookup(String english) {
@@ -150,7 +157,7 @@ class DictionaryServiceTest {
         };
         try (EcdictRepository ecdict = new EcdictRepository(tempDir.resolve("not-imported.db"))) {
             DictionaryService service = new CompositeDictionaryService(List.of(new LocalDictionaryService(ecdict),
-                new CachingDictionaryService(online, cache)));
+                new CachingDictionaryService(online, cache, clock)));
 
             DictionaryLookupResult result = service.lookup("abandon");
 
@@ -178,7 +185,7 @@ class DictionaryServiceTest {
             }
         };
         DictionaryService service = new CompositeDictionaryService(List.of(new LocalDictionaryService(),
-            new CachingDictionaryService(online, new DictionaryCacheRepository(databaseManager))));
+            new CachingDictionaryService(online, new DictionaryCacheRepository(databaseManager), clock)));
 
         assertEquals("释义1", service.lookup("petrichor").entries().get(0).chinese());
         assertEquals("释义1", service.lookup("petrichor").entries().get(0).chinese());
@@ -208,7 +215,8 @@ class DictionaryServiceTest {
                 return true;
             }
         };
-        DictionaryService service = new CachingDictionaryService(delegate, new DictionaryCacheRepository(databaseManager));
+        DictionaryService service = new CachingDictionaryService(delegate, new DictionaryCacheRepository(databaseManager),
+            clock);
 
         service.lookup("abate");
         DictionaryLookupResult refreshed = service.refresh("abate");
@@ -229,8 +237,8 @@ class DictionaryServiceTest {
             b64("Tell me your likes and dislikes."),
             b64("dictionaryapi.dev")
         );
-        cacheRepository.save("like", oldPayload, "dictionary", LocalDateTime.now());
-        DictionaryService service = new CachingDictionaryService(new MockDictionaryService(), cacheRepository);
+        cacheRepository.save("like", oldPayload, "dictionary", clock.now());
+        DictionaryService service = new CachingDictionaryService(new MockDictionaryService(), cacheRepository, clock);
 
         DictionaryLookupResult result = service.lookup("like");
 
@@ -251,7 +259,7 @@ class DictionaryServiceTest {
             b64(""),
             b64("Mock fallback")
         );
-        cacheRepository.save("hi", stalePayload, "dictionary", LocalDateTime.now());
+        cacheRepository.save("hi", stalePayload, "dictionary", clock.now());
         AtomicInteger calls = new AtomicInteger();
         DictionaryService delegate = new DictionaryService() {
             @Override
@@ -273,7 +281,7 @@ class DictionaryServiceTest {
                 return true;
             }
         };
-        DictionaryService service = new CachingDictionaryService(delegate, cacheRepository);
+        DictionaryService service = new CachingDictionaryService(delegate, cacheRepository, clock);
 
         DictionaryLookupResult result = service.lookup("hi");
 

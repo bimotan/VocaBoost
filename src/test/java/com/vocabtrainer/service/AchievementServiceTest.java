@@ -35,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AchievementServiceTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-05-28T09:00:00Z"), ZoneId.of("UTC"));
+    private static final LocalDateTime NOW = LocalDateTime.now(CLOCK);
     private static final LocalDate TODAY = LocalDate.of(2026, 5, 28);
 
     @TempDir
@@ -64,7 +65,7 @@ class AchievementServiceTest {
     @Test
     void reviewBadgesCountTheDecksReviewsButNotPractice() throws Exception {
         Deck deck = decks.ensureDefaultDeck();
-        WordCard word = words.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
+        WordCard word = words.save(WordCard.createNew(deck.getId(), "lucid", "清晰的", NOW));
         for (int i = 0; i < 5; i++) {
             logs.insert(log(word, TODAY.atTime(8, i), ReviewKind.PRACTICE));
         }
@@ -85,8 +86,8 @@ class AchievementServiceTest {
     void streakBadgesBelongToNoDeckAndAreUnlockedOnce() throws Exception {
         Deck gre = decks.ensureDefaultDeck();
         Deck toefl = decks.create("TOEFL");
-        WordCard greWord = words.save(WordCard.createNew(gre.getId(), "lucid", "清晰的"));
-        WordCard toeflWord = words.save(WordCard.createNew(toefl.getId(), "laud", "赞扬"));
+        WordCard greWord = words.save(WordCard.createNew(gre.getId(), "lucid", "清晰的", NOW));
+        WordCard toeflWord = words.save(WordCard.createNew(toefl.getId(), "laud", "赞扬", NOW));
         logs.insert(log(greWord, TODAY.minusDays(2).atTime(20, 0), ReviewKind.REVIEW));
         logs.insert(log(toeflWord, TODAY.minusDays(1).atTime(20, 0), ReviewKind.REVIEW));
 
@@ -107,7 +108,7 @@ class AchievementServiceTest {
         Achievement legacy = new Achievement("streak_3", "3-Day Streak", "Reviewed on 3 consecutive days.",
             LocalDateTime.of(2026, 4, 1, 9, 0), 20);
         achievementRepository.insertIfAbsent(gre.getId(), legacy);
-        WordCard word = words.save(WordCard.createNew(toefl.getId(), "laud", "赞扬"));
+        WordCard word = words.save(WordCard.createNew(toefl.getId(), "laud", "赞扬", NOW));
         logs.insert(log(word, TODAY.minusDays(2).atTime(20, 0), ReviewKind.REVIEW));
         logs.insert(log(word, TODAY.minusDays(1).atTime(20, 0), ReviewKind.REVIEW));
 

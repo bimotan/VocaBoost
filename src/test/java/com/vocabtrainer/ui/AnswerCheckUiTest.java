@@ -118,7 +118,7 @@ class AnswerCheckUiTest extends MainWindowUiTest {
     void anotherDeckWordThatFitsTheChinesePromptIsAcceptedAsASynonym() throws SQLException {
         long deckId = currentDeck().getId();
         WordCard abate = services.wordRepository().findByEnglish(deckId, "abate").orElseThrow();
-        services.wordRepository().insert(WordCard.createNew(deckId, "diminish", "减少; 缩小"));
+        services.wordRepository().insert(WordCard.createNew(deckId, "diminish", "减少; 缩小", clock.now()));
         selectTab("reviewTab");
         this.<ReviewMode>select("reviewModeSelector", mode -> mode == ReviewMode.ZH_TO_EN);
         assertEquals(abate.getChinese(), text("reviewWordLabel"));
