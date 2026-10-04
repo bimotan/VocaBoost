@@ -13,6 +13,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * An AI explanation split into the sections the prompt asks for: the meaning, feedback on the
  * learner's answer, a memory tip or contrast with a confusable word, and an English example with its
@@ -70,28 +72,33 @@ public record AiExplanation(String meaning, String answerFeedback, String memory
         return !meaning.isEmpty() || !answerFeedback.isEmpty() || !memoryTip.isEmpty() || !example.isEmpty();
     }
 
-    /** The sections, one per line, or the reply as it is when it had none. */
+    /**
+     * The sections, one per line, labelled in the app's language, or the reply as it is when it had
+     * none. The AI cache keeps this text, so a cached explanation keeps the labels of the language it
+     * was first asked in.
+     */
     public String text() {
         if (!isStructured()) {
             return raw;
         }
         String newline = System.lineSeparator();
         List<String> lines = new ArrayList<>();
-        addSection(lines, "Meaning", meaning);
-        addSection(lines, "About your answer", answerFeedback);
-        addSection(lines, "Memory tip", memoryTip);
+        if (!meaning.isEmpty()) {
+            lines.add(tr("ai.section.meaning", meaning));
+        }
+        if (!answerFeedback.isEmpty()) {
+            lines.add(tr("ai.section.answer", answerFeedback));
+        }
+        if (!memoryTip.isEmpty()) {
+            lines.add(tr("ai.section.memoryTip", memoryTip));
+        }
         if (!example.isEmpty()) {
-            lines.add("Example: " + example + (exampleTranslation.isEmpty() ? "" : newline + "  " + exampleTranslation));
+            lines.add(tr("ai.section.example",
+                example + (exampleTranslation.isEmpty() ? "" : newline + "  " + exampleTranslation)));
         } else if (!exampleTranslation.isEmpty()) {
-            lines.add("Example: " + exampleTranslation);
+            lines.add(tr("ai.section.example", exampleTranslation));
         }
         return String.join(newline, lines);
-    }
-
-    private static void addSection(List<String> lines, String label, String value) {
-        if (!value.isEmpty()) {
-            lines.add(label + ": " + value);
-        }
     }
 
     private static String field(JsonNode root, String key) {

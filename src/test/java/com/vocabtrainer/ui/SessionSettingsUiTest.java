@@ -5,6 +5,7 @@ import com.vocabtrainer.domain.ReviewKind;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.WordCard;
+import com.vocabtrainer.ui.review.ReviewSessionPresenter;
 import javafx.event.ActionEvent;
 import javafx.scene.control.Spinner;
 import javafx.scene.input.KeyCode;
@@ -82,7 +83,7 @@ class SessionSettingsUiTest extends MainWindowUiTest {
         selectTab("reviewTab");
         assertSession("50", "50");
         assertEquals(ReviewMode.ZH_TO_EN, selectedMode());
-        assertTrue(text("reviewMetaLabel").startsWith(ReviewMode.ZH_TO_EN.getLabel() + " | "), text("reviewMetaLabel"));
+        assertTrue(text("reviewMetaLabel").startsWith("Chinese → English | "), text("reviewMetaLabel"));
 
         selectSize("Custom");
         type("customSessionSizeField", "35");
@@ -202,14 +203,15 @@ class SessionSettingsUiTest extends MainWindowUiTest {
 
     /** The selector shows {@code choice}, and the session counts towards {@code target}. */
     private void assertSession(String choice, String target) {
-        assertEquals(choice, Fx.call(() -> this.<String>comboBox("sessionSizeSelector").getValue()));
+        assertEquals(choice, shownValue("sessionSizeSelector"));
         String progress = text("sessionProgressLabel");
         assertTrue(progress.startsWith("Session 0/" + target + " | "), "the session counts towards " + target + ": "
             + progress);
     }
 
+    /** Picks the size the selector shows as {@code choice}: a number, "All Due" or "Custom". */
     private void selectSize(String choice) {
-        this.<String>select("sessionSizeSelector", choice::equals);
+        this.<String>select("sessionSizeSelector", item -> choice.equals(ReviewSessionPresenter.sessionSizeLabel(item)));
     }
 
     private void selectMode(ReviewMode mode) {

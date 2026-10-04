@@ -1,5 +1,6 @@
 package com.vocabtrainer.ui;
 
+import com.vocabtrainer.util.Messages;
 import javafx.concurrent.Task;
 import javafx.scene.Node;
 import javafx.scene.control.Labeled;
@@ -130,7 +131,8 @@ public final class UiAsync implements TaskRunner {
     }
 
     private void handleFailure(Throwable error, Consumer<Throwable> onFailure, Labeled status, String runningMessage) {
-        LOGGER.log(Level.WARNING, "Background task failed" + (runningMessage == null ? "" : ": " + runningMessage), error);
+        LOGGER.log(Level.WARNING, "Background task failed"
+            + (runningMessage == null ? "" : ": " + Messages.inEnglish(runningMessage)), error);
         if (status != null && runningMessage != null && runningMessage.equals(status.getText())) {
             status.setText(tr("task.failed", UiErrors.rootMessage(error)));
         }

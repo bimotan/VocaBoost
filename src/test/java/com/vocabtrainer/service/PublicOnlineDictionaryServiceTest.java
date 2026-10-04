@@ -88,7 +88,7 @@ class PublicOnlineDictionaryServiceTest {
         DictionaryLookupResult result = service.lookup("tabel");
 
         assertEquals(LookupOutcome.NOT_FOUND, result.outcome());
-        assertEquals("词条未找到：dictionaryapi.dev 没有该词条。 | 词条未找到：Wiktionary 没有该词的英语词条。",
+        assertEquals("Not found: dictionaryapi.dev does not have this word. | Not found: Wiktionary has no English entry for this word.",
             result.message());
         assertEquals(VerificationStatus.UNVERIFIED, service.verify("tabel").status());
     }
@@ -103,7 +103,7 @@ class PublicOnlineDictionaryServiceTest {
         DictionaryLookupResult result = service.lookup("recieve");
 
         assertEquals(LookupOutcome.NOT_FOUND, result.outcome());
-        assertTrue(result.message().endsWith("词条未找到：Wiktionary 只把该词列为拼写错误（Misspelling of receive.）。"),
+        assertTrue(result.message().endsWith("Not found: Wiktionary lists this word only as a misspelling (Misspelling of receive.)."),
             result.message());
     }
 
@@ -119,7 +119,7 @@ class PublicOnlineDictionaryServiceTest {
         DictionaryLookupResult result = service.lookup("alot");
 
         assertEquals(LookupOutcome.NOT_FOUND, result.outcome(), result.toString());
-        assertTrue(result.message().endsWith("（(nonstandard) Misspelling of a lot.）。"), result.message());
+        assertTrue(result.message().endsWith(" ((nonstandard) Misspelling of a lot.)."), result.message());
     }
 
     @Test
@@ -149,7 +149,7 @@ class PublicOnlineDictionaryServiceTest {
         DictionaryLookupResult result = service.lookup("lucid");
 
         assertEquals(LookupOutcome.RATE_LIMITED, result.outcome());
-        assertEquals("dictionaryapi.dev：查询次数受限（HTTP 429），请在 60 秒后再试。 | 词条未找到：Wiktionary 没有该词条。",
+        assertEquals("dictionaryapi.dev: too many requests (HTTP 429): try again in 60 seconds. | Not found: Wiktionary does not have this word.",
             result.message());
         assertEquals(VerificationStatus.UNCHECKED, service.verify("lucid").status());
     }
@@ -162,7 +162,7 @@ class PublicOnlineDictionaryServiceTest {
         DictionaryLookupResult result = service.lookup("petrichor");
 
         assertEquals(LookupOutcome.TIMEOUT, result.outcome());
-        assertEquals("词条未找到：dictionaryapi.dev 没有该词条。 | Wiktionary：0.5 秒内没有响应。", result.message());
+        assertEquals("Not found: dictionaryapi.dev does not have this word. | Wiktionary: no answer within 0.5 seconds.", result.message());
     }
 
     @Test
@@ -173,7 +173,7 @@ class PublicOnlineDictionaryServiceTest {
         server.answer("/dictapi/lucid", 200, "[{\"word\":\"lucid\",");
         DictionaryLookupResult malformed = service.lookup("lucid");
         assertEquals(LookupOutcome.BAD_RESPONSE, malformed.outcome());
-        assertTrue(malformed.message().startsWith("dictionaryapi.dev：返回的内容不是有效的 JSON（"), malformed.message());
+        assertTrue(malformed.message().startsWith("dictionaryapi.dev: the answer is not valid JSON ("), malformed.message());
     }
 
     @Test

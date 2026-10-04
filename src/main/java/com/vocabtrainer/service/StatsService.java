@@ -28,6 +28,8 @@ import java.util.Map;
 import java.util.OptionalDouble;
 import java.util.function.Supplier;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 public class StatsService {
     /** The memory distribution's bucket of words never reviewed. */
     public static final String NEW_WORDS_BUCKET = "New";
@@ -260,7 +262,7 @@ public class StatsService {
     }
 
     public Path exportMarkdownReport(long deckId, Path outputPath) {
-        return exportMarkdownReport(deckId, "Deck " + deckId, null, outputPath);
+        return exportMarkdownReport(deckId, null, null, outputPath);
     }
 
     public Path exportMarkdownReport(long deckId, String deckName, DailyGoalProgress progress, Path outputPath) {
@@ -278,52 +280,59 @@ public class StatsService {
     }
 
     public String buildMarkdownReport(long deckId) {
-        return buildMarkdownReport(deckId, "Deck " + deckId, null);
+        return buildMarkdownReport(deckId, null, null);
     }
 
+    /**
+     * The learning report, in the app's language: the deck's numbers, the goals (when {@code progress}
+     * is given), the last 14 days, and the hardest words. A deck without a name is called by its id.
+     */
     public String buildMarkdownReport(long deckId, String deckName, DailyGoalProgress progress) {
         DashboardStats dashboard = dashboardStats(deckId);
+        String newline = System.lineSeparator();
         StringBuilder builder = new StringBuilder();
-        builder.append("# VocaBoost Learning Report").append(System.lineSeparator()).append(System.lineSeparator());
-        builder.append("- Deck: ").append(deckName == null || deckName.isBlank() ? "Deck " + deckId : deckName)
-            .append(System.lineSeparator());
-        builder.append("- Total words: ").append(dashboard.totalWords()).append(System.lineSeparator());
+        builder.append("# ").append(tr("report.title")).append(newline).append(newline);
+        item(builder, tr("report.deck", deckName == null || deckName.isBlank()
+            ? tr("report.deckById", String.valueOf(deckId)) : deckName));
+        item(builder, tr("report.totalWords", dashboard.totalWords()));
         if (dashboard.suspendedWords() > 0) {
-            builder.append("- Suspended words: ").append(dashboard.suspendedWords()).append(System.lineSeparator());
+            item(builder, tr("report.suspendedWords", dashboard.suspendedWords()));
         }
-        builder.append("- Due words: ").append(dashboard.dueToday()).append(System.lineSeparator());
-        builder.append("- Mastered words: ").append(dashboard.masteredWords()).append(System.lineSeparator());
-        builder.append("- Reviews today: ").append(dashboard.reviewedToday()).append(System.lineSeparator());
-        builder.append("- Accuracy today: ").append(percent(dashboard.accuracyToday())).append(System.lineSeparator());
-        builder.append("- Overdue words: ").append(overdueCount(deckId)).append(System.lineSeparator()).append(System.lineSeparator());
+        item(builder, tr("report.dueWords", dashboard.dueToday()));
+        item(builder, tr("report.masteredWords", dashboard.masteredWords()));
+        item(builder, tr("report.reviewsToday", dashboard.reviewedToday()));
+        item(builder, tr("report.accuracyToday", percent(dashboard.accuracyToday())));
+        item(builder, tr("report.overdueWords", overdueCount(deckId)));
+        builder.append(newline);
         if (progress != null) {
-            builder.append("## Goals").append(System.lineSeparator()).append(System.lineSeparator());
-            builder.append("- Review goal: ").append(progress.reviewedCount()).append("/")
-                .append(progress.reviewGoal()).append(System.lineSeparator());
-            builder.append("- New-word goal: ").append(progress.newWordsCount()).append("/")
-                .append(progress.newWordGoal()).append(System.lineSeparator());
-            builder.append("- Streak (all decks): ").append(DateTimeUtil.days(progress.currentStreak()))
-                .append(System.lineSeparator());
-            builder.append("- Deck XP: ").append(progress.totalXp()).append(System.lineSeparator()).append(System.lineSeparator());
+            heading(builder, tr("report.goals"));
+            item(builder, tr("report.reviewGoal", progress.reviewedCount(), progress.reviewGoal()));
+            item(builder, tr("report.newWordGoal", progress.newWordsCount(), progress.newWordGoal()));
+            item(builder, tr("report.streak", DateTimeUtil.days(progress.currentStreak())));
+            item(builder, tr("report.deckXp", progress.totalXp()));
+            builder.append(newline);
         }
-        builder.append("## Recent Review Curve").append(System.lineSeparator()).append(System.lineSeparator());
+        heading(builder, tr("report.curve"));
         for (DailyReviewStat stat : dailyReviewStats(deckId, 14)) {
-            builder.append("- ").append(stat.date()).append(": ")
-                .append(stat.reviewCount()).append(" reviews, ")
-                .append(percent(stat.accuracy())).append(" accuracy").append(System.lineSeparator());
+            item(builder, tr("report.curve.day", stat.date().toString(), stat.reviewCount(), percent(stat.accuracy())));
         }
-        builder.append(System.lineSeparator());
-        builder.append("## Learning Analytics").append(System.lineSeparator()).append(System.lineSeparator());
-        builder.append("VocaBoost combines spaced repetition, retrieval practice, adaptive scheduling, ")
-            .append("and review-log analytics to prioritize words that are due, weak, or repeatedly vague.")
-            .append(System.lineSeparator()).append(System.lineSeparator());
-        builder.append("## Hardest Words").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append(newline);
+        heading(builder, tr("report.analytics"));
+        builder.append(tr("report.analytics.text")).append(newline).append(newline);
+        heading(builder, tr("report.hardest"));
         for (HardWordStat word : hardestWords(deckId, 10)) {
-            builder.append("- ").append(word.english())
-                .append(": avg similarity ").append(percent(word.averageSimilarity()))
-                .append(", Again ").append(word.againCount()).append(System.lineSeparator());
+            item(builder, tr("report.hardest.word", word.english(), percent(word.averageSimilarity()),
+                tr("rating.again"), word.againCount()));
         }
         return builder.toString();
+    }
+
+    private static void heading(StringBuilder builder, String text) {
+        builder.append("## ").append(text).append(System.lineSeparator()).append(System.lineSeparator());
+    }
+
+    private static void item(StringBuilder builder, String text) {
+        builder.append("- ").append(text).append(System.lineSeparator());
     }
 
     private String percent(double value) {

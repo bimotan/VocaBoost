@@ -70,7 +70,7 @@ public class EcdictTagDeckService {
             return code;
         }
 
-        /** The exam's name in the app's language, such as "GRE" or "Kaoyan (考研)". */
+        /** The exam's name in the app's language, such as "GRE" or "Kaoyan 考研" (考研 in Chinese). */
         public String label() {
             return switch (this) {
                 case GRE -> tr("ecdict.tag.gre");

@@ -32,7 +32,7 @@ class LocalDictionaryServiceTest {
             assertEquals(LocalDictionaryService.STARTER_SOURCE, abate.source());
             assertTrue(service.verify("abate").found());
             assertFalse(service.verify("notarealword").found());
-            assertEquals("词条未找到：本地词库没有该词条。", service.lookup("notarealword").message());
+            assertEquals("Not found: the local dictionary does not have this word.", service.lookup("notarealword").message());
             assertFalse(service.status().ecdictImported());
             assertEquals("ECDICT: not imported. Bundled GRE starter: 215 entries.", service.status().toDisplayText());
             assertFalse(Files.exists(tempDir.resolve("ecdict.db")), "looking up must not create the dictionary file");

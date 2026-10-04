@@ -1,12 +1,17 @@
 package com.vocabtrainer.ui;
 
+import com.vocabtrainer.domain.Achievement;
 import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewRating;
 
 import static com.vocabtrainer.util.Messages.tr;
 
-/** The names the user sees for the review modes, ratings and card states; free of JavaFX. */
+/**
+ * The names the user sees for the review modes (which are also the question directions), ratings,
+ * card states and badges; free of JavaFX. The enums and the badge codes are identifiers stored in the
+ * database and the backups, never shown as they are.
+ */
 public final class Labels {
     private Labels() {
     }
@@ -50,6 +55,25 @@ public final class Labels {
             case LEARNING -> tr("cardState.learning");
             case REVIEW -> tr("cardState.review");
             case RELEARNING -> tr("cardState.relearning");
+        };
+    }
+
+    /**
+     * The name of a badge in the app's language. The database keeps the English name the badge was
+     * unlocked with; a badge this version does not know (one a newer version unlocked) shows that name.
+     */
+    public static String achievement(Achievement achievement) {
+        return switch (achievement.code()) {
+            case "first_review" -> tr("achievement.firstReview");
+            case "review_10" -> tr("achievement.reviews", 10);
+            case "review_50" -> tr("achievement.reviews", 50);
+            case "review_100" -> tr("achievement.reviews", 100);
+            case "streak_3" -> tr("achievement.streak", 3);
+            case "streak_7" -> tr("achievement.streak", 7);
+            case "streak_30" -> tr("achievement.streak", 30);
+            case "daily_goal" -> tr("achievement.dailyGoal");
+            case "overdue_rescue" -> tr("achievement.overdueRescue");
+            default -> achievement.name();
         };
     }
 }

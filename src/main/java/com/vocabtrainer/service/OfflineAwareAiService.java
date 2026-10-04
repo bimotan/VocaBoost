@@ -4,14 +4,18 @@ import com.vocabtrainer.domain.WordCard;
 
 import java.util.function.BooleanSupplier;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The configured AI provider, which is not asked while offline mode is on: explanations then come
  * from the offline mock text with a note, and no request is sent. Offline mode is checked at each
  * call, so switching it applies at once, also to a review card that is already on screen.
  */
 public class OfflineAwareAiService implements AiService {
-    /** Appended to the mock text while offline mode is on. */
-    public static final String OFFLINE_NOTE = "Offline mode is on: no AI request was sent.";
+    /** Appended to the mock text while offline mode is on, in the app's language. */
+    public static String offlineNote() {
+        return tr("ai.note.offline");
+    }
 
     private final AiService online;
     private final AiService offlineFallback;
@@ -45,6 +49,6 @@ public class OfflineAwareAiService implements AiService {
     }
 
     private String offlineText(ExplanationRequest request) {
-        return offlineFallback.explain(request) + System.lineSeparator() + OFFLINE_NOTE;
+        return offlineFallback.explain(request) + System.lineSeparator() + offlineNote();
     }
 }

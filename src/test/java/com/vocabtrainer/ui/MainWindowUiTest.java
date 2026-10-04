@@ -69,14 +69,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  *
  * <p>The window is shown in the language saved in its database, as the app does, and the computer's
  * locale is taken to be English ({@link #TEST_SYSTEM_LOCALE}), so the tests see the English texts
- * whatever the locale of the machine they run on, unless a test saves another language.
+ * whatever the locale of the machine they run on, unless a test saves another language or overrides
+ * {@link #systemLocale()}.
  *
  * <p>Dashboard, Decks, Statistics and Word List recompute their content only while their tab is
  * shown, like a user would see them, so select the tab before reading its controls.
  */
 @Tag("ui")
 abstract class MainWindowUiTest {
-    static final String STARTER_DECK = "默认词库";
+    /** The deck a new database starts with, named in the app's language. */
+    static final String STARTER_DECK = "Default deck";
     static final int STARTER_WORDS = 215;
     /** The default new-words-per-day limit: how many of the new starter words are due on a day. */
     static final int NEW_WORDS_PER_DAY = ReviewSettings.DEFAULT_NEW_CARDS_PER_DAY;
@@ -119,16 +121,17 @@ abstract class MainWindowUiTest {
         AppServices.Builder configured = configure(builder);
         // Like VocabTrainerApp.start, the services and the window are created on the FX thread, in the
         // language the database has saved.
+        Locale systemLocale = systemLocale();
         Fx.run(() -> {
-            VocabTrainerApp.useLanguage(LanguageSettings.Language.AUTO, TEST_SYSTEM_LOCALE);
+            VocabTrainerApp.useLanguage(LanguageSettings.Language.AUTO, systemLocale);
             try {
                 services = configured.open();
             } catch (Exception e) {
                 throw new IllegalStateException("Cannot open the test database", e);
             }
-            VocabTrainerApp.useLanguage(new LanguageSettings(services.settingsService()).language(), TEST_SYSTEM_LOCALE);
+            VocabTrainerApp.useLanguage(new LanguageSettings(services.settingsService()).language(), systemLocale);
             stage = new Stage();
-            VocabTrainerApp.showMainWindow(stage, services.createMainWindow(dialogs, TEST_SYSTEM_LOCALE));
+            VocabTrainerApp.showMainWindow(stage, services.createMainWindow(dialogs, systemLocale));
         });
     }
 
@@ -142,6 +145,14 @@ abstract class MainWindowUiTest {
         services.close();
         services = null;
         showMainWindow();
+    }
+
+    /**
+     * The computer's locale the window is opened with, which the language setting Auto follows:
+     * {@link #TEST_SYSTEM_LOCALE} unless overridden ({@link #testName()} tells which test is starting).
+     */
+    Locale systemLocale() {
+        return TEST_SYSTEM_LOCALE;
     }
 
     /**
@@ -204,7 +215,7 @@ abstract class MainWindowUiTest {
         public DictionaryLookupResult lookup(String english) {
             DictionaryEntry entry = ENTRIES.get(english == null ? "" : english.trim().toLowerCase(Locale.ROOT));
             return entry == null
-                ? DictionaryLookupResult.notFound("词条未找到：测试词典没有该词条。")
+                ? DictionaryLookupResult.notFound("Not found: the test dictionary does not have this word.")
                 : DictionaryLookupResult.success("Loaded from the test dictionary.", List.of(entry));
         }
 
@@ -459,6 +470,20 @@ abstract class MainWindowUiTest {
     }
 
     /** The id of the node that has the keyboard focus in the window, or null. */
+    /** The text a combo box shows for its value, as its button cell renders it. */
+    String shownValue(String comboBoxId) {
+        return Fx.call(() -> {
+            ComboBox<?> comboBox = comboBox(comboBoxId);
+            return comboBox.getButtonCell() != null ? comboBox.getButtonCell().getText()
+                : comboBox.getConverter().toString(cast(comboBox.getValue()));
+        });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T cast(Object value) {
+        return (T) value;
+    }
+
     String focusOwnerId() {
         return Fx.call(() -> {
             Node owner = stage.getScene().getFocusOwner();

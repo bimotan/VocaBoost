@@ -45,7 +45,7 @@ class DictionaryServiceTest {
         DictionaryLookupResult result = new MockDictionaryService().lookup("notarealword");
 
         assertFalse(result.success());
-        assertTrue(result.message().contains("词条未找到"));
+        assertTrue(result.message().contains("Not found"));
     }
 
     @Test

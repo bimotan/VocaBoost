@@ -38,11 +38,11 @@ class CrossDeckUiTest extends MainWindowUiTest {
         assertTrue(deckColumnVisible());
         type("wordSearchField", "abate");
         // A word's rows are in the order of the deck selector (by name).
-        assertEquals(List.of("abate TOEFL", "abate " + STARTER_DECK), rows());
-        assertEquals("减轻", chineseOfRow(0));
-        assertEquals(STARTER_ABATE, chineseOfRow(1));
+        assertEquals(List.of("abate " + STARTER_DECK, "abate TOEFL"), rows());
+        assertEquals(STARTER_ABATE, chineseOfRow(0));
+        assertEquals("减轻", chineseOfRow(1));
         // The details say which deck the selected word is in.
-        Fx.run(() -> this.<WordCard>table("wordTable").getSelectionModel().select(0));
+        Fx.run(() -> this.<WordCard>table("wordTable").getSelectionModel().select(1));
         assertEquals("abate   减轻   (TOEFL)", text("wordDetailsTitle"));
         snapshot("all-decks");
         type("wordSearchField", "zeugma");
@@ -82,7 +82,8 @@ class CrossDeckUiTest extends MainWindowUiTest {
         click("deleteWordButton");
         assertEquals("Delete 2 words from 2 decks?", dialogs.last(ScriptedDialogs.Kind.CHOOSE).header());
 
-        Fx.run(() -> this.<WordCard>table("wordTable").getSelectionModel().clearAndSelect(0));
+        // TOEFL's abate, after the starter deck's by the decks' names.
+        Fx.run(() -> this.<WordCard>table("wordTable").getSelectionModel().clearAndSelect(1));
         dialogs.chooseButton("Delete");
 
         click("deleteWordButton");

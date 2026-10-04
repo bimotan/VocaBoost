@@ -36,7 +36,7 @@ class StartupDeckTest {
     void brandNewDatabaseImportsStarterExactlyOnce() throws Exception {
         Launch first = launch();
 
-        assertEquals(DeckRepository.DEFAULT_DECK_NAME, first.deck().getName());
+        assertEquals("Default deck", first.deck().getName(), "named in the language of the app");
         assertTrue(first.starter().isPresent());
         int starterCount = first.starter().get().importedCount();
         assertTrue(starterCount >= 100, "starter words imported: " + starterCount);
@@ -95,7 +95,7 @@ class StartupDeckTest {
         assertEquals(first.deck().getId(), second.deck().getId());
         assertEquals("GRE 核心", second.deck().getName());
         assertEquals(1, second.decks().findAllIncludingArchived().size());
-        assertTrue(second.decks().findAnyByName(DeckRepository.DEFAULT_DECK_NAME).isEmpty());
+        assertTrue(second.decks().findAnyByName("Default deck").isEmpty());
         assertTrue(second.starter().isEmpty());
         assertEquals(starterCount, second.words().countAll(second.deck().getId()));
     }

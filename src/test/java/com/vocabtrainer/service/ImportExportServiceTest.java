@@ -23,6 +23,7 @@ import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -314,7 +315,7 @@ class ImportExportServiceTest {
         assertEquals(rows - 1, result.skippedCount());
         assertEquals(ImportExportService.MAX_LISTED_MESSAGES + 1, result.messages().size());
         assertEquals("Line 3 skipped: duplicate word abate", result.messages().get(0));
-        assertEquals("... and " + (rows - 1 - ImportExportService.MAX_LISTED_MESSAGES) + " more rows skipped.",
+        assertEquals(String.format(Locale.ENGLISH, "... and %,d more rows skipped.", rows - 1 - ImportExportService.MAX_LISTED_MESSAGES),
             result.messages().get(result.messages().size() - 1));
     }
 

@@ -10,6 +10,8 @@ import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 public class SettingsService {
     private static final Logger LOGGER = Logger.getLogger(SettingsService.class.getName());
 
@@ -105,13 +107,13 @@ public class SettingsService {
         String cleanModel = model == null ? "" : model.trim();
         String cleanTemperature = temperature == null ? "" : temperature.trim();
         if (cleanBaseUrl.isBlank() || cleanApiKey.isBlank() || cleanModel.isBlank()) {
-            throw new IllegalArgumentException("AI base URL, API key, and model are required.");
+            throw new IllegalArgumentException(tr("ai.error.required"));
         }
-        ApiKeys.requireSafeToSendKey(AiEndpoint.chatCompletions(cleanBaseUrl), "The AI base URL");
-        ApiKeys.requireSendable(cleanApiKey, "The API key");
+        ApiKeys.requireSafeToSendKey(AiEndpoint.chatCompletions(cleanBaseUrl), tr("ai.name.baseUrl"));
+        ApiKeys.requireSendable(cleanApiKey, tr("ai.name.apiKey"));
         Optional<Double> parsedTemperature = parseTemperature(cleanTemperature);
         if (!cleanTemperature.isEmpty() && parsedTemperature.isEmpty()) {
-            throw new IllegalArgumentException("Temperature must be a number from 0 to 2, or empty for the provider's default.");
+            throw new IllegalArgumentException(tr("ai.error.temperature"));
         }
         save(AI_PROVIDER_KEY, cleanProvider);
         save(AI_BASE_URL_KEY, cleanBaseUrl);

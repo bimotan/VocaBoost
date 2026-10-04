@@ -79,7 +79,7 @@ class LearningStepsUiTest extends MainWindowUiTest {
 
         assertEquals(failed.getEnglish(), text("reviewWordLabel"), "after " + second.getEnglish() + " and "
             + third.getEnglish());
-        assertTrue(text("reviewMetaLabel").startsWith("英译中 | Learning | Recall "), text("reviewMetaLabel"));
+        assertTrue(text("reviewMetaLabel").startsWith("English → Chinese | Learning | Recall "), text("reviewMetaLabel"));
         assertTrue(text("sessionProgressLabel").startsWith("Session 3/20 | "), text("sessionProgressLabel"));
     }
 

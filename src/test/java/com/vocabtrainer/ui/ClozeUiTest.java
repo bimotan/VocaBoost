@@ -36,7 +36,7 @@ class ClozeUiTest extends MainWindowUiTest {
         assertEquals("Hint: 减弱; 减少 · verb", text("reviewHintLabel"));
         assertEquals("Type the missing word", Fx.call(() -> find("answerField", TextField.class)
             .getPromptText()));
-        assertTrue(text("reviewMetaLabel").startsWith("Cloze / 例句填空 | New"), text("reviewMetaLabel"));
+        assertTrue(text("reviewMetaLabel").startsWith("Cloze | New"), text("reviewMetaLabel"));
         snapshot("question");
 
         type("answerField", "abated");

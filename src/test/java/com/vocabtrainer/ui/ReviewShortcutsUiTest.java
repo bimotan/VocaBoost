@@ -3,6 +3,7 @@ package com.vocabtrainer.ui;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
+import com.vocabtrainer.ui.review.ReviewSessionPresenter;
 import javafx.scene.Node;
 import javafx.scene.input.KeyCode;
 import org.junit.jupiter.api.Tag;
@@ -89,7 +90,7 @@ class ReviewShortcutsUiTest extends MainWindowUiTest {
 
     @Test
     void numberKeysTypedIntoAnotherFieldAreNotRatings() throws SQLException {
-        Fx.run(() -> this.<String>comboBox("sessionSizeSelector").getSelectionModel().select("Custom"));
+        Fx.run(() -> this.<String>comboBox("sessionSizeSelector").getSelectionModel().select(ReviewSessionPresenter.CUSTOM));
         answerWithEnter(true);
 
         pressKey("customSessionSizeField", KeyCode.DIGIT2);

@@ -95,7 +95,7 @@ class ReviewSessionPresenterTest {
         WordCard card = presenter.card().orElseThrow();
         assertEquals(deckId, card.getDeckId());
         assertEquals(card.getEnglish(), presenter.question());
-        assertEquals("英译中 | New | Lapses 0", presenter.details());
+        assertEquals("English → Chinese | New | Lapses 0", presenter.details());
         assertEquals("Enter Chinese meaning", presenter.answerPrompt());
         assertEquals("Session 0/20 | Accuracy 0% | XP 0", presenter.sessionProgress());
         assertEquals("", presenter.result());
@@ -382,7 +382,7 @@ class ReviewSessionPresenterTest {
     @Test
     void reachingTheSessionTargetCompletesTheSession() {
         presenter.showDeck(deckId);
-        presenter.startSession("Custom", " 1 ");
+        presenter.startSession(ReviewSessionPresenter.CUSTOM, " 1 ");
         assertEquals("Session 0/1 | Accuracy 0% | XP 0", presenter.sessionProgress());
         presenter.setAnswer(firstMeaning(presenter.card().orElseThrow()));
         presenter.submit();
@@ -422,7 +422,7 @@ class ReviewSessionPresenterTest {
         long cardNumber = presenter.cardNumber();
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-            () -> presenter.startSession("Custom", "0"));
+            () -> presenter.startSession(ReviewSessionPresenter.CUSTOM, "0"));
 
         assertEquals("Custom session size must be between 1 and 500.", error.getMessage());
         assertEquals(cardNumber, presenter.cardNumber());
@@ -448,7 +448,7 @@ class ReviewSessionPresenterTest {
 
         assertEquals(failed, presenter.question(), "the failed word comes back before the session ends");
         assertEquals(CardState.LEARNING, presenter.card().orElseThrow().getState());
-        assertTrue(presenter.details().startsWith("英译中 | Learning | Recall "), presenter.details());
+        assertTrue(presenter.details().startsWith("English → Chinese | Learning | Recall "), presenter.details());
         assertTrue(presenter.sessionProgress().startsWith("Session 2/20 | Accuracy 50% | XP "), presenter.sessionProgress());
     }
 
@@ -655,20 +655,20 @@ class ReviewSessionPresenterTest {
         presenter.showDeck(deckId);
         assertEquals(ReviewMode.MIXED, presenter.mode());
 
-        presenter.selectSessionSize("All Due", "");
-        assertEquals("All Due", presenter.sessionSizeChoice());
+        presenter.selectSessionSize(ReviewSessionPresenter.ALL_DUE, "");
+        assertEquals(ReviewSessionPresenter.ALL_DUE, presenter.sessionSizeChoice());
         assertEquals("Session 0/All Due | Accuracy 0% | XP 0", presenter.sessionProgress());
-        presenter.selectSessionSize("Custom", "7");
-        assertEquals("Custom", presenter.sessionSizeChoice());
+        presenter.selectSessionSize(ReviewSessionPresenter.CUSTOM, "7");
+        assertEquals(ReviewSessionPresenter.CUSTOM, presenter.sessionSizeChoice());
         assertEquals("7", presenter.customSessionSize());
         assertEquals("Session 0/7 | Accuracy 0% | XP 0", presenter.sessionProgress());
         // While the user is still typing, nothing changes.
-        presenter.selectSessionSize("Custom", "");
-        presenter.selectSessionSize("Custom", "0");
+        presenter.selectSessionSize(ReviewSessionPresenter.CUSTOM, "");
+        presenter.selectSessionSize(ReviewSessionPresenter.CUSTOM, "0");
         assertEquals("Session 0/7 | Accuracy 0% | XP 0", presenter.sessionProgress());
         // A custom 20 stays Custom.
-        presenter.selectSessionSize("Custom", "20");
-        assertEquals("Custom", presenter.sessionSizeChoice());
+        presenter.selectSessionSize(ReviewSessionPresenter.CUSTOM, "20");
+        assertEquals(ReviewSessionPresenter.CUSTOM, presenter.sessionSizeChoice());
         assertEquals("Session 0/20 | Accuracy 0% | XP 0", presenter.sessionProgress());
         presenter.selectSessionSize("20", "20");
         assertEquals("20", presenter.sessionSizeChoice());
@@ -677,7 +677,7 @@ class ReviewSessionPresenterTest {
     @Test
     void aLargerSessionSizeLetsACompletedSessionGoOn() {
         presenter.showDeck(deckId);
-        presenter.startSession("Custom", "1");
+        presenter.startSession(ReviewSessionPresenter.CUSTOM, "1");
         presenter.setAnswer(firstMeaning(presenter.card().orElseThrow()));
         presenter.submit();
         presenter.rate(ReviewRating.EASY);
@@ -692,7 +692,7 @@ class ReviewSessionPresenterTest {
     @Test
     void editedGoalsSetTheSessionTargetAndLetACompletedSessionGoOn() {
         presenter.showDeck(deckId);
-        presenter.startSession("Custom", "1");
+        presenter.startSession(ReviewSessionPresenter.CUSTOM, "1");
         presenter.setAnswer(firstMeaning(presenter.card().orElseThrow()));
         presenter.submit();
         presenter.rate(ReviewRating.EASY);
@@ -710,7 +710,7 @@ class ReviewSessionPresenterTest {
         assertTrue(presenter.sessionProgress().startsWith("Session 1/50 | Accuracy 100% | XP "), presenter.sessionProgress());
         presenter.resetSession();
         assertEquals("Session 0/50 | Accuracy 0% | XP 0", presenter.sessionProgress(), "a new session keeps the goal");
-        presenter.startSession("Custom", "1");
+        presenter.startSession(ReviewSessionPresenter.CUSTOM, "1");
         presenter.setAnswer(firstMeaning(presenter.card().orElseThrow()));
         presenter.submit();
         presenter.rate(ReviewRating.EASY);
@@ -749,7 +749,7 @@ class ReviewSessionPresenterTest {
 
         presenter.rate(ReviewRating.GOOD);
 
-        assertTrue(presenter.result().startsWith(ReviewSessionPresenter.PRACTICE_SAVED + " XP +"), presenter.result());
+        assertTrue(presenter.result().startsWith("Practice saved: the word was not due, so its schedule did not change. XP +"), presenter.result());
         WordCard second = presenter.card().orElseThrow();
         assertNotEquals(first.getId(), second.getId());
         presenter.setAnswer(second.getChinese());
@@ -774,7 +774,7 @@ class ReviewSessionPresenterTest {
 
         presenter.rate(ReviewRating.GOOD);
 
-        assertTrue(presenter.result().startsWith(ReviewSessionPresenter.PRACTICE_MISSED + " XP +"), presenter.result());
+        assertTrue(presenter.result().startsWith("Practice saved: the word was not due, but after this miss it is due again from the next study day. XP +"), presenter.result());
         WordCard practiced = services.wordRepository().findById(first.getId()).orElseThrow();
         assertTrue(practiced.getNextReviewAt().isBefore(first.getNextReviewAt()));
     }
@@ -822,13 +822,16 @@ class ReviewSessionPresenterTest {
     void sessionSizeChoicesAreParsed() {
         assertEquals(10, ReviewSessionPresenter.parseSessionSize("10", ""));
         assertEquals(50, ReviewSessionPresenter.parseSessionSize("50", "7"));
-        assertEquals(0, ReviewSessionPresenter.parseSessionSize("All Due", ""));
-        assertEquals(7, ReviewSessionPresenter.parseSessionSize("Custom", " 7 "));
-        assertEquals(500, ReviewSessionPresenter.parseSessionSize("Custom", "500"));
+        assertEquals(0, ReviewSessionPresenter.parseSessionSize(ReviewSessionPresenter.ALL_DUE, ""));
+        assertEquals(7, ReviewSessionPresenter.parseSessionSize(ReviewSessionPresenter.CUSTOM, " 7 "));
+        assertEquals(500, ReviewSessionPresenter.parseSessionSize(ReviewSessionPresenter.CUSTOM, "500"));
         assertEquals(20, ReviewSessionPresenter.parseSessionSize(null, null));
-        assertThrows(IllegalArgumentException.class, () -> ReviewSessionPresenter.parseSessionSize("Custom", "501"));
-        assertThrows(IllegalArgumentException.class, () -> ReviewSessionPresenter.parseSessionSize("Custom", "-1"));
-        assertThrows(IllegalArgumentException.class, () -> ReviewSessionPresenter.parseSessionSize("Custom", "abc"));
+        assertThrows(IllegalArgumentException.class, () -> ReviewSessionPresenter.parseSessionSize(ReviewSessionPresenter.CUSTOM, "501"));
+        assertThrows(IllegalArgumentException.class, () -> ReviewSessionPresenter.parseSessionSize(ReviewSessionPresenter.CUSTOM, "-1"));
+        assertThrows(IllegalArgumentException.class, () -> ReviewSessionPresenter.parseSessionSize(ReviewSessionPresenter.CUSTOM, "abc"));
+        assertEquals("All Due", ReviewSessionPresenter.sessionSizeLabel(ReviewSessionPresenter.ALL_DUE));
+        assertEquals("Custom", ReviewSessionPresenter.sessionSizeLabel(ReviewSessionPresenter.CUSTOM));
+        assertEquals("20", ReviewSessionPresenter.sessionSizeLabel("20"));
     }
 
     @Test
@@ -865,7 +868,7 @@ class ReviewSessionPresenterTest {
         assertTrue(presenter.isSentenceQuestion());
         assertEquals("Hint: " + card.getChinese() + " · " + card.getPartOfSpeech(), presenter.hint());
         assertEquals("Type the missing word", presenter.answerPrompt());
-        assertEquals("Cloze / 例句填空 | New | Lapses 0", presenter.details());
+        assertEquals("Cloze | New | Lapses 0", presenter.details());
         assertEquals("Session 0/20 | Accuracy 0% | XP 0 | 2 cards without examples skipped", presenter.sessionProgress());
 
         presenter.setAnswer(card.getEnglish() + "s");

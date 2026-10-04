@@ -7,6 +7,7 @@ import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.DatabaseManager;
 import com.vocabtrainer.repository.ReviewLogRepository;
+import com.vocabtrainer.ui.review.ReviewSessionPresenter;
 import javafx.scene.control.ProgressBar;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -36,7 +37,7 @@ class ReviewUiTest extends MainWindowUiTest {
 
         WordCard word = questionWord();
         String answer = correctAnswer(word);
-        assertEquals("英译中 | New | Lapses 0", text("reviewMetaLabel"));
+        assertEquals("English → Chinese | New | Lapses 0", text("reviewMetaLabel"));
         type("answerField", answer);
         click("submitAnswerButton");
 
@@ -152,7 +153,7 @@ class ReviewUiTest extends MainWindowUiTest {
     void aCustomSessionShowsTheCompletionCardWhenItsTargetIsReached() throws Exception {
         selectTab("reviewTab");
         assertTrue(isDisabled("customSessionSizeField"));
-        Fx.run(() -> this.<String>comboBox("sessionSizeSelector").getSelectionModel().select("Custom"));
+        Fx.run(() -> this.<String>comboBox("sessionSizeSelector").getSelectionModel().select(ReviewSessionPresenter.CUSTOM));
         assertFalse(isDisabled("customSessionSizeField"));
         type("customSessionSizeField", "1");
         click("startSessionButton");
@@ -178,7 +179,7 @@ class ReviewUiTest extends MainWindowUiTest {
     @Test
     void anInvalidCustomSessionSizeIsReported() {
         selectTab("reviewTab");
-        Fx.run(() -> this.<String>comboBox("sessionSizeSelector").getSelectionModel().select("Custom"));
+        Fx.run(() -> this.<String>comboBox("sessionSizeSelector").getSelectionModel().select(ReviewSessionPresenter.CUSTOM));
         type("customSessionSizeField", "0");
         click("startSessionButton");
 

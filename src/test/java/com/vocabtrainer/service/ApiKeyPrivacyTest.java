@@ -82,7 +82,7 @@ class ApiKeyPrivacyTest {
         }
 
         assertEquals("Bearer " + KEY, server.requests().get(0).headers().getFirst("Authorization"));
-        assertTrue(shown.endsWith(FallbackAiService.PROVIDER_FAILED_NOTE), shown);
+        assertTrue(shown.endsWith("AI provider failed; mock fallback was used."), shown);
         assertFalse(shown.contains(SECRET), shown);
         assertTrue(records.stream().anyMatch(record -> LogCapture.allText(record).contains("HTTP 401")),
             "the provider's refusal is logged");
@@ -120,7 +120,7 @@ class ApiKeyPrivacyTest {
         for (Throwable cause = error; cause != null; cause = cause.getCause()) {
             assertFalse(String.valueOf(cause.getMessage()).contains(SECRET), cause.toString());
         }
-        assertTrue(shown.endsWith(FallbackAiService.PROVIDER_FAILED_NOTE), shown);
+        assertTrue(shown.endsWith("AI provider failed; mock fallback was used."), shown);
         assertEquals(1, records.size());
         assertFalse(LogCapture.allText(records.get(0)).contains(SECRET), LogCapture.allText(records.get(0)));
         assertEquals(List.of(), server.requests(), "nothing was sent");
@@ -145,7 +145,7 @@ class ApiKeyPrivacyTest {
 
         assertEquals(PLAIN_HTTP_REFUSED, error.getMessage());
         assertEquals(LookupOutcome.SERVICE_ERROR, dictionary.outcome());
-        assertTrue(dictionary.message().contains("明文 http"), dictionary.message());
+        assertTrue(dictionary.message().contains("plain http"), dictionary.message());
         assertFalse(dictionary.message().contains(SECRET), dictionary.message());
         assertEquals(List.of(), server.paths(), "nothing was sent");
 

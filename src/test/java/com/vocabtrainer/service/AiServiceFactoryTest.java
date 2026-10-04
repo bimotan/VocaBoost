@@ -79,7 +79,7 @@ class AiServiceFactoryTest {
             warnings = log.warnings();
         }
 
-        assertTrue(first.endsWith(FallbackAiService.PROVIDER_FAILED_NOTE), first);
+        assertTrue(first.endsWith("AI provider failed; mock fallback was used."), first);
         assertEquals(1, warnings.size());
         assertEquals(List.of(), cachedResponses(), "the fallback text must not be cached");
 

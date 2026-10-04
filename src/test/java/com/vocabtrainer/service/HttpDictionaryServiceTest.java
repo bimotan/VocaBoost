@@ -120,7 +120,7 @@ class HttpDictionaryServiceTest {
         server.answer("/lookup", 404, "{\"error\":\"no such word\"}");
         DictionaryLookupResult result = service("").lookup("snarkle");
         assertEquals(LookupOutcome.NOT_FOUND, result.outcome());
-        assertEquals("词条未找到：词典 API 没有该词条。", result.message());
+        assertEquals("Not found: Dictionary API does not have this word.", result.message());
     }
 
     @Test
@@ -128,7 +128,7 @@ class HttpDictionaryServiceTest {
         server.answer("/lookup", 401, "{\"error\":\"bad key\"}");
         DictionaryLookupResult unauthorized = service("wrong").lookup("lucid");
         assertEquals(LookupOutcome.AUTH_ERROR, unauthorized.outcome());
-        assertEquals("词典 API：拒绝了请求（HTTP 401）。请检查 DICTIONARY_API_KEY。", unauthorized.message());
+        assertEquals("Dictionary API: the request was refused (HTTP 401). Check DICTIONARY_API_KEY.", unauthorized.message());
 
         server.answer("/lookup", 403, "");
         assertEquals(LookupOutcome.AUTH_ERROR, service("wrong").lookup("lucid").outcome());
@@ -136,12 +136,12 @@ class HttpDictionaryServiceTest {
         server.answer("/lookup", StubHttpServer.Answer.json(429, "{}").withHeader("Retry-After", "30"));
         DictionaryLookupResult limited = service("").lookup("lucid");
         assertEquals(LookupOutcome.RATE_LIMITED, limited.outcome());
-        assertEquals("词典 API：查询次数受限（HTTP 429），请在 30 秒后再试。", limited.message());
+        assertEquals("Dictionary API: too many requests (HTTP 429): try again in 30 seconds.", limited.message());
 
         server.answer("/lookup", 500, "oops");
         DictionaryLookupResult failed = service("").lookup("lucid");
         assertEquals(LookupOutcome.SERVICE_ERROR, failed.outcome());
-        assertEquals("词典 API：服务出错（HTTP 500）。", failed.message());
+        assertEquals("Dictionary API: the service failed (HTTP 500).", failed.message());
         assertTrue(failed.unavailable());
     }
 
@@ -152,7 +152,7 @@ class HttpDictionaryServiceTest {
         DictionaryLookupResult result = service("").lookup("lucid");
 
         assertEquals(LookupOutcome.BAD_RESPONSE, result.outcome());
-        assertTrue(result.message().startsWith("词典 API：返回的内容不是有效的 JSON（"), result.message());
+        assertTrue(result.message().startsWith("Dictionary API: the answer is not valid JSON ("), result.message());
     }
 
     @Test
@@ -164,7 +164,7 @@ class HttpDictionaryServiceTest {
             StubHttpServer.client(), Duration.ofMillis(300)).lookup("lucid");
 
         assertEquals(LookupOutcome.TIMEOUT, result.outcome());
-        assertEquals("词典 API：0.3 秒内没有响应。", result.message());
+        assertEquals("Dictionary API: no answer within 0.3 seconds.", result.message());
         assertTrue(Duration.ofNanos(System.nanoTime() - start).compareTo(Duration.ofSeconds(4)) < 0);
     }
 
@@ -176,7 +176,7 @@ class HttpDictionaryServiceTest {
         DictionaryLookupResult result = new HttpDictionaryService(address, "", StubHttpServer.client()).lookup("lucid");
 
         assertEquals(LookupOutcome.NETWORK_ERROR, result.outcome());
-        assertTrue(result.message().startsWith("词典 API：无法连接（"), result.message());
+        assertTrue(result.message().startsWith("Dictionary API: cannot connect ("), result.message());
         assertEquals(1, httpLog.warnings().size(), "why the API could not be reached is logged");
     }
 
@@ -186,7 +186,7 @@ class HttpDictionaryServiceTest {
             .lookup("lucid");
 
         assertEquals(LookupOutcome.SERVICE_ERROR, result.outcome());
-        assertEquals("词典 API：地址无效（DICTIONARY_API_BASE_URL = ftp://example.com/x）。", result.message());
+        assertEquals("Dictionary API: the address is not valid (DICTIONARY_API_BASE_URL = ftp://example.com/x).", result.message());
     }
 
     @Test

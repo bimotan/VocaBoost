@@ -91,7 +91,7 @@ class OfflineModeTest {
 
         assertEquals(onlineRequests, server.requests().size(), "no request in offline mode: " + server.paths());
         assertEquals(LookupOutcome.OFFLINE, unknown.outcome());
-        assertTrue(unknown.message().contains("离线模式已开启"), unknown.message());
+        assertTrue(unknown.message().contains("offline mode is on"), unknown.message());
         assertEquals(VerificationStatus.UNCHECKED, verification.status(), "not asked is not the same as not found");
         assertEquals(LookupOutcome.OFFLINE, verification.outcome());
         assertEquals(LookupOutcome.OFFLINE, refreshed.outcome());
@@ -121,8 +121,8 @@ class OfflineModeTest {
 
         assertEquals(List.of(), server.paths(), "no AI request in offline mode");
         assertFalse(service.isAvailable(), "the provider is not used while offline");
-        assertTrue(explained.startsWith("Mock AI："), explained);
-        assertTrue(explained.endsWith(OfflineAwareAiService.OFFLINE_NOTE), explained);
+        assertTrue(explained.startsWith("Mock AI: "), explained);
+        assertTrue(explained.endsWith("Offline mode is on: no AI request was sent."), explained);
         assertEquals(explained, regenerated);
 
         settings.saveOfflineMode(false);

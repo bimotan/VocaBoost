@@ -37,7 +37,7 @@ class GoalsUiTest extends MainWindowUiTest {
         type("importPathField", csv.toString());
         click("importCsvButton");
         waitForBackgroundTasks();
-        assertTrue(text("importStatusLabel").contains("Imported 2000"), text("importStatusLabel"));
+        assertTrue(text("importStatusLabel").contains("Imported 2,000"), text("importStatusLabel"));
         assertFalse(text("importStatusLabel").contains("Unlocked"), "no badges for importing");
 
         selectTab("dashboardTab");
@@ -82,7 +82,7 @@ class GoalsUiTest extends MainWindowUiTest {
         assertEquals("0 / 30", text("reviewedTodayLabel"));
         assertEquals("0 / 8", text("newWordsTodayLabel"));
         selectTab("reviewTab");
-        assertEquals("Custom", Fx.call(() -> this.<String>comboBox("sessionSizeSelector").getValue()));
+        assertEquals("Custom", shownValue("sessionSizeSelector"));
         assertEquals("35", text("customSessionSizeField"));
         assertTrue(text("sessionProgressLabel").startsWith("Session 0/35"), text("sessionProgressLabel"));
 

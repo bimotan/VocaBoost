@@ -82,7 +82,7 @@ class ReviewUndoPresenterTest {
             presenter.result());
         assertTrue(presenter.result().contains("Correct answer: " + rated.getChinese()), presenter.result());
         assertEquals("Session 0/20 | Accuracy 0% | XP 0", presenter.sessionProgress());
-        assertEquals("英译中 | New | Lapses 0", presenter.details());
+        assertEquals("English → Chinese | New | Lapses 0", presenter.details());
         assertFalse(presenter.canUndo());
         assertTrue(services.reviewLogRepository().findByWord(rated.getId()).isEmpty());
         assertEquals(CardState.NEW, stored(rated).getState());

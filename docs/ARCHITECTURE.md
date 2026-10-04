@@ -105,6 +105,33 @@ A word's phonetic, part of speech, example sentence, note and tags are shown in 
 - **Text size.** The Settings tab's text size puts the class `text-size-115` or `text-size-130` on the window's root, which sets its font size to 1.15 or 1.3 em; every dialog (`JavaFxDialogs`) gets the stylesheet and the size saved when it opens. Sizes set in pixels (column widths, the answer field) do not grow.
 - **Labels and keyboard.** Every form field has a label that names it for screen readers (`Label.setLabelFor`, through `Widgets.formLabel`); a field without a visible label (the Word List's filters, the lookup and import paths, the answer field, tables and lists) has an accessible text instead (`AccessibilityUiTest` checks every input). Form labels have mnemonics: Alt and the underlined letter moves to the field, unique among the header and one tab, or one dialog (header: Deck; Review: Mode, Session size, New words/day; Add / Import: deck, English, Chinese, Phonetic, POS, Tags, Example, Notes; Settings: retention, starts at, words per day, text size, Provider, Base URL, API key, Model, Temperature; the edit and goals dialogs label their own fields). A form dialog puts the keyboard in its first field instead of on OK. The tab order follows the layout: the Review tab's rating buttons come after its content.
 
+## Languages (i18n)
+
+The app is in Simplified Chinese or English, never a mix of both.
+
+- **Bundles.** Every text the user sees is a key in `com/vocabtrainer/i18n/messages.properties` (English, the base bundle) and `messages_zh_CN.properties` (Simplified Chinese), UTF-8, with the same keys in the same order. `util.Messages.tr(key, args...)` formats the value with `MessageFormat` in the app's language (an apostrophe is written twice; numbers are grouped, 1,240; English plurals use choice formats). It has no JavaFX dependency, so the services use it too: validation errors, import, export and backup results, deck errors, dictionary and AI messages, startup errors and the Markdown report. `ui.Labels` names the review modes (also the question directions), ratings, card states and badges. Enum names, badge codes, settings keys, file formats (CSV and Anki headers, JSON backups), the AI prompt and log messages stay English (a failed action is logged under its title in English, `Messages.inEnglish`). Errors from SQLite or the system are shown as they come, under a translated title.
+- **Choosing.** Settings → Language offers Auto (the default: any Chinese locale shows 简体中文, every other English), 简体中文 and English, saved as `ui.language` (`auto`, `zh_CN`, `en`) in `settings`; a value that is not one of these is logged and read as Auto. Decision: the choice applies when the app starts again, which the note under the selector says in the chosen language, instead of rebuilding the window, whose views, running imports and listeners all hold texts. At startup `VocabTrainerApp.useLanguage` sets the language of `Messages` and the default locale (JavaFX's own texts, such as dialog buttons, table placeholders and the date picker, follow it) before the window is built.
+- **Data keeps its language.** A new database's deck is named in the language of that start (默认词库 or Default deck) and keeps that name, like every deck name and word field. A dictionary note written when a word was added ("More meanings" / "更多释义"), badge names stored in `achievements` (shown by their code through `Labels.achievement`) and cached AI explanations (labelled in the language they were first asked in) keep the language they were written in.
+- **Tests.** `MessagesBundleTest` checks that both bundles have the same keys in the same order, that every value parses with the same arguments in both languages and has no lone apostrophe, that the Chinese values are translated, and that every key is used and every key the code uses (always a literal) exists. Unit and UI tests run in English: the UI test harness takes the computer's locale to be English. `LanguageUiTest` switches to 简体中文 and back, checks labels on every tab and saves a snapshot of every tab in both languages to `target/ui-snapshots`.
+
+Glossary (Chinese terms used everywhere):
+
+| English | 中文 | English | 中文 |
+|---|---|---|---|
+| deck | 词库 | Dashboard | 概览 |
+| word list | 单词列表 | Statistics / Settings | 统计 / 设置 |
+| review | 复习 | session / session size | 本轮 / 每轮数量 |
+| due | 到期 | new word | 新词 |
+| study day | 学习日 | goal / XP / streak | 目标 / 经验值 / 连续学习 |
+| English → Chinese | 英译中 | Chinese → English | 中译英 |
+| Mixed / Weak Words | 混合 / 薄弱词 | Cloze | 例句填空 |
+| Again / Hard / Good / Easy | 重来 / 困难 / 良好 / 简单 | New / Learning / Review / Relearning | 新词 / 学习中 / 复习中 / 重新学习 |
+| leech / lapses | 难记词 / 遗忘次数 | suspend | 暂停 |
+| already known | 已认识 | mastered | 已掌握 |
+| desired retention / recall | 目标记忆保持率 / 回忆概率 | exam | 考试 |
+| dictionary / entry | 词典 / 词条 | verified / checked | 验证 / 核对 |
+| offline mode | 离线模式 | mock explanation | 离线示例讲解 |
+
 ## Dictionary Services
 
 `DictionaryServiceFactory` composes the lookup chain, asked in this order until a dictionary has the word:

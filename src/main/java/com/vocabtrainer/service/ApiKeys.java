@@ -4,6 +4,8 @@ import java.net.URI;
 import java.util.Locale;
 import java.util.Set;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Rules for the API keys of the AI provider and the dictionary API. A key is only ever sent in a
  * request header, never shown in full, logged or put into an error message, and never sent
@@ -34,13 +36,12 @@ public final class ApiKeys {
     }
 
     /**
-     * @param what names the key in the message, e.g. "The AI API key"
+     * @param what names the key in the message, in the app's language, e.g. "The AI API key"
      * @throws IllegalArgumentException if the key cannot be sent; the message does not contain the key
      */
     static void requireSendable(String key, String what) {
         if (!isSendable(key)) {
-            throw new IllegalArgumentException(what + " contains spaces or characters that cannot be sent"
-                + " in an HTTP header (for example a full-width character or a line break); paste it again.");
+            throw new IllegalArgumentException(tr("apiKey.notSendable", what));
         }
     }
 
@@ -51,13 +52,12 @@ public final class ApiKeys {
     }
 
     /**
-     * @param what names the URL in the message, e.g. "The AI base URL"
+     * @param what names the URL in the message, in the app's language, e.g. "The AI base URL"
      * @throws IllegalArgumentException if a key sent to {@code uri} would cross the network unencrypted
      */
     static void requireSafeToSendKey(URI uri, String what) {
         if (!isSafeToSendKey(uri)) {
-            throw new IllegalArgumentException(what + " uses plain http, which would send the API key unencrypted."
-                + " Use https, or http only for a server on this computer (localhost, 127.0.0.1 or ::1).");
+            throw new IllegalArgumentException(tr("apiKey.plainHttp", what));
         }
     }
 

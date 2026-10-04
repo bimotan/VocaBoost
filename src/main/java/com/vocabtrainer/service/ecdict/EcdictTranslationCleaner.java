@@ -8,6 +8,8 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Turns an ECDICT translation into a Chinese answer key a learner can type.
  *
@@ -129,7 +131,7 @@ public final class EcdictTranslationCleaner {
             }
         }
         if (!more.isEmpty()) {
-            noteLines.add("More meanings: " + String.join("; ", more));
+            noteLines.add(tr("ecdict.note.moreMeanings", String.join("; ", more)));
         }
         return new Cleaned(meaning.toString(), String.join("; ", partsOfSpeech), String.join("\n", noteLines));
     }

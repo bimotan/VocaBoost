@@ -129,7 +129,7 @@ class EcdictUiTest extends MainWindowUiTest {
         assertFalse(Files.exists(tempDir.resolve("ecdict.db")));
         assertTrue(headerSubtitle().contains("| Dictionary: starter/online fallback |"), headerSubtitle());
         lookUp("abacus");
-        assertTrue(text("lookupStatusLabel").startsWith("词条未找到。"), text("lookupStatusLabel"));
+        assertTrue(text("lookupStatusLabel").startsWith("Not found."), text("lookupStatusLabel"));
     }
 
     @Test

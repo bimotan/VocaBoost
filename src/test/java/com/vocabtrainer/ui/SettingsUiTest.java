@@ -244,7 +244,8 @@ class SettingsUiTest extends MainWindowUiTest {
         }
         assertTrue(addImport.containsAll(List.of("addEnglishField", "lookupField", "importCsvButton")), addImport.toString());
         assertFalse(idsOnTab("statisticsTab").contains("openDataFolderButton"));
-        assertTrue(isDisabled("languageSelector"), "a placeholder until the app is translated");
+        assertFalse(isDisabled("languageSelector"), "Auto, 简体中文 or English");
+        assertEquals("Auto (English)", shownValue("languageSelector"));
 
         selectTab("settingsTab");
         snapshot("settings-tab");

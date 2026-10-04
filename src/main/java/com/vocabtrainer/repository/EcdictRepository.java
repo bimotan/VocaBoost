@@ -30,6 +30,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The imported ECDICT dictionary. It lives in its own SQLite file next to vocab.db
  * ({@code ecdict.db}), so the learner's database and its backups do not grow by the dictionary's
@@ -200,8 +202,7 @@ public class EcdictRepository implements AutoCloseable {
         }
         if (lock == null) {
             importing.set(false);
-            throw new IllegalStateException(
-                "Another VocaBoost window is importing ECDICT. Try again when it has finished.");
+            throw new IllegalStateException(tr("ecdict.error.otherWindow"));
         }
         try {
             // Left behind by a crash or by an import the app was closed during.
@@ -266,7 +267,7 @@ public class EcdictRepository implements AutoCloseable {
      */
     public void delete() throws IOException {
         if (importing.get()) {
-            throw new IllegalStateException("Cancel the running ECDICT import first.");
+            throw new IllegalStateException(tr("ecdict.error.cancelFirst"));
         }
         synchronized (lock) {
             closeReader();

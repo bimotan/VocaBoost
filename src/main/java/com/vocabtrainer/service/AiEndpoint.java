@@ -5,6 +5,8 @@ import java.net.URISyntaxException;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The chat completions URL for the AI base URL the user entered. Providers document either a base
  * URL ({@code https://api.deepseek.com}, {@code https://api.openai.com/v1}) or the full endpoint
@@ -38,12 +40,11 @@ final class AiEndpoint {
         try {
             uri = new URI(clean);
         } catch (URISyntaxException e) {
-            throw new IllegalArgumentException("The AI base URL is not a valid URL: " + clean);
+            throw new IllegalArgumentException(tr("ai.error.invalidUrl", clean));
         }
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
         if (!scheme.equals("http") && !scheme.equals("https") || uri.getHost() == null) {
-            throw new IllegalArgumentException("The AI base URL must start with https:// and name a server,"
-                + " for example https://api.openai.com/v1.");
+            throw new IllegalArgumentException(tr("ai.error.urlScheme"));
         }
         String path = uri.getRawPath() == null ? "" : uri.getRawPath();
         String trimmed = path.endsWith("/") ? path.substring(0, path.length() - 1) : path;

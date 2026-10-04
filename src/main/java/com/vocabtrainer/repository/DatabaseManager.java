@@ -72,7 +72,7 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
                 Files.createDirectories(parent);
             }
         } catch (IOException e) {
-            throw new SQLException("无法创建数据库目录: " + databasePath, e);
+            throw new SQLException("Cannot create the database folder for " + databasePath, e);
         }
 
         Lease setup = lease();

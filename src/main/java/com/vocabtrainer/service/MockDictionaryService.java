@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 public class MockDictionaryService implements DictionaryService {
     private static final Map<String, DictionaryEntry> ENTRIES = Map.of(
         "abate", new DictionaryEntry("abate", "减弱; 减少", "verb", "/əˈbeɪt/",
@@ -23,7 +25,7 @@ public class MockDictionaryService implements DictionaryService {
     public DictionaryLookupResult lookup(String english) {
         String key = english == null ? "" : english.trim().toLowerCase(Locale.ROOT);
         if (key.isBlank()) {
-            return DictionaryLookupResult.notFound("Please enter an English word first.");
+            return DictionaryLookupResult.notFound(tr("dictionary.enterWord"));
         }
         DictionaryEntry entry = ENTRIES.getOrDefault(key, new DictionaryEntry(
             english.trim(),
@@ -34,9 +36,9 @@ public class MockDictionaryService implements DictionaryService {
             "Mock fallback"
         ));
         if (entry.chinese().isBlank()) {
-            return DictionaryLookupResult.notFound("词条未找到：Mock 离线词典没有该词条。");
+            return DictionaryLookupResult.notFound(tr("dictionary.notFoundIn", "Mock"));
         }
-        return DictionaryLookupResult.success("Using offline mock dictionary.", List.of(entry));
+        return DictionaryLookupResult.success(tr("dictionary.loadedFrom", "Mock"), List.of(entry));
     }
 
     @Override

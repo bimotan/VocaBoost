@@ -15,6 +15,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * An OpenAI-compatible chat completions API. The prompt sends the word, its meanings, part of
  * speech and example, and, after a review answer, what the learner typed and the question's
@@ -94,13 +96,13 @@ public class OpenAiCompatibleAiService implements AiService {
     @Override
     public String explain(ExplanationRequest request) {
         if (!isAvailable()) {
-            throw new IllegalStateException("AI provider is not configured.");
+            throw new IllegalStateException(tr("ai.error.notConfigured"));
         }
         URI endpoint;
         try {
             endpoint = AiEndpoint.chatCompletions(baseUrl);
-            ApiKeys.requireSafeToSendKey(endpoint, "The AI base URL");
-            ApiKeys.requireSendable(apiKey, "The AI API key");
+            ApiKeys.requireSafeToSendKey(endpoint, tr("ai.name.baseUrl"));
+            ApiKeys.requireSendable(apiKey, tr("ai.name.apiKey"));
         } catch (IllegalArgumentException e) {
             // Our own messages, which never contain the key.
             throw new IllegalStateException(e.getMessage(), e);
@@ -124,23 +126,23 @@ public class OpenAiCompatibleAiService implements AiService {
             HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 String detail = errorDetail(response.body());
-                throw new IllegalStateException("AI provider returned HTTP " + response.statusCode()
-                    + (detail.isBlank() ? "." : ": " + detail));
+                String status = String.valueOf(response.statusCode());
+                throw new IllegalStateException(detail.isBlank() ? tr("ai.error.http", status)
+                    : tr("ai.error.httpDetail", status, detail));
             }
             String content = parseContent(response.body());
             if (content.isBlank()) {
-                throw new IllegalStateException("AI provider returned an empty response.");
+                throw new IllegalStateException(tr("ai.error.empty"));
             }
             return AiExplanation.parse(content).text();
         } catch (IOException e) {
-            throw new IllegalStateException("AI provider network error.", e);
+            throw new IllegalStateException(tr("ai.error.network"), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("AI request was interrupted.", e);
+            throw new IllegalStateException(tr("ai.error.interrupted"), e);
         } catch (IllegalArgumentException e) {
             // The JDK quotes an invalid header value, which would be the key, so the cause is dropped.
-            throw new IllegalStateException("Cannot build the AI request: "
-                + ApiKeys.redact(e.getMessage(), apiKey));
+            throw new IllegalStateException(tr("ai.error.buildRequest", ApiKeys.redact(e.getMessage(), apiKey)));
         }
     }
 

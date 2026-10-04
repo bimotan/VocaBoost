@@ -79,7 +79,7 @@ class DeckServiceTest {
 
         IllegalArgumentException lastActive = assertThrows(IllegalArgumentException.class,
             () -> deckService.archiveDeck(greDeck.getId()));
-        assertTrue(lastActive.getMessage().contains("至少需要保留一个活动词库"), lastActive.getMessage());
+        assertTrue(lastActive.getMessage().contains("At least one deck must stay active"), lastActive.getMessage());
         assertNull(lastActive.getCause(), "shown to the user as a plain validation message");
         assertThrows(IllegalArgumentException.class, () -> deckService.archiveDeck(defaultDeck.getId()));
         assertEquals(List.of(greDeck.getId()), deckService.activeDecks().stream().map(Deck::getId).toList());
@@ -118,17 +118,17 @@ class DeckServiceTest {
 
         IllegalArgumentException restore = assertThrows(IllegalArgumentException.class,
             () -> deckService.restoreDeck(archivedGre.getId()));
-        assertTrue(restore.getMessage().contains("已有同名的活动词库「GRE」"), restore.getMessage());
+        assertTrue(restore.getMessage().contains("An active deck is already named \"GRE\""), restore.getMessage());
         assertNull(restore.getCause(), "shown to the user as a plain validation message");
         assertTrue(deckRepository.findById(archivedGre.getId()).orElseThrow().isArchived());
 
         // Active names stay unique.
         IllegalArgumentException create = assertThrows(IllegalArgumentException.class, () -> deckService.createDeck("GRE"));
-        assertTrue(create.getMessage().contains("已有同名词库"), create.getMessage());
+        assertTrue(create.getMessage().contains("A deck is already named"), create.getMessage());
         assertNull(create.getCause());
         IllegalArgumentException rename = assertThrows(IllegalArgumentException.class,
             () -> deckService.renameDeck(defaultDeck.getId(), "GRE"));
-        assertTrue(rename.getMessage().contains("已有同名词库"), rename.getMessage());
+        assertTrue(rename.getMessage().contains("A deck is already named"), rename.getMessage());
         assertEquals("TOEFL", deckService.renameDeck(defaultDeck.getId(), "TOEFL").getName());
 
         // Once the name is free again, the archived deck comes back under it.

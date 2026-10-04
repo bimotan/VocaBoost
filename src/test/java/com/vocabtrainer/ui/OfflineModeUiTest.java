@@ -7,7 +7,6 @@ import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.service.AiServiceFactory;
 import com.vocabtrainer.service.DictionaryService;
 import com.vocabtrainer.service.DictionaryServiceFactory;
-import com.vocabtrainer.service.OfflineAwareAiService;
 import javafx.scene.Node;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Labeled;
@@ -91,7 +90,7 @@ class OfflineModeUiTest extends MainWindowUiTest {
         type("answerField", "完全错误");
         click("submitAnswerButton");
         waitForBackgroundTasks();
-        assertTrue(text("reviewResultArea").endsWith(OfflineAwareAiService.OFFLINE_NOTE), text("reviewResultArea"));
+        assertTrue(text("reviewResultArea").endsWith("Offline mode is on: no AI request was sent."), text("reviewResultArea"));
         assertFalse(isVisible("regenerateExplanationButton"));
 
         selectTab("settingsTab");
@@ -123,16 +122,16 @@ class OfflineModeUiTest extends MainWindowUiTest {
         click("lookupButton");
         waitForBackgroundTasks();
 
-        assertTrue(text("lookupStatusLabel").startsWith("离线模式已开启"), text("lookupStatusLabel"));
+        assertTrue(text("lookupStatusLabel").startsWith("Offline mode is on"), text("lookupStatusLabel"));
         assertFalse(isVisible("lookupRetryButton"), "asking again cannot help while offline");
 
         type("addEnglishField", "zyzzyva");
         type("addChineseField", "一种象鼻虫");
-        dialogs.chooseButton("直接添加");
+        dialogs.chooseButton("Add anyway");
         click("addWordButton");
         waitForText("addWordStatusLabel", "Added to " + STARTER_DECK + ": zyzzyva | Not checked: offline mode is on");
 
-        assertEquals("直接添加 | 取消", dialogs.last(ScriptedDialogs.Kind.CHOOSE).value());
+        assertEquals("Add anyway | Cancel", dialogs.last(ScriptedDialogs.Kind.CHOOSE).value());
         assertEquals("UNCHECKED", services.wordRepository().findByEnglish(currentDeck().getId(), "zyzzyva")
             .orElseThrow().getTags());
         assertEquals(0, online.calls.get(), "the online dictionaries were not asked");

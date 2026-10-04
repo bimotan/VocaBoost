@@ -145,7 +145,7 @@ class AiExplanationUiTest extends MainWindowUiTest {
         click("submitAnswerButton");
         waitForBackgroundTasks();
 
-        assertTrue(text("reviewResultArea").contains("Mock AI："), text("reviewResultArea"));
+        assertTrue(text("reviewResultArea").contains("Mock AI: "), text("reviewResultArea"));
         assertFalse(isVisible("regenerateExplanationButton"));
     }
 

@@ -25,7 +25,7 @@ class DeckUiTest extends MainWindowUiTest {
         Deck toefl = currentDeck();
         assertEquals("TOEFL", toefl.getName());
         // Decks are listed by name.
-        assertEquals(List.of("TOEFL", STARTER_DECK), deckNames("deckSelector"));
+        assertEquals(List.of(STARTER_DECK, "TOEFL"), deckNames("deckSelector"));
         assertEquals("Deck: TOEFL | Dictionary: starter/online fallback | AI: mock", headerSubtitle());
         assertEquals("0", text("totalWordsLabel"));
         assertEquals("0", text("dueTodayLabel"));
@@ -34,7 +34,7 @@ class DeckUiTest extends MainWindowUiTest {
         assertEquals("TOEFL", Fx.call(() -> this.<Deck>comboBox("addDeckSelector").getValue().getName()));
         assertEquals("Review complete", text("reviewWordLabel"));
         selectTab("decksTab");
-        assertEquals(List.of("TOEFL", STARTER_DECK), deckRowNames("deckTable"));
+        assertEquals(List.of(STARTER_DECK, "TOEFL"), deckRowNames("deckTable"));
         assertEquals(toefl.getId(), services.settingsService().getLastDeckId().orElseThrow());
 
         selectDeck("deckSelector", STARTER_DECK);
@@ -73,7 +73,7 @@ class DeckUiTest extends MainWindowUiTest {
 
         ScriptedDialogs.Shown error = dialogs.takeError();
         assertEquals("Create deck failed", error.title());
-        assertEquals("已有同名词库「" + STARTER_DECK + "」，请换一个名称", error.content());
+        assertEquals("A deck is already named \"" + STARTER_DECK + "\": choose another name.", error.content());
         assertEquals(List.of(STARTER_DECK), deckNames("deckSelector"));
     }
 
@@ -123,7 +123,7 @@ class DeckUiTest extends MainWindowUiTest {
         click("restoreDeckButton");
 
         assertEquals(tempId, currentDeck().getId());
-        assertEquals(List.of("Temp", STARTER_DECK), deckNames("deckSelector"));
+        assertEquals(List.of(STARTER_DECK, "Temp"), deckNames("deckSelector"));
         assertTrue(headerSubtitle().startsWith("Deck: Temp | "), headerSubtitle());
         assertEquals(2, rowCount("deckTable"));
         assertEquals(0, rowCount("archivedDeckTable"));
@@ -146,7 +146,8 @@ class DeckUiTest extends MainWindowUiTest {
 
         ScriptedDialogs.Shown error = dialogs.takeError();
         assertEquals("Archive deck failed", error.title());
-        assertEquals("至少需要保留一个活动词库：请先新建或恢复另一个词库，再归档这个词库", error.content());
+        assertEquals("At least one deck must stay active: create or restore another deck before you archive this one.",
+            error.content());
         assertEquals(deckId, currentDeck().getId());
         selectTab("decksTab");
         assertEquals(0, rowCount("archivedDeckTable"));

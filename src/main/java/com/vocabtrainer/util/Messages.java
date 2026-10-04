@@ -1,8 +1,10 @@
 package com.vocabtrainer.util;
 
 import java.text.MessageFormat;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.MissingResourceException;
 import java.util.Objects;
 import java.util.ResourceBundle;
@@ -18,7 +20,8 @@ import java.util.logging.Logger;
  * is always written twice ({@code Don''t}) and {@code {0}} is the first argument. Numbers are
  * formatted for the language ({@code 1,240}); English plurals use choice formats
  * ({@code {0,choice,1#word|1<words}}). The views and the services both use it; it has no JavaFX
- * dependency. Log messages are not translated.
+ * dependency. Log messages are not translated; {@link #inEnglish} turns a text the user saw back into
+ * English for the log.
  *
  * <p>The language is set once at startup ({@link #setLocale}), before the window is built; until
  * then, and in unit tests, it is English.
@@ -39,6 +42,8 @@ public final class Messages {
         ResourceBundle.Control.getNoFallbackControl(ResourceBundle.Control.FORMAT_PROPERTIES);
 
     private static volatile Locale locale = ENGLISH;
+    /** The English text of every Chinese text without arguments, built on first use by {@link #inEnglish}. */
+    private static volatile Map<String, String> englishByChinese;
 
     private Messages() {
     }
@@ -81,6 +86,29 @@ public final class Messages {
             text = text.isEmpty() ? sentence : tr("format.sentences", text, sentence);
         }
         return text;
+    }
+
+    /**
+     * {@code text} in English when it is the whole text of a key without arguments in the app's
+     * language, such as the title of a failed action; any other text as it is. Log records use it, so
+     * they stay English when the app is shown in Chinese.
+     */
+    public static String inEnglish(String text) {
+        if (text == null || !isChinese()) {
+            return text;
+        }
+        Map<String, String> english = englishByChinese;
+        if (english == null) {
+            english = new HashMap<>();
+            ResourceBundle chinese = ResourceBundle.getBundle(BUNDLE, SIMPLIFIED_CHINESE, CONTROL);
+            for (String key : chinese.keySet()) {
+                if (!chinese.getString(key).contains("{")) {
+                    english.putIfAbsent(trIn(SIMPLIFIED_CHINESE, key), trIn(ENGLISH, key));
+                }
+            }
+            englishByChinese = english;
+        }
+        return english.getOrDefault(text, text);
     }
 
     /**

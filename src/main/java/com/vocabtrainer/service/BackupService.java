@@ -365,7 +365,7 @@ public class BackupService {
         for (JsonNode row : rows) {
             index++;
             if (!row.isObject()) {
-                tally.invalid(tr("backup.invalid.row", rowName, index, tr("backup.invalid.notObject")), null);
+                tally.invalid(tr("backup.invalid.row", rowName, String.valueOf(index), tr("backup.invalid.notObject")), null);
                 continue;
             }
             try {

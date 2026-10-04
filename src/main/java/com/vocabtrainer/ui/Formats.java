@@ -79,7 +79,7 @@ public final class Formats {
         if (achievements == null || achievements.isEmpty()) {
             return tr("format.achievements.none");
         }
-        return achievements.stream().map(Achievement::name).collect(Collectors.joining(tr("format.listSeparator")));
+        return achievements.stream().map(Labels::achievement).collect(Collectors.joining(tr("format.listSeparator")));
     }
 
     /** A new line listing the newly unlocked achievements, or nothing when there are none. */

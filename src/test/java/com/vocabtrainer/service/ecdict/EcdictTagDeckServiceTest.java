@@ -205,7 +205,7 @@ class EcdictTagDeckServiceTest {
         assertThrows(IllegalArgumentException.class, () -> request("GRE", -1, EcdictRepository.TagOrder.FREQUENCY));
         assertThrows(IllegalArgumentException.class, () -> ecdict.findByTag("gre%", EcdictRepository.TagOrder.FREQUENCY));
         assertEquals("GRE (ECDICT)", EcdictTagDeckService.Tag.GRE.defaultDeckName());
-        assertEquals("考研 Kaoyan (ky)", EcdictTagDeckService.Tag.KY.toString());
+        assertEquals("Kaoyan 考研 (ky)", EcdictTagDeckService.Tag.KY.toString());
     }
 
     private void importEcdict() throws Exception {

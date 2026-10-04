@@ -2,6 +2,7 @@ package com.vocabtrainer.ui;
 
 import com.vocabtrainer.util.AppLogging;
 import com.vocabtrainer.util.ErrorMessages;
+import com.vocabtrainer.util.Messages;
 
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -41,12 +42,13 @@ public final class UiErrors {
             + AppLogging.logLocationText());
     }
 
-    /** Logs a failure that the caller shows on its own, e.g. in a status label. */
+    /** Logs a failure that the caller shows on its own, e.g. in a status label; the title in English. */
     public void logFailure(String title, Throwable error) {
+        String logged = Messages.inEnglish(title);
         if (isInputValidationError(error)) {
-            LOGGER.log(Level.INFO, title + ": " + error.getMessage());
+            LOGGER.log(Level.INFO, logged + ": " + error.getMessage());
         } else {
-            LOGGER.log(Level.WARNING, title, error);
+            LOGGER.log(Level.WARNING, logged, error);
         }
     }
 

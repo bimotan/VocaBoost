@@ -96,27 +96,27 @@ class DictionaryLookupUiTest extends MainWindowUiTest {
 
         Fx.waitUntil("the first lookup is interrupted", () -> dictionary.interrupted.contains("petrichor"));
         waitForBackgroundTasks();
-        assertTrue(text("lookupStatusLabel").startsWith("词条未找到。"), text("lookupStatusLabel"));
+        assertTrue(text("lookupStatusLabel").startsWith("Not found."), text("lookupStatusLabel"));
     }
 
     @Test
     void theLookupBoxTellsAMissingWordFromADictionaryThatCannotBeAskedAndOffersRetry() {
         dictionary.answer("quokka",
-            DictionaryLookupResult.unavailable(LookupOutcome.RATE_LIMITED, "dictionaryapi.dev：查询次数受限（HTTP 429），请稍后再试。"),
+            DictionaryLookupResult.unavailable(LookupOutcome.RATE_LIMITED, "dictionaryapi.dev: too many requests (HTTP 429): try again later."),
             found("quokka", "短尾矮袋鼠"));
         selectTab("addImportTab");
 
         type("lookupField", "snarkle");
         click("lookupButton");
         waitForBackgroundTasks();
-        assertTrue(text("lookupStatusLabel").startsWith("词条未找到。"), text("lookupStatusLabel"));
+        assertTrue(text("lookupStatusLabel").startsWith("Not found."), text("lookupStatusLabel"));
         assertFalse(isVisible("lookupRetryButton"));
 
         type("lookupField", "quokka");
         click("lookupButton");
         waitForBackgroundTasks();
-        assertEquals("在线词典暂时限制了查询次数，请稍后重试。" + System.lineSeparator()
-            + "词条未找到：本地词库没有该词条。 | dictionaryapi.dev：查询次数受限（HTTP 429），请稍后再试。",
+        assertEquals("The online dictionary limits how often it may be asked: try again later." + System.lineSeparator()
+            + "Not found: the local dictionary does not have this word. | dictionaryapi.dev: too many requests (HTTP 429): try again later.",
             text("lookupStatusLabel"));
         assertTrue(isVisible("lookupRetryButton"));
         snapshot("rate-limited");
@@ -177,40 +177,40 @@ class DictionaryLookupUiTest extends MainWindowUiTest {
     @Test
     void whenTheDictionariesCannotBeAskedTheUserCanRetryAddUncheckedOrCancel() throws Exception {
         DictionaryLookupResult offline = DictionaryLookupResult.unavailable(LookupOutcome.NETWORK_ERROR,
-            "dictionaryapi.dev：无法连接（Connection refused）。");
+            "dictionaryapi.dev: cannot connect (Connection refused).");
         dictionary.answer("quokka", offline, offline, offline, found("quokka", "短尾矮袋鼠"));
         selectTab("addImportTab");
         type("addEnglishField", "quokka");
         type("addChineseField", "短尾矮袋鼠");
 
-        dialogs.chooseButton("取消");
+        dialogs.chooseButton("Cancel");
         click("addWordButton");
         waitForText("addWordStatusLabel", "Canceled: quokka");
         ScriptedDialogs.Shown question = dialogs.last(ScriptedDialogs.Kind.CHOOSE);
-        assertEquals("无法验证", question.title());
-        assertEquals("无法验证：quokka", question.header());
-        assertEquals("无法连接在线词典，请检查网络后重试。" + System.lineSeparator()
-            + "词条未找到：本地词库没有该词条。 | dictionaryapi.dev：无法连接（Connection refused）。" + System.lineSeparator()
-            + "重试，或不经验证直接添加并标记为 UNCHECKED？", question.content());
-        assertEquals("重试 | 直接添加 | 取消", question.value());
+        assertEquals("Cannot check the word", question.title());
+        assertEquals("Cannot check: quokka", question.header());
+        assertEquals("Cannot reach the online dictionaries: check the network and try again." + System.lineSeparator()
+            + "Not found: the local dictionary does not have this word. | dictionaryapi.dev: cannot connect (Connection refused)."
+            + System.lineSeparator() + "Retry, or add it without checking and tag it UNCHECKED?", question.content());
+        assertEquals("Retry | Add anyway | Cancel", question.value());
         assertTrue(services.wordRepository().findByEnglish(currentDeck().getId(), "quokka").isEmpty());
 
         // Still offline at the first retry; the dictionary answers at the second.
-        dialogs.chooseButton("重试").chooseButton("重试");
+        dialogs.chooseButton("Retry").chooseButton("Retry");
         click("addWordButton");
         waitForText("addWordStatusLabel", "Added to " + STARTER_DECK + ": quokka | Verified by " + SlowDictionary.SOURCE);
         assertEquals(3, dialogs.shown(ScriptedDialogs.Kind.CHOOSE).size());
         assertEquals("VERIFIED; " + SlowDictionary.SOURCE,
             services.wordRepository().findByEnglish(currentDeck().getId(), "quokka").orElseThrow().getTags());
 
-        dictionary.answer("wallaby", DictionaryLookupResult.unavailable(LookupOutcome.TIMEOUT, "Wiktionary：5 秒内没有响应。"));
+        dictionary.answer("wallaby", DictionaryLookupResult.unavailable(LookupOutcome.TIMEOUT, "Wiktionary: no answer within 5 seconds."));
         type("addEnglishField", "wallaby");
         type("addChineseField", "沙袋鼠");
-        dialogs.chooseButton("直接添加");
+        dialogs.chooseButton("Add anyway");
         click("addWordButton");
         waitForText("addWordStatusLabel",
             "Added to " + STARTER_DECK + ": wallaby | Not checked: the dictionaries could not be asked");
-        assertTrue(dialogs.last(ScriptedDialogs.Kind.CHOOSE).content().startsWith("在线词典响应超时，请稍后重试。"));
+        assertTrue(dialogs.last(ScriptedDialogs.Kind.CHOOSE).content().startsWith("The online dictionary did not answer in time: try again later."));
         assertEquals("UNCHECKED", services.wordRepository().findByEnglish(currentDeck().getId(), "wallaby")
             .orElseThrow().getTags());
         assertFalse(dialogs.wasShown(ScriptedDialogs.Kind.CONFIRM), "only a word no dictionary has is UNVERIFIED");
@@ -306,7 +306,7 @@ class DictionaryLookupUiTest extends MainWindowUiTest {
             }
             Deque<DictionaryLookupResult> queue = answers.get(word);
             if (queue == null) {
-                return DictionaryLookupResult.notFound("词条未找到：测试词典没有该词条。");
+                return DictionaryLookupResult.notFound("Not found: the test dictionary does not have this word.");
             }
             synchronized (queue) {
                 return queue.size() > 1 ? queue.poll() : queue.peek();
