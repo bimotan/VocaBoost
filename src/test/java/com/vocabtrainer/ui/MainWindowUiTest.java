@@ -96,6 +96,8 @@ abstract class MainWindowUiTest {
     Path tempDir;
 
     final ScriptedDialogs dialogs = new ScriptedDialogs();
+    /** Takes the place of JavaFX Media, so no test plays sound. */
+    final RecordingAudioPlayer audio = new RecordingAudioPlayer();
     AppServices services;
     private Stage stage;
     private String testName;
@@ -131,7 +133,9 @@ abstract class MainWindowUiTest {
             }
             VocabTrainerApp.useLanguage(new LanguageSettings(services.settingsService()).language(), systemLocale);
             stage = new Stage();
-            VocabTrainerApp.showMainWindow(stage, services.createMainWindow(dialogs, systemLocale));
+            MainWindow window = services.createMainWindow(dialogs, systemLocale);
+            window.useAudioPlayer(audio);
+            VocabTrainerApp.showMainWindow(stage, window);
         });
     }
 

@@ -231,19 +231,33 @@ public class PublicOnlineDictionaryService implements DictionaryService {
         }
     }
 
+    /**
+     * Reads dictionaryapi.dev's entries: {@code [{"word", "phonetic", "phonetics": [{"text", "audio"}],
+     * "meanings": [{"partOfSpeech", "synonyms", "antonyms", "definitions": [{"definition", "example",
+     * "synonyms", "antonyms"}]}]}]}. Each definition is an entry with the synonyms and antonyms of its
+     * meaning and its own, and the word's recording (an American one when there are several).
+     */
     private DictionaryLookupResult parseDictionaryApi(String english, JsonNode root) {
         List<DictionaryEntry> entries = new ArrayList<>();
         // A word it does not know is HTTP 404; any other shape than an array of entries has none.
         JsonNode words = root.isArray() ? root : objectMapper.createArrayNode();
         for (JsonNode wordNode : words) {
             String phonetic = HttpLookup.text(wordNode, "phonetic");
+            if (phonetic.isEmpty()) {
+                phonetic = firstPhoneticText(wordNode.path("phonetics"));
+            }
+            String audio = recording(wordNode.path("phonetics"));
             for (JsonNode meaning : wordNode.path("meanings")) {
                 String pos = HttpLookup.text(meaning, "partOfSpeech");
+                List<String> meaningSynonyms = words(meaning.path("synonyms"));
+                List<String> meaningAntonyms = words(meaning.path("antonyms"));
                 for (JsonNode definitionNode : meaning.path("definitions")) {
                     String definition = HttpLookup.text(definitionNode, "definition");
                     if (!definition.isBlank() && entries.size() < MAX_ENTRIES) {
                         entries.add(new DictionaryEntry(english, "", pos, phonetic,
-                            HttpLookup.text(definitionNode, "example"), DICTIONARY_API_SOURCE, definition));
+                            HttpLookup.text(definitionNode, "example"), DICTIONARY_API_SOURCE, definition, "",
+                            joined(words(definitionNode.path("synonyms")), meaningSynonyms),
+                            joined(words(definitionNode.path("antonyms")), meaningAntonyms), audio));
                     }
                 }
             }
@@ -252,6 +266,50 @@ public class PublicOnlineDictionaryService implements DictionaryService {
             return DictionaryLookupResult.notFound(tr("dictionary.notFoundIn", DICTIONARY_API_SOURCE));
         }
         return DictionaryLookupResult.success(loadedEnglishOnly(DICTIONARY_API_SOURCE), entries);
+    }
+
+    private static String firstPhoneticText(JsonNode phonetics) {
+        for (JsonNode phonetic : phonetics) {
+            String text = HttpLookup.text(phonetic, "text");
+            if (!text.isEmpty()) {
+                return text;
+            }
+        }
+        return "";
+    }
+
+    /** The URL of the word's recording, an American one ("-us.mp3") when there are several; empty without one. */
+    private static String recording(JsonNode phonetics) {
+        String first = "";
+        for (JsonNode phonetic : phonetics) {
+            String audio = HttpLookup.text(phonetic, "audio");
+            if (!audio.startsWith("https://") && !audio.startsWith("http://")) {
+                continue;
+            }
+            if (audio.toLowerCase(Locale.ROOT).contains("-us.")) {
+                return audio;
+            }
+            first = first.isEmpty() ? audio : first;
+        }
+        return first;
+    }
+
+    /** The words of a JSON array of strings, each once, in order. */
+    private static List<String> words(JsonNode array) {
+        List<String> words = new ArrayList<>();
+        for (JsonNode word : array) {
+            String text = word.isTextual() ? word.asText().strip() : "";
+            if (!text.isEmpty() && !words.contains(text)) {
+                words.add(text);
+            }
+        }
+        return words;
+    }
+
+    private static List<String> joined(List<String> first, List<String> then) {
+        List<String> all = new ArrayList<>(first);
+        then.stream().filter(word -> !all.contains(word)).forEach(all::add);
+        return all;
     }
 
     /**

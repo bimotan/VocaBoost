@@ -58,6 +58,21 @@ public final class DictionaryServiceFactory {
             offline);
     }
 
+    /**
+     * The public online dictionaries alone, behind the lookup cache and skipped while {@code offline}
+     * answers true: where a word's synonyms, antonyms and recording come from ({@link WordExtrasService}).
+     */
+    public static DictionaryService publicOnline(DictionaryCacheRepository cacheRepository, BooleanSupplier offline) {
+        return new CachingDictionaryService(new OfflineAwareDictionaryService(
+            new PublicOnlineDictionaryService(HttpLookup.newClient()), offline, tr("dictionary.online.name")),
+            cacheRepository, Clock.systemDefaultZone());
+    }
+
+    /** A client for downloading pronunciation recordings, which follows redirects and carries no key. */
+    public static HttpClient audioClient() {
+        return HttpLookup.newClient();
+    }
+
     public static DictionaryService compose(DictionaryService local, DictionaryService configuredApi,
                                             DictionaryService online, DictionaryCacheRepository cacheRepository,
                                             Clock clock) {

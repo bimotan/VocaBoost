@@ -78,7 +78,10 @@ final class DictionaryLookupBox {
                     String meaning = item.chinese() == null || item.chinese().isBlank()
                         ? tr("lookup.result.definition", item.definition())
                         : item.chinese();
-                    setText(item.english() + " | " + meaning + " | " + LocalDictionaryService.sourceLabel(item.source()));
+                    String synonyms = item.synonyms().isEmpty() ? ""
+                        : " | " + tr("lookup.result.synonyms", String.join(", ", item.synonyms()));
+                    setText(item.english() + " | " + meaning + synonyms + " | "
+                        + LocalDictionaryService.sourceLabel(item.source()));
                 }
             }
         });

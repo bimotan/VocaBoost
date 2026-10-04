@@ -2,10 +2,13 @@ package com.vocabtrainer.ui.review;
 
 import com.vocabtrainer.domain.ReviewMode;
 import com.vocabtrainer.domain.ReviewRating;
+import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ReviewService;
 import com.vocabtrainer.service.ReviewSettings;
 import com.vocabtrainer.service.SettingsService;
+import com.vocabtrainer.service.WordExtrasService;
+import com.vocabtrainer.ui.AudioPlayer;
 import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.Labels;
@@ -13,6 +16,7 @@ import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import com.vocabtrainer.ui.WordDetails;
 import com.vocabtrainer.ui.WordDetailsCard;
+import com.vocabtrainer.ui.WordExtrasController;
 import javafx.css.PseudoClass;
 import javafx.event.ActionEvent;
 import javafx.event.EventTarget;
@@ -104,6 +108,7 @@ public final class ReviewView {
     private final Button submitAnswerButton = new Button(tr("review.submit"));
     private final TextArea reviewResultArea = new TextArea();
     private final WordDetailsCard detailsCard = new WordDetailsCard("reviewDetails");
+    private final WordExtrasController extrasController;
     private final Button explainButton = new Button(tr("review.explain"));
     private final Button regenerateExplanationButton = new Button(tr("review.regenerate"));
     private final Label completionTitleLabel = new Label(tr("review.complete"));
@@ -132,10 +137,15 @@ public final class ReviewView {
     /** Set while {@link #render} updates the selectors, whose listeners only react to the user. */
     private boolean rendering;
 
-    /** {@code settingsService} says when answers are explained by themselves; {@code clock} times the answers. */
+    /**
+     * {@code settingsService} says when answers are explained by themselves; {@code wordExtras} and
+     * {@code audioPlayer} give the answered word's synonyms and recording; {@code clock} times the answers.
+     */
     public ReviewView(ViewContext context, ReviewService reviewService, GoalService goalService,
-                      ConfiguredServices configured, SettingsService settingsService, Clock clock) {
+                      ConfiguredServices configured, SettingsService settingsService, WordExtrasService wordExtras,
+                      AudioPlayer audioPlayer, Clock clock) {
         this.context = context;
+        this.extrasController = new WordExtrasController(detailsCard, context, wordExtras, audioPlayer);
         this.presenter = new ReviewSessionPresenter(reviewService, goalService, configured::ai, context.async(),
             context.changes(), context.errors()::reportFailure, clock);
         presenter.setAutoExplain(settingsService::getAutoExplain);
@@ -159,6 +169,7 @@ public final class ReviewView {
             if (changes.contains(DataChange.SETTINGS)) {
                 // The AI provider or offline mode may have changed.
                 render();
+                extrasController.settingsChanged();
             }
         });
     }
@@ -605,6 +616,8 @@ public final class ReviewView {
         showIf(reviewHintLabel, !presenter.hint().isEmpty());
         Optional<WordDetails> revealed = presenter.revealedDetails().filter(details -> !details.isEmpty());
         revealed.ifPresent(details -> detailsCard.show("", details, ""));
+        // Synonyms give an answer away, so the extras follow the details: only once the answer is checked.
+        extrasController.show(revealed.isPresent() ? presenter.card().map(WordCard::getEnglish).orElse(null) : null);
         showIf(detailsCard.root(), revealed.isPresent());
         reviewMetaLabel.setText(presenter.details());
         sessionProgressLabel.setText(presenter.sessionProgress());

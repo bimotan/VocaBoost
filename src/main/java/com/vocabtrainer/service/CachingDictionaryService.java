@@ -5,13 +5,10 @@ import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.domain.LookupOutcome;
 import com.vocabtrainer.repository.DictionaryCacheRepository;
 
-import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -206,85 +203,13 @@ public class CachingDictionaryService implements DictionaryService {
             .anyMatch(entry -> !PublicOnlineDictionaryService.DICTIONARY_API_SOURCE.equals(entry.source()));
     }
 
-    private String serialize(List<DictionaryEntry> entries) {
-        List<String> rows = new ArrayList<>();
-        for (DictionaryEntry entry : entries) {
-            rows.add(String.join("\t",
-                encode(entry.english()),
-                encode(entry.chinese()),
-                encode(entry.partOfSpeech()),
-                encode(entry.phonetic()),
-                encode(entry.example()),
-                encode(entry.source()),
-                encode(entry.definition()),
-                encode(entry.note())
-            ));
-        }
-        return String.join("\n", rows);
-    }
-
-    private List<DictionaryEntry> deserializeRows(String payload) {
-        List<DictionaryEntry> entries = new ArrayList<>();
-        for (String row : payload.split("\\R")) {
-            if (row.isBlank()) {
-                continue;
-            }
-            String[] fields = row.split("\\t", -1);
-            if (fields.length >= 6 && fields.length <= 8) {
-                String chinese = decode(fields[1]);
-                String definition = fields.length >= 7 ? decode(fields[6]) : "";
-                if (looksLikeOnlineDefinitionPlaceholder(chinese)) {
-                    definition = extractDefinition(chinese);
-                    chinese = "";
-                }
-                entries.add(new DictionaryEntry(
-                    decode(fields[0]),
-                    chinese,
-                    decode(fields[2]),
-                    decode(fields[3]),
-                    decode(fields[4]),
-                    decode(fields[5]),
-                    definition,
-                    fields.length == 8 ? decode(fields[7]) : ""
-                ));
-            }
-        }
-        return entries;
-    }
-
-    private String encode(String value) {
-        String safe = value == null ? "" : value;
-        return Base64.getEncoder().encodeToString(safe.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private String decode(String value) {
-        return new String(Base64.getDecoder().decode(value), StandardCharsets.UTF_8);
+    private static String serialize(List<DictionaryEntry> entries) {
+        return DictionaryCachePayload.serialize(entries);
     }
 
     /** A payload this version cannot read counts as no entries, so the row is replaced. */
-    private List<DictionaryEntry> deserialize(String payload) {
-        try {
-            return deserializeRows(payload == null ? "" : payload);
-        } catch (IllegalArgumentException e) {
-            LOGGER.log(Level.WARNING, "Ignoring a dictionary cache entry that cannot be read", e);
-            return List.of();
-        }
-    }
-
-    private boolean looksLikeOnlineDefinitionPlaceholder(String value) {
-        return value != null && value.startsWith("请填写中文释义（English definition: ");
-    }
-
-    private String extractDefinition(String value) {
-        if (!looksLikeOnlineDefinitionPlaceholder(value)) {
-            return value == null ? "" : value;
-        }
-        String prefix = "请填写中文释义（English definition: ";
-        String definition = value.substring(prefix.length());
-        if (definition.endsWith("）")) {
-            definition = definition.substring(0, definition.length() - 1);
-        }
-        return definition.trim();
+    private static List<DictionaryEntry> deserialize(String payload) {
+        return DictionaryCachePayload.deserialize(payload);
     }
 
     private boolean isUsableCache(List<DictionaryEntry> entries) {

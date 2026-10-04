@@ -116,6 +116,34 @@ class PublicOnlineDictionaryServiceTest {
     }
 
     @Test
+    void dictionaryApiDevGivesSynonymsAntonymsAndARecording() {
+        server.answer("/dictapi/abate", 200, """
+            [{"word":"abate","phonetics":[{"text":"/əˈbeɪt/","audio":""},
+                {"audio":"https://api.dictionaryapi.dev/media/pronunciations/en/abate-uk.mp3"},
+                {"text":"/əˈbeɪt/","audio":"https://api.dictionaryapi.dev/media/pronunciations/en/abate-us.mp3"}],
+              "meanings":[{"partOfSpeech":"verb","synonyms":["subside","diminish"],"antonyms":["intensify"],
+                "definitions":[{"definition":"To lessen in force or intensity.","synonyms":["wane","subside"],
+                                "antonyms":[]}]},
+                {"partOfSpeech":"noun","synonyms":[],"antonyms":[],"definitions":[{"definition":"Abatement."}]}]}]
+            """);
+
+        DictionaryLookupResult result = service.lookup("abate");
+
+        assertEquals(LookupOutcome.FOUND, result.outcome());
+        DictionaryEntry verb = result.entries().get(0);
+        assertEquals("/əˈbeɪt/", verb.phonetic(), "from phonetics when there is no phonetic");
+        assertEquals(List.of("wane", "subside", "diminish"), verb.synonyms());
+        assertEquals(List.of("intensify"), verb.antonyms());
+        assertEquals("https://api.dictionaryapi.dev/media/pronunciations/en/abate-us.mp3", verb.audioUrl(),
+            "the American recording when there are several");
+        DictionaryEntry noun = result.entries().get(1);
+        assertEquals(List.of(), noun.synonyms());
+        assertEquals(verb.audioUrl(), noun.audioUrl(), "the recording is the word's");
+        assertEquals(new WordExtras(List.of("wane", "subside", "diminish"), List.of("intensify"), verb.audioUrl()),
+            WordExtras.of("abate", result.entries()));
+    }
+
+    @Test
     void wiktionaryAnswersWithItsEnglishSectionAsPlainText() {
         server.answer("/dictapi/petrichor", 404, DICTIONARY_API_NOT_FOUND);
         server.answer("/wiki/petrichor", 200, """
