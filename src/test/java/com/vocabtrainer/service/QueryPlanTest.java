@@ -134,6 +134,10 @@ class QueryPlanTest {
         wordRepository.deleteByIds(List.of(words.get(5).getId(), words.get(6).getId()));
         // Adding a word: is it in another deck already?
         wordRepository.findInOtherDecks(words.get(1).getEnglish(), other.getId());
+        // Importing a word list: which of its words do other decks have? Re-checking unchecked words.
+        wordRepository.findFirstInOtherDecks(List.of(words.get(1).getEnglish(), "wordzz"), other.getId());
+        wordRepository.findTagged(List.of(deck.getId()), "UNCHECKED");
+        wordRepository.updateTagsIfUnchanged(words.get(1).getId(), "", "VERIFIED", "");
 
         List<String> problems = new ArrayList<>();
         for (String sql : databaseManager.statements) {

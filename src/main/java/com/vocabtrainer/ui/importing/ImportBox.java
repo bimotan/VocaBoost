@@ -9,6 +9,7 @@ import com.vocabtrainer.service.WordListOptions;
 import com.vocabtrainer.service.csv.WordColumns;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.LatestRequest;
+import com.vocabtrainer.ui.OtherDecksQuestion;
 import com.vocabtrainer.ui.UiAsync;
 import com.vocabtrainer.ui.UiErrors;
 import com.vocabtrainer.ui.ViewContext;
@@ -261,7 +262,9 @@ final class ImportBox {
 
     /**
      * Imports the file in the path field, with the columns chosen in the preview when it shows this
-     * file, otherwise with the detected columns.
+     * file, otherwise with the detected columns. The file is read first: when other active decks
+     * already have some of its words, the user chooses whether to copy their meanings, keep the
+     * file's or skip them, or cancels.
      */
     private void importWordList() {
         Optional<Path> chosen = chosenFile(tr("import.chooseFirst"));
@@ -273,7 +276,26 @@ final class ImportBox {
         boolean mapped = mapping.isShown() && path.equals(previewedPath);
         WordListOptions options = new WordListOptions(mapped ? chosenColumns() : null, onlineLookup.isSelected());
         previews.invalidate();
+        context.async().run(
+            () -> importExportService.previewWordList(path, deck.getId(), options),
+            preview -> {
+                if (preview.inOtherDecks() == 0) {
+                    startImport(path, deck, options);
+                    return;
+                }
+                OtherDecksQuestion.ask(context, preview.inOtherDecks(), preview.otherDeckIds()).ifPresentOrElse(
+                    choice -> startImport(path, deck, options.with(choice)),
+                    () -> importStatus.setText(tr("import.canceled")));
+            },
+            error -> showFailure(tr("import.failed"), error),
+            importStatus,
+            tr("import.analyzing"),
+            importButtons()
+        );
+    }
 
+    /** Runs the import of {@code path} into {@code deck} in the background, with progress and Cancel. */
+    private void startImport(Path path, Deck deck, WordListOptions options) {
         AtomicBoolean cancelRequested = new AtomicBoolean();
         String startMessage = tr("import.running");
         Task<ImportResult> task = new Task<>() {

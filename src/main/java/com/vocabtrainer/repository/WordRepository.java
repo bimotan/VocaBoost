@@ -311,6 +311,41 @@ public class WordRepository {
     }
 
     /**
+     * For each of {@code englishKeys} (lower case) that an active deck other than {@code deckId} has,
+     * that word in the oldest such deck, by its lower-case English: what importing the words into
+     * {@code deckId} (0 for a deck that does not exist yet) would duplicate elsewhere. Asked
+     * {@value #IDS_PER_STATEMENT} words at a time through the unique index on (deck_id, english).
+     */
+    public Map<String, WordCard> findFirstInOtherDecks(Collection<String> englishKeys, long deckId)
+        throws SQLException {
+        Map<String, WordCard> found = new HashMap<>();
+        List<String> keys = List.copyOf(new LinkedHashSet<>(englishKeys));
+        for (int from = 0; from < keys.size(); from += IDS_PER_STATEMENT) {
+            List<String> chunk = keys.subList(from, Math.min(keys.size(), from + IDS_PER_STATEMENT));
+            String sql = """
+                SELECT w.* FROM decks d
+                JOIN words w ON w.deck_id = d.id AND w.english COLLATE NOCASE IN (%s)
+                WHERE d.archived = 0 AND d.id <> ?
+                ORDER BY d.id, w.id
+                """.formatted(String.join(", ", Collections.nCopies(chunk.size(), "?")));
+            try (Connection connection = databaseManager.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(sql)) {
+                int index = 1;
+                for (String key : chunk) {
+                    statement.setString(index++, key);
+                }
+                statement.setLong(index, deckId);
+                try (ResultSet rs = statement.executeQuery()) {
+                    for (WordCard word : mapList(rs)) {
+                        found.putIfAbsent(word.getEnglish().trim().toLowerCase(Locale.ROOT), word);
+                    }
+                }
+            }
+        }
+        return found;
+    }
+
+    /**
      * The deck's English words in lower case, for duplicate checks without one query per word.
      * Suspended words are included, because the unique index on (deck_id, english) covers them too.
      */

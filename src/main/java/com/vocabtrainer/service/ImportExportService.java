@@ -32,11 +32,14 @@ import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -142,7 +145,9 @@ public class ImportExportService {
                 file.anki().describe(),
                 analysis.columns,
                 file.columns(),
-                previewRows(analysis, options)
+                previewRows(analysis, options),
+                analysis.inOtherDecks,
+                List.copyOf(analysis.otherDeckIds)
             );
         } catch (IOException e) {
             throw new IllegalStateException(cannotRead(tr("import.what.wordList"), path, e), e);
@@ -464,7 +469,62 @@ public class ImportExportService {
                 analysis.messages.add(skippedLine(row.line, e.getMessage()));
             }
         }
+        applyOtherDecks(analysis, deckId, options.inOtherDecks());
         return analysis;
+    }
+
+    /**
+     * Counts the rows whose word another active deck has and does with them what {@code choice} says:
+     * nothing, copy that deck's meaning, part of speech, example and phonetic into them (which also
+     * gives a row without a meaning one, so it needs no dictionary), or skip them.
+     */
+    private void applyOtherDecks(Analysis analysis, long deckId, InOtherDecks choice) {
+        Map<String, WordCard> elsewhere;
+        try {
+            elsewhere = wordRepository.findFirstInOtherDecks(
+                analysis.rows.stream().map(row -> key(row.english)).toList(), deckId);
+        } catch (SQLException e) {
+            throw new IllegalStateException(tr("import.error.readDeck", ErrorMessages.rootMessage(e)), e);
+        }
+        Set<Long> decks = new TreeSet<>();
+        for (Iterator<Row> rows = analysis.rows.iterator(); rows.hasNext(); ) {
+            Row row = rows.next();
+            WordCard other = elsewhere.get(key(row.english));
+            if (other == null) {
+                continue;
+            }
+            analysis.inOtherDecks++;
+            decks.add(other.getDeckId());
+            if (choice == InOtherDecks.SKIP) {
+                rows.remove();
+                row.word = null;
+                row.needsMeaning = false;
+                row.status = tr("import.row.inOtherDeck");
+                analysis.skipped++;
+                analysis.messages.add(tr("import.row.skippedInOtherDeck", row.line, row.english));
+            } else if (choice == InOtherDecks.COPY_DETAILS) {
+                try {
+                    row.word = InOtherDecks.copyDetails(other, row.word != null ? row.word
+                        : newWord(deckId, validationService.validate(row.english, other.getChinese(),
+                            row.fields.get(WordColumn.PHONETIC), row.fields.get(WordColumn.POS),
+                            row.fields.get(WordColumn.EXAMPLE), row.fields.get(WordColumn.NOTE),
+                            row.fields.get(WordColumn.TAGS))));
+                    row.needsMeaning = false;
+                    row.copied = true;
+                    row.status = tr("import.row.copied");
+                    analysis.copied++;
+                } catch (IllegalArgumentException e) {
+                    rows.remove();
+                    row.status = e.getMessage();
+                    analysis.skipped++;
+                    analysis.messages.add(skippedLine(row.line, e.getMessage()));
+                }
+            }
+        }
+        analysis.otherDeckIds.addAll(decks);
+        if (analysis.copied > 0) {
+            analysis.notes.add(tr("import.otherDecks.copied", analysis.copied));
+        }
     }
 
     /**
@@ -594,6 +654,8 @@ public class ImportExportService {
         boolean filled;
         /** True when the row has no meaning and waits for the dictionary's. */
         boolean needsMeaning;
+        /** True when the row's details were copied from another deck that has the word. */
+        boolean copied;
         String status = "";
 
         Row(int line, Map<WordColumn, String> fields) {
@@ -615,6 +677,13 @@ public class ImportExportService {
         int skipped;
         int duplicates;
         boolean stoppedAtLimit;
+        /** Rows to import whose word another active deck has, and those decks' ids. */
+        int inOtherDecks;
+        final Set<Long> otherDeckIds = new LinkedHashSet<>();
+        /** Rows whose details were copied from another deck. */
+        int copied;
+        /** Notes for the import's summary after the row messages. */
+        final List<String> notes = new ArrayList<>();
 
         Analysis(WordColumns columns, String layout) {
             this.columns = columns;
@@ -640,6 +709,7 @@ public class ImportExportService {
             if (stoppedAtLimit) {
                 all.add(tr("import.stoppedAtLimit", MAX_GRE_IMPORT_WORDS));
             }
+            all.addAll(notes);
             return all;
         }
     }

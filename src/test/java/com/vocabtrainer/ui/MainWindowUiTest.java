@@ -593,10 +593,17 @@ abstract class MainWindowUiTest {
      * the FX thread.
      */
     void waitForBackgroundTasks() {
-        Fx.waitUntil("background tasks finish", () -> Thread.getAllStackTraces().keySet().stream()
-            .noneMatch(thread -> thread.isAlive() && BACKGROUND_THREAD_NAME.equals(thread.getName())));
-        // A finished task has already queued its result handler; run it.
-        Fx.flush();
+        do {
+            Fx.waitUntil("background tasks finish", () -> !backgroundTaskRunning());
+            // A finished task has already queued its result handler; run it. The handler may start the
+            // next step in the background (a preview before an import), which is waited for too.
+            Fx.flush();
+        } while (backgroundTaskRunning());
+    }
+
+    private static boolean backgroundTaskRunning() {
+        return Thread.getAllStackTraces().keySet().stream()
+            .anyMatch(thread -> thread.isAlive() && BACKGROUND_THREAD_NAME.equals(thread.getName()));
     }
 
     /** Saves the window as target/ui-snapshots/{TestClass}-{test}-{name}.png for manual inspection. */
