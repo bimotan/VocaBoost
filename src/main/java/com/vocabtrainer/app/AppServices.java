@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.repository.AchievementRepository;
 import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.repository.DatabaseManager;
+import com.vocabtrainer.repository.DatabaseSnapshots;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.DictionaryCacheRepository;
 import com.vocabtrainer.repository.EcdictRepository;
@@ -181,13 +182,19 @@ public record AppServices(
         }
 
         /**
-         * Creates or migrates the database, derives the FSRS state of words that have none yet,
+         * Creates or migrates the database, writes the day's snapshot of an existing one (see
+         * {@link DatabaseSnapshots}), derives the FSRS state of words that have none yet,
          * resolves the startup deck, imports the starter words into a brand-new database and wires
          * the services.
          */
         public AppServices open() throws SQLException {
             DatabaseManager databaseManager = new DatabaseManager(databasePath);
             databaseManager.initialize();
+            DatabaseSnapshots snapshots = new DatabaseSnapshots(databaseManager, clock);
+            if (!databaseManager.isNewDatabase()) {
+                // At most one a day; a failure is logged and never stops the start.
+                snapshots.takeDailyIfDue();
+            }
 
             DeckRepository deckRepository = new DeckRepository(databaseManager);
             WordRepository wordRepository = wordRepositoryFactory.apply(databaseManager);
@@ -246,7 +253,8 @@ public record AppServices(
                 reviewSettings, reviewScheduler, clock);
             bringReviewsBeforeExams(examPlanService);
             BackupService backupService = new BackupService(deckRepository, wordRepository, reviewLogRepository,
-                goalRepository, achievementRepository, databaseManager, validationService, clock, cardStates);
+                goalRepository, achievementRepository, databaseManager, validationService, clock, cardStates,
+                snapshots);
             BiFunction<AiCacheRepository, SettingsService, AiService> aiFactory = aiServiceFactory;
 
             return new AppServices(

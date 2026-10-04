@@ -18,6 +18,7 @@ import com.vocabtrainer.domain.ValidatedWord;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.AchievementRepository;
 import com.vocabtrainer.repository.DatabaseManager;
+import com.vocabtrainer.repository.DatabaseSnapshots;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
@@ -70,6 +71,7 @@ public class BackupService {
     private final WordValidationService validationService;
     private final Clock clock;
     private final CardStateBackfill cardStates;
+    private final DatabaseSnapshots snapshots;
     private final ObjectMapper objectMapper = JsonMapper.builder()
         // Version 1 backups were written by hand and left tabs and other control characters unescaped.
         .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
@@ -99,6 +101,19 @@ public class BackupService {
                          ReviewLogRepository reviewLogRepository, GoalRepository goalRepository,
                          AchievementRepository achievementRepository, DatabaseManager databaseManager,
                          WordValidationService validationService, Clock clock, CardStateBackfill cardStates) {
+        this(deckRepository, wordRepository, reviewLogRepository, goalRepository, achievementRepository,
+            databaseManager, validationService, clock, cardStates, null);
+    }
+
+    /**
+     * @param cardStates derives the FSRS state of words restored from a backup written before FSRS
+     * @param snapshots  writes a snapshot of the database before each restore; null for none
+     */
+    public BackupService(DeckRepository deckRepository, WordRepository wordRepository,
+                         ReviewLogRepository reviewLogRepository, GoalRepository goalRepository,
+                         AchievementRepository achievementRepository, DatabaseManager databaseManager,
+                         WordValidationService validationService, Clock clock, CardStateBackfill cardStates,
+                         DatabaseSnapshots snapshots) {
         this.deckRepository = deckRepository;
         this.wordRepository = wordRepository;
         this.reviewLogRepository = reviewLogRepository;
@@ -108,6 +123,7 @@ public class BackupService {
         this.validationService = validationService;
         this.clock = clock;
         this.cardStates = cardStates;
+        this.snapshots = snapshots;
     }
 
     /**
@@ -207,11 +223,15 @@ public class BackupService {
     /**
      * Restores a version 1 or 2 backup into the deck in one transaction: either everything valid in
      * the file is restored or, if the database fails, nothing is. Rows the file gets wrong are skipped
-     * and listed in the result. Restoring the same file again adds nothing.
+     * and listed in the result. Restoring the same file again adds nothing. A snapshot of the database
+     * is written first (one that cannot be written is logged and does not stop the restore).
      */
     public BackupRestoreResult importJsonBackup(Path inputPath, long deckId, ExistingWordPolicy policy) {
         JsonNode root = readBackup(inputPath);
         int version = formatVersion(root);
+        if (snapshots != null) {
+            snapshots.takeQuietly("before-restore");
+        }
         RestoreTally tally;
         try {
             tally = databaseManager.inTransaction(() -> restore(root, version, deckId, policy));

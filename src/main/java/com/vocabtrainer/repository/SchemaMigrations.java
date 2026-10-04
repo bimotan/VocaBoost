@@ -80,6 +80,16 @@ final class SchemaMigrations {
         this.connection = connection;
     }
 
+    /**
+     * Whether {@link #migrate()} will change a database that already holds a schema: one of an
+     * earlier version, or from before versioning. A new, empty database and one of this or a newer
+     * version are not upgraded.
+     */
+    boolean upgradesExistingDatabase() throws SQLException {
+        int version = userVersion();
+        return version < CURRENT_VERSION && (version > 0 || tableExists("decks"));
+    }
+
     /** Applies every step the database has not had yet, oldest first. */
     void migrate() throws SQLException {
         int version = userVersion();

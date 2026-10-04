@@ -14,6 +14,7 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Clock;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -51,6 +52,8 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
     private long connectionsOpened;
     /** Guarded by poolLock. */
     private boolean closed;
+    /** Whether {@link #initialize()} created the database file. */
+    private volatile boolean createdByInitialize;
 
     public DatabaseManager() {
         this(DateTimeUtil.defaultDatabasePath());
@@ -64,6 +67,9 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
     /**
      * Creates the database file if needed and migrates its schema to the current version; see
      * {@link SchemaMigrations}. Safe to call on every start and on a database of any earlier version.
+     * Before an existing database is upgraded, a snapshot of it is written (see
+     * {@link DatabaseSnapshots}); a snapshot that cannot be written is logged and does not stop the
+     * upgrade.
      */
     public void initialize() throws SQLException {
         try {
@@ -74,12 +80,18 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
         } catch (IOException e) {
             throw new SQLException("Cannot create the database folder for " + databasePath, e);
         }
+        createdByInitialize = !Files.exists(databasePath);
 
         Lease setup = lease();
         boolean migrated = false;
         try {
             enableWriteAheadLog(setup.view);
-            new SchemaMigrations(setup.view).migrate();
+            SchemaMigrations migrations = new SchemaMigrations(setup.view);
+            if (migrations.upgradesExistingDatabase()) {
+                new DatabaseSnapshots(this, Clock.systemDefaultZone())
+                    .takeQuietly("before-upgrade-v" + SchemaMigrations.CURRENT_VERSION, setup.view);
+            }
+            migrations.migrate();
             migrated = true;
         } finally {
             if (migrated) {
@@ -188,6 +200,14 @@ public class DatabaseManager implements TransactionRunner, AutoCloseable {
             openConnections -= idle.size();
         }
         idle.forEach(DatabaseManager::closeQuietly);
+    }
+
+    /**
+     * Whether the last {@link #initialize()} created the database file, so it holds nothing of the
+     * user's yet.
+     */
+    public boolean isNewDatabase() {
+        return createdByInitialize;
     }
 
     /** Physical connections opened since this manager was created; for diagnostics and tests. */

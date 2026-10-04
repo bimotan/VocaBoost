@@ -208,7 +208,7 @@ class UndoAndSuspendUiTest extends MainWindowUiTest {
         assertEquals("Delete \"" + reviewed.getEnglish() + "\"?", dialog.header());
         assertEquals("Delete | Suspend instead | Cancel", dialog.value());
         assertTrue(dialog.content().startsWith("Its review history (1 review) will be deleted with it"), dialog.content());
-        assertTrue(dialog.content().contains("only restoring a JSON backup made before brings it back"), dialog.content());
+        assertTrue(dialog.content().contains("only restoring a JSON backup made before, or a database snapshot from before (Settings → Data and Logs), brings it back"), dialog.content());
         assertTrue(dialog.content().contains("Suspend instead to stop reviewing it and keep the history"), dialog.content());
         assertTrue(stored(reviewed).isSuspended());
         assertEquals(1, logs().size(), "suspending keeps the history");

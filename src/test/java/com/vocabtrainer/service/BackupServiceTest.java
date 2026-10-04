@@ -12,6 +12,7 @@ import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.AchievementRepository;
 import com.vocabtrainer.repository.DatabaseManager;
+import com.vocabtrainer.repository.DatabaseSnapshots;
 import com.vocabtrainer.repository.DeckRepository;
 import com.vocabtrainer.repository.GoalRepository;
 import com.vocabtrainer.repository.ReviewLogRepository;
@@ -189,6 +190,26 @@ class BackupServiceTest {
             BackupService.ExistingWordPolicy.OVERWRITE_SCHEDULE);
         assertEquals(0, again.wordsUpdated());
         assertEquals(4, again.wordsSkipped());
+    }
+
+    @Test
+    void aSnapshotIsWrittenBeforeEachRestore() throws Exception {
+        Db db = new Db(tempDir.resolve("vocab.db"));
+        Deck deck = db.decks.ensureDefaultDeck();
+        seedTrickyDeck(db, deck.getId());
+        Path json = db.backup.exportJsonBackup(deck.getId(), tempDir.resolve("backup.json"));
+        DatabaseSnapshots snapshots = new DatabaseSnapshots(db.databaseManager, CLOCK);
+        BackupService backup = new BackupService(db.decks, db.words, db.logs, db.goals, db.achievements,
+            db.databaseManager, new WordValidationService(), CLOCK,
+            new CardStateBackfill(db.words, db.logs, new ReviewScheduler()), snapshots);
+
+        backup.importJsonBackup(json, db.decks.create("Restored").getId());
+        backup.importJsonBackup(json, db.decks.create("Again").getId());
+
+        List<Path> written = snapshots.list();
+        assertEquals(2, written.size());
+        assertTrue(written.stream().allMatch(file -> file.getFileName().toString().endsWith("-before-restore.db")),
+            written.toString());
     }
 
     @Test
