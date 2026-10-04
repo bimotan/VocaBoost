@@ -10,6 +10,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The character encoding of a text file and the length of its byte order mark.
  *
@@ -71,7 +73,7 @@ public record TextEncoding(Charset charset, int bomLength) {
     /** For messages: "UTF-8", "UTF-8 with BOM", "GBK/GB18030", ... */
     public String displayName() {
         String name = charset.equals(GB18030) ? "GBK/GB18030" : charset.name();
-        return bomLength > 0 ? name + " with BOM" : name;
+        return bomLength > 0 ? tr("csv.encoding.withBom", name) : name;
     }
 
     /**
@@ -79,10 +81,8 @@ public record TextEncoding(Charset charset, int bomLength) {
      * file with a bad byte is damaged, while other files are usually just in an unexpected encoding.
      */
     public String undecodableMessage() {
-        String advice = charset.equals(StandardCharsets.UTF_8)
-            ? "a character on this line is damaged or in another encoding"
-            : "save the file as UTF-8 and try again";
-        return "the text is not valid " + displayName() + " (" + advice + ")";
+        String advice = charset.equals(StandardCharsets.UTF_8) ? tr("csv.encoding.damaged") : tr("csv.encoding.saveAsUtf8");
+        return tr("csv.encoding.invalid", displayName(), advice);
     }
 
     /** True when the text is valid UTF-8, or valid long enough to be UTF-8 with a bad byte. */

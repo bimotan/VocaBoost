@@ -9,6 +9,7 @@ import com.vocabtrainer.ui.UiAsync;
 import com.vocabtrainer.ui.UiErrors;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
+import com.vocabtrainer.util.Messages;
 import javafx.concurrent.Task;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
@@ -29,6 +30,8 @@ import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Chooses, tests, imports and clears the local ECDICT CSV used as the first dictionary.
  *
@@ -48,7 +51,7 @@ final class EcdictSettingsBox {
     private final TextField pathField = new TextField();
     private final Label statusLabel = new Label();
     private final ProgressBar progressBar = new ProgressBar(0);
-    private final Button cancelButton = new Button("Cancel Import");
+    private final Button cancelButton = new Button(tr("import.cancel"));
     private final HBox progressRow;
     private final List<Button> actionButtons;
     private final VBox root;
@@ -62,52 +65,52 @@ final class EcdictSettingsBox {
 
         pathField.setText(settingsService.getEcdictPath().orElse(""));
         pathField.setId("ecdictPathField");
-        pathField.setPromptText("Choose local ECDICT CSV");
-        pathField.setAccessibleText("ECDICT CSV file");
+        pathField.setPromptText(tr("ecdict.path.prompt"));
+        pathField.setAccessibleText(tr("ecdict.path.accessible"));
         statusLabel.setId("ecdictStatusLabel");
         statusLabel.setWrapText(true);
         progressBar.setId("ecdictProgressBar");
         progressBar.setMaxWidth(Double.MAX_VALUE);
         cancelButton.setId("cancelEcdictImportButton");
 
-        Button chooseButton = new Button("Choose ECDICT CSV");
+        Button chooseButton = new Button(tr("ecdict.choose"));
         chooseButton.setId("chooseEcdictButton");
         chooseButton.setOnAction(event -> {
             List<FileChooser.ExtensionFilter> filters = List.of(
                 new FileChooser.ExtensionFilter("CSV", "*.csv"),
-                new FileChooser.ExtensionFilter("All Files", "*.*")
+                new FileChooser.ExtensionFilter(tr("file.filter.all"), "*.*")
             );
-            context.dialogs().chooseOpenFile(context.window().get(), "Choose ECDICT CSV", filters)
+            context.dialogs().chooseOpenFile(context.window().get(), tr("ecdict.choose"), filters)
                 .ifPresent(file -> pathField.setText(file.toString()));
         });
 
-        Button testButton = new Button("Test ECDICT");
+        Button testButton = new Button(tr("ecdict.test"));
         testButton.setId("testEcdictButton");
         testButton.setOnAction(event -> chosenFile().ifPresent(csv -> context.async().run(
             () -> importService.check(csv),
-            check -> statusLabel.setText("Test only, nothing imported." + System.lineSeparator() + check.toDisplayText()),
-            error -> statusLabel.setText("Test failed: " + message(error)),
+            check -> statusLabel.setText(tr("ecdict.test.only") + System.lineSeparator() + check.toDisplayText()),
+            error -> statusLabel.setText(tr("ecdict.test.failed", message(error))),
             statusLabel,
-            "Testing " + csv + "...",
+            tr("ecdict.test.running", csv.toString()),
             testButton
         )));
 
-        Button saveButton = new Button("Save and Import");
+        Button saveButton = new Button(tr("ecdict.save"));
         saveButton.setId("saveEcdictButton");
         saveButton.setOnAction(event -> saveAndImport(false));
 
-        Button reimportButton = new Button("Re-import");
+        Button reimportButton = new Button(tr("ecdict.reimport"));
         reimportButton.setId("reimportEcdictButton");
         reimportButton.setOnAction(event -> saveAndImport(true));
 
-        Button clearButton = new Button("Clear Dictionary Path");
+        Button clearButton = new Button(tr("ecdict.clear"));
         clearButton.setId("clearEcdictButton");
-        clearButton.setOnAction(event -> context.errors().guard("Clear dictionary path failed", () -> {
+        clearButton.setOnAction(event -> context.errors().guard(tr("ecdict.clear.failed"), () -> {
             settingsService.clearEcdictPath();
             importService.delete();
             pathField.clear();
             context.changes().publish(DataChange.SETTINGS);
-            statusLabel.setText("Cleared. Using bundled starter and online fallback.");
+            statusLabel.setText(tr("ecdict.cleared"));
         }));
         actionButtons = List.of(testButton, saveButton, reimportButton, clearButton);
 
@@ -117,7 +120,7 @@ final class EcdictSettingsBox {
         progressRow = new HBox(10, progressBar, cancelButton);
         HBox.setHgrow(progressBar, Priority.ALWAYS);
         showProgressRow(false);
-        root = new VBox(10, Widgets.sectionTitle("ECDICT Local Dictionary"), pathRow, actionRow, progressRow,
+        root = new VBox(10, Widgets.sectionTitle(tr("ecdict.title")), pathRow, actionRow, progressRow,
             statusLabel);
 
         statusLabel.setText(importedText());
@@ -144,15 +147,14 @@ final class EcdictSettingsBox {
                 case UP_TO_DATE -> {
                     // The imported dictionary is current.
                 }
-                case NOT_IMPORTED -> startImport(csv, "Importing " + csv + "...", false);
-                case CHANGED -> startImport(csv, "The ECDICT CSV changed since it was imported; importing "
-                    + csv + " again...", false);
-                case FILE_MISSING -> statusLabel.setText("ECDICT CSV not found: " + csv + System.lineSeparator()
+                case NOT_IMPORTED -> startImport(csv, tr("ecdict.importing", csv.toString()), false);
+                case CHANGED -> startImport(csv, tr("ecdict.importing.changed", csv.toString()), false);
+                case FILE_MISSING -> statusLabel.setText(tr("ecdict.notFound", csv.toString()) + System.lineSeparator()
                     + importedText());
             }
         } catch (RuntimeException e) {
-            context.errors().logFailure("Checking the ECDICT dictionary failed", e);
-            statusLabel.setText("Cannot check the ECDICT dictionary: " + message(e));
+            context.errors().logFailure(tr("ecdict.check.failed.title"), e);
+            statusLabel.setText(tr("ecdict.check.failed", message(e)));
         }
     }
 
@@ -167,14 +169,13 @@ final class EcdictSettingsBox {
             return;
         }
         Path csv = chosen.get();
-        context.errors().guard("Save dictionary path failed", () -> {
+        context.errors().guard(tr("ecdict.savePath.failed"), () -> {
             if (!force && importService.state(csv) == EcdictImportService.State.UP_TO_DATE) {
                 savePath(csv);
-                statusLabel.setText("Saved. Already imported, the file has not changed." + System.lineSeparator()
-                    + importedText());
+                statusLabel.setText(tr("ecdict.upToDate") + System.lineSeparator() + importedText());
                 return;
             }
-            startImport(csv, "Importing " + csv + "...", true);
+            startImport(csv, tr("ecdict.importing", csv.toString()), true);
         });
     }
 
@@ -187,18 +188,18 @@ final class EcdictSettingsBox {
     private Optional<Path> chosenFile() {
         String text = pathField.getText() == null ? "" : pathField.getText().trim();
         if (text.isEmpty()) {
-            statusLabel.setText("Choose an ECDICT CSV first.");
+            statusLabel.setText(tr("ecdict.chooseFirst"));
             return Optional.empty();
         }
         Path csv;
         try {
             csv = Path.of(text);
         } catch (InvalidPathException e) {
-            statusLabel.setText("Not a valid file path: " + text);
+            statusLabel.setText(tr("import.badPath", text));
             return Optional.empty();
         }
         if (!Files.isRegularFile(csv)) {
-            statusLabel.setText("ECDICT CSV not found: " + csv);
+            statusLabel.setText(tr("ecdict.notFound", csv.toString()));
             return Optional.empty();
         }
         return Optional.of(csv);
@@ -229,31 +230,33 @@ final class EcdictSettingsBox {
             // The import stops at its next check; the buttons come back when it has cleaned up.
             cancelRequested.set(true);
             cancelButton.setDisable(true);
-            statusLabel.setText("Canceling the import...");
+            statusLabel.setText(tr("import.canceling"));
         });
         showProgressRow(true);
         actionButtons.forEach(button -> button.setDisable(true));
 
-        String notSaved = savePath ? " The path was not saved." : "";
+        String notSaved = savePath ? tr("ecdict.pathNotSaved") : "";
         task.setOnSucceeded(event -> {
             importFinished();
             EcdictMetadata imported = task.getValue();
-            statusLabel.setText(String.format(Locale.ROOT, "Imported %,d entries in %.1f s.",
-                imported.rowCount(), imported.durationMillis() / 1000.0) + System.lineSeparator() + importedText());
+            statusLabel.setText(tr("ecdict.imported", imported.rowCount(),
+                String.format(Locale.ROOT, "%.1f", imported.durationMillis() / 1000.0))
+                + System.lineSeparator() + importedText());
             if (savePath) {
-                context.errors().guard("Save dictionary path failed", () -> savePath(csv));
+                context.errors().guard(tr("ecdict.savePath.failed"), () -> savePath(csv));
             }
         });
         task.setOnFailed(event -> {
             importFinished();
             Throwable error = task.getException();
             if (error instanceof CancellationException) {
-                statusLabel.setText("Import canceled." + notSaved + System.lineSeparator() + importedText());
+                statusLabel.setText(Messages.sentences(List.of(tr("ecdict.import.canceled"), notSaved))
+                    + System.lineSeparator() + importedText());
                 return;
             }
-            context.errors().logFailure("ECDICT import failed", error);
-            statusLabel.setText("Import failed: " + message(error) + System.lineSeparator()
-                + (savePath ? "The path was not saved." + System.lineSeparator() : "") + importedText());
+            context.errors().logFailure(tr("ecdict.import.failed.title"), error);
+            statusLabel.setText(tr("ecdict.import.failed", message(error)) + System.lineSeparator()
+                + (savePath ? notSaved + System.lineSeparator() : "") + importedText());
         });
         Thread thread = new Thread(task, UiAsync.THREAD_NAME);
         thread.setDaemon(true);
@@ -278,8 +281,8 @@ final class EcdictSettingsBox {
         try {
             return localDictionary.status().toDisplayText();
         } catch (RuntimeException e) {
-            context.errors().logFailure("Reading the ECDICT dictionary failed", e);
-            return "Cannot read the imported ECDICT dictionary: " + message(e);
+            context.errors().logFailure(tr("ecdict.read.failed"), e);
+            return tr("ecdict.error.read", message(e));
         }
     }
 

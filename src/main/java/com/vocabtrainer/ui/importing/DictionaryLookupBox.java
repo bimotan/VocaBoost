@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.domain.LookupOutcome;
 import com.vocabtrainer.service.DictionaryService;
+import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.LatestRequest;
@@ -25,6 +26,8 @@ import javafx.scene.layout.VBox;
 
 import java.util.function.Consumer;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Looks a word up in the configured dictionaries; choosing a result fills the add form. The lookup
  * runs in the background and the buttons stay usable: a new lookup, or a change to the word,
@@ -35,7 +38,7 @@ final class DictionaryLookupBox {
     private final WordValidationService validationService;
     private final ConfiguredServices configured;
     private final TextField lookupField = new TextField();
-    private final Button retryButton = new Button("Retry");
+    private final Button retryButton = new Button(tr("common.retry"));
     private final ProgressIndicator busyIndicator = LookupMessages.busyIndicator("lookupBusyIndicator");
     private final Label lookupStatus = new Label();
     private final ListView<DictionaryEntry> results = new ListView<>();
@@ -51,11 +54,11 @@ final class DictionaryLookupBox {
         this.configured = configured;
 
         lookupField.setId("lookupField");
-        lookupField.setPromptText("Enter an English word to look up");
-        lookupField.setAccessibleText("Word to look up");
-        Button lookupButton = new Button("Lookup online");
+        lookupField.setPromptText(tr("lookup.field.prompt"));
+        lookupField.setAccessibleText(tr("lookup.field.accessible"));
+        Button lookupButton = new Button(tr("lookup.button"));
         lookupButton.setId("lookupButton");
-        Button refreshLookupButton = new Button("Refresh cache");
+        Button refreshLookupButton = new Button(tr("lookup.refresh"));
         refreshLookupButton.setId("refreshLookupButton");
         retryButton.setId("lookupRetryButton");
         retryButton.managedProperty().bind(retryButton.visibleProperty());
@@ -63,7 +66,7 @@ final class DictionaryLookupBox {
         lookupStatus.setId("lookupStatusLabel");
         lookupStatus.setWrapText(true);
         results.setId("lookupResults");
-        results.setAccessibleText("Dictionary entries found");
+        results.setAccessibleText(tr("lookup.results.accessible"));
         results.setPrefHeight(120);
         results.setCellFactory(list -> new ListCell<>() {
             @Override
@@ -73,9 +76,9 @@ final class DictionaryLookupBox {
                     setText(null);
                 } else {
                     String meaning = item.chinese() == null || item.chinese().isBlank()
-                        ? "English definition: " + item.definition()
+                        ? tr("lookup.result.definition", item.definition())
                         : item.chinese();
-                    setText(item.english() + " | " + meaning + " | " + item.source());
+                    setText(item.english() + " | " + meaning + " | " + LocalDictionaryService.sourceLabel(item.source()));
                 }
             }
         });
@@ -87,7 +90,7 @@ final class DictionaryLookupBox {
         lookupField.textProperty().addListener((obs, oldText, newText) -> {
             if (running != null) {
                 cancelRunning();
-                lookupStatus.setText("Lookup canceled: the word changed.");
+                lookupStatus.setText(tr("lookup.canceledWordChanged"));
             }
             retryButton.setVisible(false);
         });
@@ -98,7 +101,7 @@ final class DictionaryLookupBox {
         HBox controls = new HBox(10, lookupField, lookupButton, refreshLookupButton, retryButton, busyIndicator);
         controls.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(lookupField, Priority.ALWAYS);
-        root = new VBox(10, Widgets.sectionTitle("Dictionary Lookup"), controls, results, lookupStatus);
+        root = new VBox(10, Widgets.sectionTitle(tr("lookup.title")), controls, results, lookupStatus);
     }
 
     Node root() {
@@ -119,7 +122,7 @@ final class DictionaryLookupBox {
         lastWasRefresh = refresh;
         retryButton.setVisible(false);
         LookupMessages.setBusy(busyIndicator, true);
-        lookupStatus.setText(refresh ? "Refreshing dictionary cache..." : "Looking up " + english + "...");
+        lookupStatus.setText(refresh ? tr("lookup.refreshing") : tr("lookup.lookingUp", english));
         DictionaryService dictionary = configured.dictionary();
         running = context.async().start(
             () -> refresh ? dictionary.refresh(english) : dictionary.lookup(english),
@@ -132,8 +135,8 @@ final class DictionaryLookupBox {
             error -> {
                 if (lookups.isLatest(ticket)) {
                     finished();
-                    context.errors().logFailure("Dictionary lookup failed", error);
-                    lookupStatus.setText("查词失败：" + UiErrors.rootMessage(error));
+                    context.errors().logFailure(tr("lookup.failed.title"), error);
+                    lookupStatus.setText(tr("lookup.failed", UiErrors.rootMessage(error)));
                     retryButton.setVisible(true);
                 }
             });

@@ -9,6 +9,7 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.domain.WordVerificationResult;
 import com.vocabtrainer.repository.WordRepository;
 import com.vocabtrainer.service.DictionaryService;
+import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.DataChange;
@@ -44,6 +45,8 @@ import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The manual add form, with a dictionary lookup that fills it in. Adding first checks the word with
  * the dictionaries in the background, so a slow or unreachable online dictionary never freezes the
@@ -67,13 +70,13 @@ final class AddWordBox {
     private final WordValidationService validationService;
     private final ConfiguredServices configured;
 
-    private final TextField englishField = textField("addEnglishField", "English");
-    private final TextField chineseField = textField("addChineseField", "Chinese meaning");
-    private final TextField phoneticField = textField("addPhoneticField", "Phonetic");
-    private final TextField posField = textField("addPosField", "Part of speech");
-    private final TextField tagsField = textField("addTagsField", "Tags");
-    private final TextArea exampleArea = textArea("addExampleArea", "Example sentence", 2);
-    private final TextArea noteArea = textArea("addNoteArea", "Notes", 3);
+    private final TextField englishField = textField("addEnglishField", tr("add.prompt.english"));
+    private final TextField chineseField = textField("addChineseField", tr("add.prompt.chinese"));
+    private final TextField phoneticField = textField("addPhoneticField", tr("word.phonetic"));
+    private final TextField posField = textField("addPosField", tr("word.partOfSpeech"));
+    private final TextField tagsField = textField("addTagsField", tr("word.tags"));
+    private final TextArea exampleArea = textArea("addExampleArea", tr("add.prompt.example"), 2);
+    private final TextArea noteArea = textArea("addNoteArea", tr("add.prompt.notes"), 3);
     private final Label statusLabel = new Label();
     private final ComboBox<Deck> addDeckSelector = Widgets.deckComboBox("addDeckSelector", 260);
     private final ProgressIndicator busyIndicator = LookupMessages.busyIndicator("addWordBusyIndicator");
@@ -100,14 +103,14 @@ final class AddWordBox {
         decks.onSwitch(deck -> showDecks());
         showDecks();
 
-        Button addButton = new Button("Add word");
+        Button addButton = new Button(tr("add.button"));
         addButton.setId("addWordButton");
         addButton.setOnAction(event -> addWordFromForm());
         englishField.textProperty().addListener((obs, oldText, newText) -> {
             if (runningCheck != null && !sameWord(validationService.normalizeEnglish(newText), checkedWord)) {
                 String canceled = checkedWord;
                 cancelCheck();
-                statusLabel.setText("Canceled adding " + canceled + ": the English word changed.");
+                statusLabel.setText(tr("add.canceledWordChanged", canceled));
             }
         });
         HBox addRow = new HBox(10, addButton, busyIndicator);
@@ -117,27 +120,27 @@ final class AddWordBox {
         addForm.setHgap(10);
         addForm.setVgap(10);
         // Alt and the underlined letter moves to a field; the header's Deck selector has D.
-        addForm.add(Widgets.formLabel("Add to dec_k", addDeckSelector), 0, 0);
+        addForm.add(Widgets.formLabel(tr("add.label.deck"), addDeckSelector), 0, 0);
         addForm.add(addDeckSelector, 1, 0);
-        addForm.add(Widgets.formLabel("_English", englishField), 0, 1);
+        addForm.add(Widgets.formLabel(tr("add.label.english"), englishField), 0, 1);
         addForm.add(englishField, 1, 1);
-        addForm.add(Widgets.formLabel("_Chinese", chineseField), 0, 2);
+        addForm.add(Widgets.formLabel(tr("add.label.chinese"), chineseField), 0, 2);
         addForm.add(chineseField, 1, 2);
-        addForm.add(Widgets.formLabel("_Phonetic", phoneticField), 0, 3);
+        addForm.add(Widgets.formLabel(tr("add.label.phonetic"), phoneticField), 0, 3);
         addForm.add(phoneticField, 1, 3);
-        addForm.add(Widgets.formLabel("P_OS", posField), 0, 4);
+        addForm.add(Widgets.formLabel(tr("add.label.pos"), posField), 0, 4);
         addForm.add(posField, 1, 4);
-        addForm.add(Widgets.formLabel("_Tags", tagsField), 0, 5);
+        addForm.add(Widgets.formLabel(tr("add.label.tags"), tagsField), 0, 5);
         addForm.add(tagsField, 1, 5);
-        addForm.add(Widgets.formLabel("E_xample", exampleArea), 0, 6);
+        addForm.add(Widgets.formLabel(tr("add.label.example"), exampleArea), 0, 6);
         addForm.add(exampleArea, 1, 6);
-        addForm.add(Widgets.formLabel("_Notes", noteArea), 0, 7);
+        addForm.add(Widgets.formLabel(tr("add.label.notes"), noteArea), 0, 7);
         addForm.add(noteArea, 1, 7);
         addForm.add(addRow, 1, 8);
         addForm.add(statusLabel, 1, 9);
 
         DictionaryLookupBox lookup = new DictionaryLookupBox(context, validationService, configured, this::fillFrom);
-        root = new VBox(24, Widgets.sectionTitle("Manual Add"), addForm, lookup.root());
+        root = new VBox(24, Widgets.sectionTitle(tr("add.title")), addForm, lookup.root());
     }
 
     Node root() {
@@ -163,13 +166,12 @@ final class AddWordBox {
         try {
             Deck targetDeck = addDeckSelector.getValue();
             if (targetDeck == null) {
-                statusLabel.setText("Please select a target deck first.");
+                statusLabel.setText(tr("add.selectDeck"));
                 return;
             }
             String english = validationService.validateEnglishOnly(englishField.getText());
             if (wordRepository.findByEnglish(targetDeck.getId(), english).isPresent()) {
-                statusLabel.setText("Word already exists in " + targetDeck.getName() + ": "
-                    + english + ". Edit it in Word List.");
+                statusLabel.setText(tr("add.exists", targetDeck.getName(), english));
                 return;
             }
             // A meaning left empty can still be copied from another deck; any other mistake is shown first.
@@ -180,14 +182,14 @@ final class AddWordBox {
             copiedFrom = null;
             List<WordCard> elsewhere = wordRepository.findInOtherDecks(english, targetDeck.getId());
             if (!elsewhere.isEmpty() && !askAboutOtherDecks(english, targetDeck, elsewhere, hasMeaning)) {
-                statusLabel.setText("Canceled: " + english);
+                statusLabel.setText(tr("add.canceled", english));
                 return;
             }
             checkThenAdd(validateForm().english());
         } catch (IllegalArgumentException e) {
             statusLabel.setText(e.getMessage());
         } catch (SQLException | RuntimeException e) {
-            context.errors().reportFailure("Add failed", e);
+            context.errors().reportFailure(tr("add.failed"), e);
         }
     }
 
@@ -203,22 +205,20 @@ final class AddWordBox {
         String sourceDeck = deckName(source.getDeckId());
         StringBuilder content = new StringBuilder();
         for (WordCard word : elsewhere) {
-            content.append(deckName(word.getDeckId())).append(": ").append(summary(word)).append(System.lineSeparator());
+            content.append(tr("add.otherDeck.line", deckName(word.getDeckId()), summary(word)))
+                .append(System.lineSeparator());
         }
-        content.append(System.lineSeparator())
-            .append("Copy fills in the meaning, part of speech, example and phonetic from ").append(sourceDeck)
-            .append(". The word in ").append(targetDeck.getName())
-            .append(" gets its own review schedule and starts as a new word there.");
-        ButtonType copy = new ButtonType("Copy and add", ButtonBar.ButtonData.OK_DONE);
-        ButtonType asTyped = new ButtonType("Add as typed", ButtonBar.ButtonData.OTHER);
-        ButtonType cancel = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+        content.append(System.lineSeparator()).append(tr("add.otherDeck.copyHint", sourceDeck, targetDeck.getName()));
+        ButtonType copy = new ButtonType(tr("add.otherDeck.copy"), ButtonBar.ButtonData.OK_DONE);
+        ButtonType asTyped = new ButtonType(tr("add.otherDeck.asTyped"), ButtonBar.ButtonData.OTHER);
+        ButtonType cancel = new ButtonType(tr("common.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
         String decks = elsewhere.stream().map(word -> deckName(word.getDeckId())).distinct()
-            .collect(Collectors.joining(", "));
+            .collect(Collectors.joining(tr("format.listSeparator")));
+        String title = tr("add.otherDeck.title");
+        String header = tr("add.otherDeck.header", english, decks);
         Optional<ButtonType> choice = hasMeaning
-            ? context.dialogs().choose("Word in another deck", english + " is already in " + decks,
-                content.toString(), copy, asTyped, cancel)
-            : context.dialogs().choose("Word in another deck", english + " is already in " + decks,
-                content.toString(), copy, cancel);
+            ? context.dialogs().choose(title, header, content.toString(), copy, asTyped, cancel)
+            : context.dialogs().choose(title, header, content.toString(), copy, cancel);
         if (choice.isEmpty() || choice.get() == cancel) {
             return false;
         }
@@ -253,7 +253,7 @@ final class AddWordBox {
             .filter(deck -> deck.getId() == deckId)
             .map(Deck::getName)
             .findFirst()
-            .orElse("another deck");
+            .orElse(tr("add.anotherDeck"));
     }
 
     /** Asks the dictionaries about {@code english} in the background; a check still running is canceled. */
@@ -262,7 +262,7 @@ final class AddWordBox {
         long ticket = checks.next();
         checkedWord = english;
         LookupMessages.setBusy(busyIndicator, true);
-        statusLabel.setText("Checking " + english + " in the dictionaries...");
+        statusLabel.setText(tr("add.checking", english));
         DictionaryService dictionary = configured.dictionary();
         runningCheck = context.async().start(
             () -> dictionary.verify(english),
@@ -275,8 +275,8 @@ final class AddWordBox {
             error -> {
                 if (checks.isLatest(ticket)) {
                     checkFinished();
-                    context.errors().logFailure("Checking " + english + " failed", error);
-                    statusLabel.setText("Checking " + english + " failed: " + UiErrors.rootMessage(error));
+                    context.errors().logFailure(tr("add.check.failed.title", english), error);
+                    statusLabel.setText(tr("add.check.failed", english, UiErrors.rootMessage(error)));
                 }
             });
     }
@@ -287,41 +287,42 @@ final class AddWordBox {
                 String filled = "";
                 if (phoneticField.getText().isBlank() && !verification.phonetic().isEmpty()) {
                     phoneticField.setText(verification.phonetic());
-                    filled = " | Phonetic " + verification.phonetic();
+                    filled = " | " + tr("add.phoneticFilled", verification.phonetic());
                 }
                 addFromForm(english,
                     tags -> WordFields.appendTag(WordFields.appendTag(tags, "VERIFIED"), verification.source()),
-                    " | Verified by " + verification.source() + filled);
+                    " | " + tr("add.verifiedBy", LocalDictionaryService.sourceLabel(verification.source())) + filled);
             }
             case UNVERIFIED -> {
                 if (confirmUnverifiedAdd(english, verification.message())) {
-                    addFromForm(english, tags -> WordFields.appendTag(tags, UNVERIFIED_TAG), " | Marked " + UNVERIFIED_TAG);
+                    addFromForm(english, tags -> WordFields.appendTag(tags, UNVERIFIED_TAG),
+                        " | " + tr("add.marked", UNVERIFIED_TAG));
                 } else {
-                    statusLabel.setText("Canceled: " + english);
+                    statusLabel.setText(tr("add.canceled", english));
                 }
             }
             case UNCHECKED -> {
                 // In offline mode asking again cannot help, so there is no Retry.
                 boolean offline = verification.outcome() == LookupOutcome.OFFLINE;
-                ButtonType retry = new ButtonType("重试", ButtonBar.ButtonData.OTHER);
-                ButtonType addUnchecked = new ButtonType("直接添加", ButtonBar.ButtonData.OK_DONE);
-                ButtonType cancel = new ButtonType("取消", ButtonBar.ButtonData.CANCEL_CLOSE);
-                String question = offline
-                    ? "不经验证直接添加并标记为 " + UNCHECKED_TAG + "？"
-                    : "重试，或不经验证直接添加并标记为 " + UNCHECKED_TAG + "？";
+                ButtonType retry = new ButtonType(tr("common.retry"), ButtonBar.ButtonData.OTHER);
+                ButtonType addUnchecked = new ButtonType(tr("add.unchecked.add"), ButtonBar.ButtonData.OK_DONE);
+                ButtonType cancel = new ButtonType(tr("common.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
+                String question = offline ? tr("add.unchecked.questionOffline", UNCHECKED_TAG)
+                    : tr("add.unchecked.question", UNCHECKED_TAG);
                 String content = LookupMessages.headline(verification.outcome()) + System.lineSeparator()
                     + verification.message() + System.lineSeparator() + question;
+                String title = tr("add.unchecked.title");
+                String header = tr("add.unchecked.header", english);
                 Optional<ButtonType> choice = offline
-                    ? context.dialogs().choose("无法验证", "无法验证：" + english, content, addUnchecked, cancel)
-                    : context.dialogs().choose("无法验证", "无法验证：" + english, content, retry, addUnchecked, cancel);
+                    ? context.dialogs().choose(title, header, content, addUnchecked, cancel)
+                    : context.dialogs().choose(title, header, content, retry, addUnchecked, cancel);
                 if (choice.isPresent() && choice.get() == retry) {
                     checkThenAdd(english);
                 } else if (choice.isPresent() && choice.get() == addUnchecked) {
-                    addFromForm(english, tags -> WordFields.appendTag(tags, UNCHECKED_TAG), offline
-                        ? " | Not checked: offline mode is on"
-                        : " | Not checked: the dictionaries could not be asked");
+                    addFromForm(english, tags -> WordFields.appendTag(tags, UNCHECKED_TAG), " | " + (offline
+                        ? tr("add.notChecked.offline") : tr("add.notChecked.unavailable")));
                 } else {
-                    statusLabel.setText("Canceled: " + english);
+                    statusLabel.setText(tr("add.canceled", english));
                 }
             }
         }
@@ -335,17 +336,16 @@ final class AddWordBox {
         try {
             Deck targetDeck = addDeckSelector.getValue();
             if (targetDeck == null) {
-                statusLabel.setText("Please select a target deck first.");
+                statusLabel.setText(tr("add.selectDeck"));
                 return;
             }
             ValidatedWord validated = validateForm();
             if (!sameWord(validated.english(), checkedEnglish)) {
-                statusLabel.setText("Canceled adding " + checkedEnglish + ": the English word changed.");
+                statusLabel.setText(tr("add.canceledWordChanged", checkedEnglish));
                 return;
             }
             if (wordRepository.findByEnglish(targetDeck.getId(), validated.english()).isPresent()) {
-                statusLabel.setText("Word already exists in " + targetDeck.getName() + ": "
-                    + validated.english() + ". Edit it in Word List.");
+                statusLabel.setText(tr("add.exists", targetDeck.getName(), validated.english()));
                 return;
             }
             ValidatedWord wordToSave = new ValidatedWord(
@@ -368,17 +368,17 @@ final class AddWordBox {
             exampleArea.clear();
             noteArea.clear();
             tagsField.clear();
-            String addedText = "Added to " + targetDeck.getName() + ": " + wordToSave.english() + verificationText
-                + (copiedFrom == null ? "" : " | Details copied from " + copiedFrom);
+            String addedText = tr("add.added", targetDeck.getName(), wordToSave.english()) + verificationText
+                + (copiedFrom == null ? "" : " | " + tr("add.copiedFrom", copiedFrom));
             copiedFrom = null;
             statusLabel.setText(addedText);
             // Adding earns no XP: the word counts as a new word on the day of its first review.
-            context.errors().guard("Word added, but refreshing the views failed",
+            context.errors().guard(tr("add.refreshFailed"),
                 () -> context.changes().publish(DataChange.WORDS));
         } catch (IllegalArgumentException e) {
             statusLabel.setText(e.getMessage());
         } catch (SQLException | RuntimeException e) {
-            context.errors().reportFailure("Add failed", e);
+            context.errors().reportFailure(tr("add.failed"), e);
         }
     }
 
@@ -413,9 +413,9 @@ final class AddWordBox {
     }
 
     private boolean confirmUnverifiedAdd(String english, String message) {
-        return context.dialogs().confirm("词条未找到", "词条未找到：" + english,
-            (message == null || message.isBlank() ? "本地和在线词典都未验证该词条。" : message)
-                + System.lineSeparator() + "是否强制添加并标记为 UNVERIFIED？");
+        return context.dialogs().confirm(tr("add.unverified.title"), tr("add.unverified.header", english),
+            (message == null || message.isBlank() ? tr("add.unverified.noMessage") : message)
+                + System.lineSeparator() + tr("add.unverified.question", UNVERIFIED_TAG));
     }
 
     private static String dictionaryNote(DictionaryEntry entry) {
@@ -428,13 +428,13 @@ final class AddWordBox {
             if (builder.length() > 0) {
                 builder.append(System.lineSeparator());
             }
-            builder.append("English definition: ").append(entry.definition().trim());
+            builder.append(tr("lookup.result.definition", entry.definition().trim()));
         }
         if (entry.source() != null && !entry.source().isBlank()) {
             if (builder.length() > 0) {
                 builder.append(System.lineSeparator());
             }
-            builder.append("Dictionary source: ").append(entry.source().trim());
+            builder.append(tr("add.note.source", LocalDictionaryService.sourceLabel(entry.source().trim())));
         }
         return builder.toString();
     }

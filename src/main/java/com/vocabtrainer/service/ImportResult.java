@@ -1,6 +1,10 @@
 package com.vocabtrainer.service;
 
+import com.vocabtrainer.util.Messages;
+
 import java.util.List;
+
+import static com.vocabtrainer.util.Messages.tr;
 
 /**
  * What an import did.
@@ -20,10 +24,10 @@ public record ImportResult(int importedCount, int skippedCount, List<String> mes
     }
 
     public String toSummary() {
-        StringBuilder builder = new StringBuilder();
-        builder.append("Imported ").append(importedCount).append(", skipped ").append(skippedCount).append(".");
+        StringBuilder builder = new StringBuilder(tr("import.result.counts", importedCount, skippedCount));
         if (meaningsFilled > 0) {
-            builder.append(" Meanings from ").append(dictionary).append(": ").append(meaningsFilled).append(".");
+            builder = new StringBuilder(Messages.sentences(List.of(builder.toString(),
+                tr("import.result.meanings", dictionary, meaningsFilled))));
         }
         if (!messages.isEmpty()) {
             builder.append(System.lineSeparator()).append(String.join(System.lineSeparator(), messages));

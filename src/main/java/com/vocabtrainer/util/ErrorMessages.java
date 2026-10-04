@@ -8,6 +8,8 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /** Turns exceptions into text for error dialogs and log files. */
 public final class ErrorMessages {
     private static final int MAX_CHAIN_LENGTH = 10;
@@ -18,7 +20,7 @@ public final class ErrorMessages {
     /** The message closest to the root cause, e.g. the SQLite error behind a service wrapper. */
     public static String rootMessage(Throwable error) {
         if (error == null) {
-            return "Unknown error";
+            return tr("error.unknown");
         }
         List<Throwable> chain = chain(error);
         for (int i = chain.size() - 1; i >= 0; i--) {
@@ -33,16 +35,18 @@ public final class ErrorMessages {
     /** One line per exception in the cause chain, outermost first. */
     public static String causeChain(Throwable error) {
         if (error == null) {
-            return "Unknown error";
+            return tr("error.unknown");
         }
         StringBuilder builder = new StringBuilder();
         for (Throwable current : chain(error)) {
-            if (builder.length() > 0) {
-                builder.append(System.lineSeparator()).append("Caused by: ");
-            }
-            builder.append(current.getClass().getSimpleName());
+            String description = current.getClass().getSimpleName();
             if (current.getMessage() != null && !current.getMessage().isBlank()) {
-                builder.append(": ").append(current.getMessage());
+                description += ": " + current.getMessage();
+            }
+            if (builder.length() > 0) {
+                builder.append(System.lineSeparator()).append(tr("error.causedBy", description));
+            } else {
+                builder.append(description);
             }
         }
         return builder.toString();

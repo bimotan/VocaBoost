@@ -7,6 +7,8 @@ import javafx.scene.control.Tooltip;
 import java.util.ArrayList;
 import java.util.List;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Offline mode as one switch that several check boxes show, the header's and the Settings tab's.
  * Turning any of them saves the setting and publishes {@link DataChange#SETTINGS}, and the others
@@ -15,8 +17,9 @@ import java.util.List;
  */
 public final class OfflineMode {
     /** What offline mode does, for the boxes' tooltips and the Settings tab. */
-    public static final String DESCRIPTION = "No online dictionary lookups and no AI requests: only the local"
-        + " dictionaries, cached lookups and the offline mock explanation are used.";
+    public static String description() {
+        return tr("offline.description");
+    }
 
     private final ViewContext context;
     private final SettingsService settingsService;
@@ -38,7 +41,7 @@ public final class OfflineMode {
     public CheckBox checkBox(String id, String text) {
         CheckBox box = new CheckBox(text);
         box.setId(id);
-        box.setTooltip(new Tooltip(DESCRIPTION));
+        box.setTooltip(new Tooltip(description()));
         box.setSelected(settingsService.isOfflineMode());
         box.selectedProperty().addListener((observable, wasOffline, offline) -> {
             if (!showingSaved) {
@@ -53,12 +56,12 @@ public final class OfflineMode {
         try {
             settingsService.saveOfflineMode(offline);
         } catch (RuntimeException e) {
-            context.errors().reportFailure("Switching offline mode failed", e);
+            context.errors().reportFailure(tr("offline.switchFailed"), e);
             showSaved();
             return;
         }
         showSaved();
-        context.errors().guard("Offline mode switched, but refreshing the views failed",
+        context.errors().guard(tr("offline.refreshFailed"),
             () -> context.changes().publish(DataChange.SETTINGS));
     }
 

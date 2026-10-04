@@ -42,6 +42,8 @@ import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Runs review sessions on the scheduler: which card comes next, checking a typed answer and saving
  * its rating.
@@ -456,8 +458,7 @@ public class ReviewService {
     public void setNewCardsPerDay(long deckId, int limit) {
         if (settings == null) {
             if (limit < 0 || limit > ReviewSettings.MAX_NEW_CARDS_PER_DAY) {
-                throw new IllegalArgumentException("New cards per day must be between 0 and "
-                    + ReviewSettings.MAX_NEW_CARDS_PER_DAY + ".");
+                throw new IllegalArgumentException(tr("validation.newCardsPerDay", ReviewSettings.MAX_NEW_CARDS_PER_DAY));
             }
             newCardLimits.put(deckId, limit);
         } else {
@@ -501,7 +502,7 @@ public class ReviewService {
     public ReviewAnswer submitAnswer(long wordId, String userAnswer, ReviewMode mode, LocalDateTime shownAt) {
         try {
             WordCard word = wordRepository.findById(wordId)
-                .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
+                .orElseThrow(() -> new IllegalArgumentException(tr("review.error.noWord", String.valueOf(wordId))));
             ReviewMode askedIn = mode == null ? ReviewMode.EN_TO_ZH : mode;
             ReviewMode direction = askedIn == ReviewMode.MIXED ? currentQuestionMode : questionModeFor(askedIn);
             boolean english = direction == ReviewMode.ZH_TO_EN || direction == ReviewMode.CLOZE;
@@ -578,7 +579,7 @@ public class ReviewService {
         }
         try {
             WordCard word = wordRepository.findById(wordId)
-                .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
+                .orElseThrow(() -> new IllegalArgumentException(tr("review.error.noWord", String.valueOf(wordId))));
             LocalDateTime now = LocalDateTime.now(clock);
             if (kindOf(word, now) == ReviewKind.PRACTICE) {
                 return practicePreviews(word, answer, overridden, now);
@@ -669,7 +670,7 @@ public class ReviewService {
         throws SQLException {
         // Read inside the transaction so a retry starts from the stored card, not a half-updated copy.
         WordCard word = wordRepository.findById(wordId)
-            .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
+            .orElseThrow(() -> new IllegalArgumentException(tr("review.error.noWord", String.valueOf(wordId))));
         WordCard before = word.copy();
         LocalDateTime now = LocalDateTime.now(clock);
         ReviewKind kind = kindOf(word, now);
@@ -798,10 +799,9 @@ public class ReviewService {
         try {
             saved = transactions.inTransaction(() -> {
                 WordCard word = wordRepository.findById(wordId)
-                    .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
+                    .orElseThrow(() -> new IllegalArgumentException(tr("review.error.noWord", String.valueOf(wordId))));
                 if (word.getState() != CardState.NEW) {
-                    throw new IllegalArgumentException("\"" + word.getEnglish()
-                        + "\" was reviewed before; only a new word can be marked as already known.");
+                    throw new IllegalArgumentException(tr("review.error.notNew", word.getEnglish()));
                 }
                 WordCard before = word.copy();
                 LocalDateTime now = LocalDateTime.now(clock);
@@ -840,7 +840,7 @@ public class ReviewService {
         try {
             before = transactions.inTransaction(() -> {
                 WordCard word = wordRepository.findById(wordId)
-                    .orElseThrow(() -> new IllegalArgumentException("Word does not exist: " + wordId));
+                    .orElseThrow(() -> new IllegalArgumentException(tr("review.error.noWord", String.valueOf(wordId))));
                 if (word.isSuspended()) {
                     return null;
                 }
@@ -889,7 +889,7 @@ public class ReviewService {
     public UndoAction undoLast() {
         UndoEntry entry = undoStack.peekFirst();
         if (entry == null) {
-            throw new IllegalStateException("There is nothing to undo.");
+            throw new IllegalStateException(tr("review.error.nothingToUndo"));
         }
         UndoAction action = entry.action();
         WordCard restored;
@@ -900,8 +900,7 @@ public class ReviewService {
         }
         undoStack.pollFirst();
         if (restored == null) {
-            throw new IllegalStateException("\"" + action.word().getEnglish()
-                + "\" was deleted, so what was done to it cannot be undone.");
+            throw new IllegalStateException(tr("review.error.undoDeleted", action.word().getEnglish()));
         }
         // Committed: only in-memory session state changes from here on.
         long wordId = restored.getId();

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.domain.LookupOutcome;
+import com.vocabtrainer.util.Messages;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -16,6 +17,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import static com.vocabtrainer.util.Messages.tr;
 
 /**
  * A dictionary API the user runs or subscribes to ({@code DICTIONARY_API_BASE_URL}, optionally
@@ -39,8 +42,6 @@ public class HttpDictionaryService implements DictionaryService {
     public static final String SOURCE = "Configured API";
 
     private static final Logger LOGGER = Logger.getLogger(HttpDictionaryService.class.getName());
-    private static final String NAME = "词典 API";
-    private static final String NOT_FOUND = "词条未找到：词典 API 没有该词条。";
     private static final List<String> ENTRY_CONTAINERS = List.of("entries", "data", "results", "result");
     private static final List<String> SENSE_CONTAINERS = List.of("senses", "meanings", "definitions", "translations");
     private static final int MAX_ENTRIES = 10;
@@ -79,15 +80,20 @@ public class HttpDictionaryService implements DictionaryService {
         this.timeout = timeout;
     }
 
+    /** The configured API, as messages name it. */
+    private static String name() {
+        return tr("dictionary.api.name");
+    }
+
     @Override
     public DictionaryLookupResult lookup(String english) {
         if (!isConfigured()) {
-            return DictionaryLookupResult.unavailable(LookupOutcome.SERVICE_ERROR,
-                NAME + "：没有配置 DICTIONARY_API_BASE_URL。");
+            return DictionaryLookupResult.unavailable(LookupOutcome.SERVICE_ERROR, tr("dictionary.api.notConfigured",
+                name()));
         }
         String clean = english == null ? "" : english.trim();
         if (clean.isBlank()) {
-            return DictionaryLookupResult.notFound("Please enter an English word first.");
+            return DictionaryLookupResult.notFound(tr("dictionary.enterWord"));
         }
         URI uri;
         try {
@@ -95,17 +101,14 @@ public class HttpDictionaryService implements DictionaryService {
         } catch (IllegalArgumentException e) {
             LOGGER.log(Level.WARNING, "DICTIONARY_API_BASE_URL is not a valid http(s) URL: " + baseUrl, e);
             return DictionaryLookupResult.unavailable(LookupOutcome.SERVICE_ERROR,
-                NAME + "：地址无效（DICTIONARY_API_BASE_URL = " + baseUrl + "）。");
+                tr("dictionary.api.badAddress", name(), baseUrl));
         }
         if (!apiKey.isBlank() && !ApiKeys.isSafeToSendKey(uri)) {
             LOGGER.warning("Not sending DICTIONARY_API_KEY over plain http to " + uri.getHost());
-            return DictionaryLookupResult.unavailable(LookupOutcome.SERVICE_ERROR, NAME
-                + "：DICTIONARY_API_BASE_URL 使用明文 http，API key 会被明文发送，所以没有查询。请改用 https"
-                + "（本机地址 localhost、127.0.0.1、::1 除外）。");
+            return DictionaryLookupResult.unavailable(LookupOutcome.SERVICE_ERROR, tr("dictionary.api.plainHttp", name()));
         }
         if (!apiKey.isBlank() && !ApiKeys.isSendable(apiKey)) {
-            return DictionaryLookupResult.unavailable(LookupOutcome.AUTH_ERROR,
-                NAME + "：DICTIONARY_API_KEY 含有空格或不能放进 HTTP 请求头的字符（例如全角字符或换行），请重新设置。");
+            return DictionaryLookupResult.unavailable(LookupOutcome.AUTH_ERROR, tr("dictionary.api.badKey", name()));
         }
         HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
             .timeout(timeout)
@@ -117,10 +120,10 @@ public class HttpDictionaryService implements DictionaryService {
             builder.header("X-API-Key", apiKey);
         }
         HttpRequest request = builder.build();
-        HttpLookup.Reply reply = HttpLookup.get(httpClient, request, NAME, NOT_FOUND);
+        HttpLookup.Reply reply = HttpLookup.get(httpClient, request, name(), tr("dictionary.notFoundIn", name()));
         if (!reply.ok() && reply.failure().outcome() == LookupOutcome.AUTH_ERROR) {
             return DictionaryLookupResult.unavailable(LookupOutcome.AUTH_ERROR,
-                reply.failure().message() + "请检查 DICTIONARY_API_KEY。");
+                Messages.sentences(List.of(reply.failure().message(), tr("dictionary.api.checkKey"))));
         }
         if (!reply.ok()) {
             return reply.failure();
@@ -131,12 +134,12 @@ public class HttpDictionaryService implements DictionaryService {
         } catch (JsonProcessingException e) {
             LOGGER.log(Level.WARNING, "The dictionary API's answer for '" + clean + "' is not JSON", e);
             return DictionaryLookupResult.unavailable(LookupOutcome.BAD_RESPONSE,
-                NAME + "：返回的内容不是有效的 JSON（" + e.getOriginalMessage() + "）。");
+                tr("dictionary.badJson", name(), e.getOriginalMessage()));
         }
         if (entries.isEmpty()) {
-            return DictionaryLookupResult.notFound(NOT_FOUND);
+            return DictionaryLookupResult.notFound(tr("dictionary.notFoundIn", name()));
         }
-        return DictionaryLookupResult.success("Loaded from configured dictionary API.", entries);
+        return DictionaryLookupResult.success(tr("dictionary.api.loaded"), entries);
     }
 
     @Override

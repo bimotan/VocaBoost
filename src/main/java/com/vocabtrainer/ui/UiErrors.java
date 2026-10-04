@@ -6,6 +6,8 @@ import com.vocabtrainer.util.ErrorMessages;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Reports what went wrong in a UI action: the failure is logged and shown in an error dialog
  * instead of being lost on the JavaFX thread.
@@ -49,7 +51,7 @@ public final class UiErrors {
     }
 
     public void showError(String title, String message) {
-        dialogs.showError(title, message == null ? "Unknown error" : message);
+        dialogs.showError(title, message == null ? tr("error.unknown") : message);
     }
 
     public void showInfo(String message) {

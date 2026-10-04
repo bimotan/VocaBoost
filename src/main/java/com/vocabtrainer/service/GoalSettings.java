@@ -7,6 +7,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The goals the user set, kept in the {@code settings} table: the default daily goals of every deck
  * ({@code goals.reviewsPerDay}, {@code goals.newWordsPerDay}), the goals of a deck that has its own
@@ -81,8 +83,7 @@ public class GoalSettings {
     public void saveSessionGoal(int size) {
         if (reviewSettings == null) {
             if (size < 0 || size > ReviewSettings.MAX_SESSION_SIZE) {
-                throw new IllegalArgumentException("Session size must be between 0 and "
-                    + ReviewSettings.MAX_SESSION_SIZE + ".");
+                throw new IllegalArgumentException(tr("validation.sessionSize", ReviewSettings.MAX_SESSION_SIZE));
             }
             inMemory.put(ReviewSettings.SESSION_SIZE_KEY, String.valueOf(size));
             return;

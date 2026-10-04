@@ -13,7 +13,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 public class DeckRepository {
+    /** The name of the deck a new database started with before the app was translated. */
     public static final String DEFAULT_DECK_NAME = "默认词库";
 
     private final DatabaseManager databaseManager;
@@ -22,14 +25,19 @@ public class DeckRepository {
         this.databaseManager = databaseManager;
     }
 
-    /**
-     * Returns the active deck named {@link #DEFAULT_DECK_NAME}. If only archived decks have that
-     * name, the newest of them is restored with its words instead of creating an empty one.
-     */
+    /** {@link #ensureDefaultDeck(String)} with the name {@link #DEFAULT_DECK_NAME}. */
     public Deck ensureDefaultDeck() throws SQLException {
-        Optional<Deck> existing = findAnyByName(DEFAULT_DECK_NAME);
+        return ensureDefaultDeck(DEFAULT_DECK_NAME);
+    }
+
+    /**
+     * Returns the active deck named {@code name}. If only archived decks have that name, the newest
+     * of them is restored with its words instead of creating an empty one.
+     */
+    public Deck ensureDefaultDeck(String name) throws SQLException {
+        Optional<Deck> existing = findAnyByName(name);
         if (existing.isEmpty()) {
-            return create(DEFAULT_DECK_NAME);
+            return create(name);
         }
         Deck deck = existing.get();
         return deck.isArchived() ? restore(deck.getId()) : deck;
@@ -49,7 +57,7 @@ public class DeckRepository {
                 }
             }
         }
-        throw new SQLException("创建词库失败");
+        throw new SQLException(tr("deck.error.createFailed"));
     }
 
     public Optional<Deck> findByName(String name) throws SQLException {
@@ -141,10 +149,10 @@ public class DeckRepository {
             statement.setLong(2, id);
             int updated = statement.executeUpdate();
             if (updated == 0) {
-                throw new SQLException("词库不存在或已归档");
+                throw new SQLException(tr("deck.error.notActive"));
             }
         }
-        return findById(id).orElseThrow(() -> new SQLException("词库不存在"));
+        return findById(id).orElseThrow(() -> new SQLException(tr("deck.error.notFound")));
     }
 
     public void archive(long id) throws SQLException {
@@ -160,20 +168,20 @@ public class DeckRepository {
      * deck's name can be reused), so restoring fails while an active deck has the same name.
      */
     public Deck restore(long id) throws SQLException {
-        Deck deck = findById(id).orElseThrow(() -> new SQLException("词库不存在"));
+        Deck deck = findById(id).orElseThrow(() -> new SQLException(tr("deck.error.notFound")));
         Optional<Deck> activeWithSameName = findByName(deck.getName());
         if (activeWithSameName.isPresent() && activeWithSameName.get().getId() != id) {
-            throw new SQLException("已有同名的活动词库「" + deck.getName() + "」，无法恢复");
+            throw new SQLException(tr("deck.error.restoreNameInUse", deck.getName()));
         }
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement("UPDATE decks SET archived = 0 WHERE id = ?")) {
             statement.setLong(1, id);
             int updated = statement.executeUpdate();
             if (updated == 0) {
-                throw new SQLException("词库不存在");
+                throw new SQLException(tr("deck.error.notFound"));
             }
         }
-        return findById(id).orElseThrow(() -> new SQLException("词库不存在"));
+        return findById(id).orElseThrow(() -> new SQLException(tr("deck.error.notFound")));
     }
 
     private Deck map(ResultSet rs) throws SQLException {

@@ -30,6 +30,8 @@ import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * "Create deck from ECDICT tag" on the Decks tab: a form for the exam tag, the deck to create or
  * fill, a limit and the order, then the words are added in the background with a progress bar and
@@ -38,9 +40,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class EcdictDeckBox {
     private final ViewContext context;
     private final EcdictTagDeckService service;
-    private final Button createButton = new Button("Create deck from ECDICT tag...");
+    private final Button createButton = new Button(tr("ecdict.deck.create"));
     private final ProgressBar progressBar = new ProgressBar(0);
-    private final Button cancelButton = new Button("Cancel");
+    private final Button cancelButton = new Button(tr("common.cancel"));
     private final HBox progressRow;
     private final Label statusLabel = new Label();
     private final VBox root;
@@ -49,7 +51,7 @@ final class EcdictDeckBox {
         this.context = context;
         this.service = service;
         createButton.setId("ecdictDeckButton");
-        createButton.setOnAction(event -> context.errors().guard("Create deck from ECDICT failed", this::askAndBuild));
+        createButton.setOnAction(event -> context.errors().guard(tr("ecdict.deck.failed"), this::askAndBuild));
         progressBar.setId("ecdictDeckProgressBar");
         progressBar.setMaxWidth(Double.MAX_VALUE);
         cancelButton.setId("cancelEcdictDeckButton");
@@ -69,9 +71,7 @@ final class EcdictDeckBox {
 
     private void askAndBuild() {
         if (!service.isAvailable()) {
-            context.errors().showInfo("Creating a deck from an ECDICT tag needs the ECDICT dictionary. Import"
-                + " ecdict.csv in the ECDICT box of the Settings tab first; it is imported once and then works"
-                + " offline.");
+            context.errors().showInfo(tr("ecdict.deck.needsEcdict"));
             return;
         }
         Optional<EcdictTagDeckService.Request> request = askRequest();
@@ -100,23 +100,21 @@ final class EcdictDeckBox {
 
         TextField limitField = new TextField();
         limitField.setId("ecdictLimitField");
-        limitField.setPromptText("all");
+        limitField.setPromptText(tr("ecdict.deck.form.limitPrompt"));
         limitField.setPrefColumnCount(6);
         limitField.setTextFormatter(new TextFormatter<String>(change ->
             change.getControlNewText().matches("\\d{0,5}") ? change : null));
 
         ToggleGroup order = new ToggleGroup();
-        RadioButton byFrequency = new RadioButton("Most common first");
+        RadioButton byFrequency = new RadioButton(tr("ecdict.deck.form.frequency"));
         byFrequency.setId("ecdictOrderFrequency");
         byFrequency.setToggleGroup(order);
         byFrequency.setSelected(true);
-        RadioButton alphabetical = new RadioButton("Alphabetical");
+        RadioButton alphabetical = new RadioButton(tr("ecdict.deck.form.alphabetical"));
         alphabetical.setId("ecdictOrderAlphabetical");
         alphabetical.setToggleGroup(order);
 
-        Label hint = Widgets.hint("A new deck is created; when an active deck has this name, the words are added to it."
-            + " Words already in the deck are skipped, and the limit counts the words added. Meanings, parts of"
-            + " speech and phonetics come from ECDICT, cleaned like a lookup.");
+        Label hint = Widgets.hint(tr("ecdict.deck.form.hint"));
         // A fixed width lets the grid give the wrapped lines their height.
         hint.setPrefWidth(400);
 
@@ -124,17 +122,17 @@ final class EcdictDeckBox {
         form.setId("ecdictDeckForm");
         form.setHgap(10);
         form.setVgap(10);
-        form.add(Widgets.formLabel("Exam _tag", tagSelector), 0, 0);
+        form.add(Widgets.formLabel(tr("ecdict.deck.form.tag"), tagSelector), 0, 0);
         form.add(tagSelector, 1, 0);
-        form.add(Widgets.formLabel("_Deck", deckName), 0, 1);
+        form.add(Widgets.formLabel(tr("header.deck"), deckName), 0, 1);
         form.add(deckName, 1, 1);
-        form.add(Widgets.formLabel("_Limit", limitField), 0, 2);
-        form.add(new HBox(8, limitField, new Label("words (empty for all)")), 1, 2);
-        form.add(Widgets.formLabel("_Order", byFrequency), 0, 3);
+        form.add(Widgets.formLabel(tr("ecdict.deck.form.limit"), limitField), 0, 2);
+        form.add(new HBox(8, limitField, new Label(tr("ecdict.deck.form.limitUnit"))), 1, 2);
+        form.add(Widgets.formLabel(tr("ecdict.deck.form.order"), byFrequency), 0, 3);
         form.add(new HBox(16, byFrequency, alphabetical), 1, 3);
         form.add(hint, 1, 4);
 
-        if (!context.dialogs().showForm("Create deck from ECDICT tag", form)) {
+        if (!context.dialogs().showForm(tr("ecdict.deck.form.title"), form)) {
             return Optional.empty();
         }
         try {
@@ -145,7 +143,7 @@ final class EcdictDeckBox {
                 limit.isEmpty() ? 0 : Integer.parseInt(limit),
                 alphabetical.isSelected() ? EcdictRepository.TagOrder.ALPHABETICAL : EcdictRepository.TagOrder.FREQUENCY));
         } catch (IllegalArgumentException e) {
-            context.errors().showError("Deck not created", e.getMessage());
+            context.errors().showError(tr("ecdict.deck.notCreated"), e.getMessage());
             return Optional.empty();
         }
     }
@@ -162,7 +160,7 @@ final class EcdictDeckBox {
                 }, cancelRequested::get);
             }
         };
-        String startMessage = "Building " + request.deckName() + " from the ECDICT " + request.tag().code() + " words...";
+        String startMessage = tr("ecdict.deck.building", request.deckName(), request.tag().code());
         statusLabel.setText(startMessage);
         task.messageProperty().addListener((observable, oldMessage, progressMessage) -> {
             if (!cancelRequested.get() && progressMessage != null && !progressMessage.isBlank()) {
@@ -174,7 +172,7 @@ final class EcdictDeckBox {
         cancelButton.setOnAction(event -> {
             cancelRequested.set(true);
             cancelButton.setDisable(true);
-            statusLabel.setText("Canceling...");
+            statusLabel.setText(tr("common.canceling"));
         });
         showProgressRow(true);
         createButton.setDisable(true);
@@ -184,7 +182,7 @@ final class EcdictDeckBox {
             EcdictTagDeckService.Result result = task.getValue();
             statusLabel.setText(result.toDisplayText(request.tag()));
             if (result.deck() != null) {
-                context.errors().guard("Deck built, but refreshing the views failed", () -> {
+                context.errors().guard(tr("ecdict.deck.refreshFailed"), () -> {
                     context.decks().switchTo(result.deck());
                     context.changes().publish(DataChange.DECKS, DataChange.WORDS);
                 });
@@ -194,13 +192,13 @@ final class EcdictDeckBox {
             finished();
             Throwable error = task.getException();
             if (error instanceof CancellationException) {
-                statusLabel.setText("Canceled. Nothing was added.");
+                statusLabel.setText(tr("ecdict.deck.canceled"));
                 return;
             }
-            context.errors().logFailure("Create deck from ECDICT failed", error);
+            context.errors().logFailure(tr("ecdict.deck.failed"), error);
             String message = error.getMessage() == null || error.getMessage().isBlank()
                 ? UiErrors.rootMessage(error) : error.getMessage();
-            statusLabel.setText("Failed: " + message + " Nothing was added.");
+            statusLabel.setText(tr("ecdict.deck.failedNothingAdded", message));
         });
         Thread thread = new Thread(task, UiAsync.THREAD_NAME);
         thread.setDaemon(true);

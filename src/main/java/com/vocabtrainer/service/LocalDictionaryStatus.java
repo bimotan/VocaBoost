@@ -2,8 +2,11 @@ package com.vocabtrainer.service;
 
 import com.vocabtrainer.domain.EcdictMetadata;
 import com.vocabtrainer.util.DateTimeUtil;
+import com.vocabtrainer.util.Messages;
 
-import java.util.Locale;
+import java.util.List;
+
+import static com.vocabtrainer.util.Messages.tr;
 
 /**
  * What the offline dictionaries hold.
@@ -21,12 +24,11 @@ public record LocalDictionaryStatus(EcdictMetadata ecdict, int starterEntries) {
      * (skipped rows: 3). Bundled GRE starter: 215 entries."
      */
     public String toDisplayText() {
-        String starter = String.format(Locale.ROOT, "Bundled GRE starter: %,d entries.", starterEntries);
+        String starter = tr("ecdict.status.starter", starterEntries);
         if (!ecdictImported()) {
-            return "ECDICT: not imported. " + starter;
+            return Messages.sentences(List.of(tr("ecdict.status.notImported"), starter));
         }
-        return String.format(Locale.ROOT, "ECDICT: %,d entries from %s, imported %s (skipped rows: %,d). %s",
-            ecdict.rowCount(), ecdict.sourcePath(), DateTimeUtil.toDisplay(ecdict.importedAt()),
-            ecdict.skippedRows(), starter);
+        return Messages.sentences(List.of(tr("ecdict.status.imported", ecdict.rowCount(), ecdict.sourcePath(),
+            DateTimeUtil.toDisplay(ecdict.importedAt()), ecdict.skippedRows()), starter));
     }
 }

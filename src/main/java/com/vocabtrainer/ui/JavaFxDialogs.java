@@ -22,6 +22,8 @@ import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The dialogs the desktop app shows: JavaFX alerts, prompts and file choosers that block until closed.
  * The dialogs use app.css and the text size the window has.
@@ -52,7 +54,7 @@ public class JavaFxDialogs implements Dialogs {
     @Override
     public void showInfo(String message) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle("Info");
+        alert.setTitle(tr("dialog.info.title"));
         alert.setHeaderText(null);
         alert.setContentText(message);
         style(alert);

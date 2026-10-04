@@ -19,6 +19,7 @@ import com.vocabtrainer.ui.Widgets;
 import com.vocabtrainer.ui.dashboard.ExamDialog;
 import com.vocabtrainer.ui.dashboard.GoalsDialog;
 import com.vocabtrainer.util.DateTimeUtil;
+import com.vocabtrainer.util.Messages;
 import javafx.event.ActionEvent;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -38,10 +39,13 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.util.StringConverter;
 
-import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.stream.IntStream;
+
+import static com.vocabtrainer.util.Messages.tr;
 
 /**
  * How the user studies: the desired retention and the hour a study day starts (the scheduler), the
@@ -54,7 +58,6 @@ final class StudySettingsBox {
     private static final double MIN_OFFERED_RETENTION = 0.80;
     /** The stability the retention hint compares intervals for: 10 days, the interval it gives at 90%. */
     private static final double HINT_STABILITY_DAYS = 10;
-    private static final DateTimeFormatter EXAM_DATE = DateTimeFormatter.ofPattern("EEE yyyy-MM-dd", Locale.ENGLISH);
 
     private final ViewContext context;
     private final SchedulingSettings scheduling;
@@ -68,7 +71,7 @@ final class StudySettingsBox {
     private final Spinner<Integer> newCardsSpinner = new Spinner<>();
     private final Label newCardsHint = hint("newCardsPerDayHintLabel");
     /** Shown while the current deck has a limit of its own: drops it, so the deck follows the default. */
-    private final Button useDefaultNewCardsButton = new Button("Use the default for this deck");
+    private final Button useDefaultNewCardsButton = new Button(tr("settings.newWords.useDefault"));
     private final Label goalsSummary = hint("goalsSummaryLabel");
     private final Label examSummary = hint("examSummaryLabel");
     private final VBox root;
@@ -90,13 +93,13 @@ final class StudySettingsBox {
         configureRetention();
         configureRollover();
         configureNewCardsPerDay();
-        Button editGoalsButton = new Button("Edit goals");
+        Button editGoalsButton = new Button(tr("goals.edit"));
         editGoalsButton.setId("settingsEditGoalsButton");
         editGoalsButton.setOnAction(event -> GoalsDialog.open(context, goalSettings));
-        Button editExamButton = new Button("Set exam date");
+        Button editExamButton = new Button(tr("exam.edit"));
         editExamButton.setId("settingsEditExamButton");
         editExamButton.setOnAction(event ->
-            context.errors().guard("Exam date not saved", () -> ExamDialog.open(context, examPlans)));
+            context.errors().guard(tr("exam.notSaved"), () -> ExamDialog.open(context, examPlans)));
 
         GridPane form = new GridPane();
         form.setHgap(12);
@@ -104,19 +107,18 @@ final class StudySettingsBox {
         HBox retentionRow = new HBox(10, retentionSlider, retentionLabel);
         retentionRow.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(retentionSlider, Priority.ALWAYS);
-        addRow(form, 0, Widgets.formLabel("Desired _retention", retentionSlider), retentionRow, retentionHint);
-        addRow(form, 2, Widgets.formLabel("New study day _starts at", rolloverSelector), rolloverSelector,
-            hint("dayRolloverHintLabel", "Reviews before this hour count for the day before. What is due today"
-                + " and the daily goals follow the study day."));
+        addRow(form, 0, Widgets.formLabel(tr("settings.retention"), retentionSlider), retentionRow, retentionHint);
+        addRow(form, 2, Widgets.formLabel(tr("settings.rollover"), rolloverSelector), rolloverSelector,
+            hint("dayRolloverHintLabel", tr("settings.rollover.hint")));
         HBox newCardsRow = new HBox(10, newCardsSpinner, useDefaultNewCardsButton);
         newCardsRow.setAlignment(Pos.CENTER_LEFT);
-        addRow(form, 4, Widgets.formLabel("New _words per day", newCardsSpinner), newCardsRow, newCardsHint);
-        addRow(form, 6, new Label("Daily goals"), editGoalsButton, goalsSummary);
-        addRow(form, 8, new Label("Exam"), editExamButton, examSummary);
+        addRow(form, 4, Widgets.formLabel(tr("settings.newWords"), newCardsSpinner), newCardsRow, newCardsHint);
+        addRow(form, 6, new Label(tr("dashboard.goals.title")), editGoalsButton, goalsSummary);
+        addRow(form, 8, new Label(tr("exam.title")), editExamButton, examSummary);
         GridPane.setHgrow(retentionRow, Priority.ALWAYS);
 
         showSaved();
-        root = new VBox(10, Widgets.sectionTitle("Study"), form);
+        root = new VBox(10, Widgets.sectionTitle(tr("settings.study.title")), form);
         context.decks().onSwitch(deck -> refreshDeckSettings());
         // The exam row's new-word plan counts the deck's new words and today's first reviews.
         context.changes().subscribe(changes -> {
@@ -137,7 +139,7 @@ final class StudySettingsBox {
      * exam countdown depends on the clock: a rating or an import on another tab marks them stale.
      */
     void refreshWhenShown(Tab tab) {
-        deckRefresh = new LazyRefresh(tab, this::showDeckSettings, context.errors(), "Refreshing the settings failed",
+        deckRefresh = new LazyRefresh(tab, this::showDeckSettings, context.errors(), tr("settings.refreshFailed"),
             true);
     }
 
@@ -146,15 +148,15 @@ final class StudySettingsBox {
      * gives 10 days.
      */
     static String retentionHint(double retention) {
-        String tradeOff = "Higher = more reviews: you forget fewer words, but each one comes back sooner.";
+        String tradeOff = tr("settings.retention.tradeOff");
+        String applies = tr("settings.retention.applies");
         if (Math.round(retention * 100) == Math.round(Fsrs.DEFAULT_DESIRED_RETENTION * 100)) {
-            return tradeOff + " 90% is the default. A change applies from the next rating; due dates already set stay.";
+            return Messages.sentences(List.of(tradeOff, tr("settings.retention.default"), applies));
         }
         long days = Math.max(1L, Math.round(new Fsrs(retention, Fsrs.DEFAULT_MAXIMUM_INTERVAL)
             .rawInterval(HINT_STABILITY_DAYS)));
-        return tradeOff + " At " + Formats.percent(retention) + ", a word that 90% brings back after "
-            + DateTimeUtil.days(Math.round(HINT_STABILITY_DAYS)) + " comes back after " + DateTimeUtil.days(days)
-            + ". A change applies from the next rating; due dates already set stay.";
+        return Messages.sentences(List.of(tradeOff, tr("settings.retention.example", Formats.percent(retention),
+            DateTimeUtil.days(Math.round(HINT_STABILITY_DAYS)), DateTimeUtil.days(days)), applies));
     }
 
     private void configureRetention() {
@@ -249,7 +251,7 @@ final class StudySettingsBox {
         useDefaultNewCardsButton.setId("useDefaultNewCardsPerDayButton");
         useDefaultNewCardsButton.setOnAction(event -> {
             long deckId = context.decks().currentId();
-            apply("New words per day not saved", () -> reviewSettings.clearNewCardsPerDay(deckId));
+            apply(tr("settings.newWords.failed"), () -> reviewSettings.clearNewCardsPerDay(deckId));
         });
     }
 
@@ -269,21 +271,21 @@ final class StudySettingsBox {
         if (retention == scheduling.options().desiredRetention()) {
             return;
         }
-        apply("Desired retention not saved", () -> scheduling.saveDesiredRetention(retention));
+        apply(tr("settings.retention.failed"), () -> scheduling.saveDesiredRetention(retention));
     }
 
     private void saveRollover(int hour) {
         if (hour == scheduling.options().dayRolloverHour()) {
             return;
         }
-        apply("Day rollover not saved", () -> scheduling.saveDayRolloverHour(hour));
+        apply(tr("settings.rollover.failed"), () -> scheduling.saveDayRolloverHour(hour));
     }
 
     private void saveNewCardsPerDay(int limit) {
         if (limit == savedNewCardsPerDay) {
             return;
         }
-        apply("New words per day not saved", () -> {
+        apply(tr("settings.newWords.failed"), () -> {
             reviewSettings.saveDefaultNewCardsPerDay(limit);
             savedNewCardsPerDay = limit;
         });
@@ -301,7 +303,7 @@ final class StudySettingsBox {
             showControls();
             return;
         }
-        context.errors().guard("Setting saved, but refreshing the views failed",
+        context.errors().guard(tr("settings.refreshViewsFailed"),
             () -> context.changes().publish(DataChange.REVIEW_SETTINGS));
     }
 
@@ -335,7 +337,7 @@ final class StudySettingsBox {
     }
 
     private void refreshDeckSettings() {
-        context.errors().guard("Refreshing the settings failed",
+        context.errors().guard(tr("settings.refreshFailed"),
             deckRefresh == null ? this::showDeckSettings : deckRefresh::markStale);
     }
 
@@ -343,24 +345,22 @@ final class StudySettingsBox {
     private void showDeckSettings() {
         Deck deck = context.decks().current();
         long deckId = deck.getId();
-        String newCards = "The most new words a deck introduces per study day, unless the Review tab or the"
-            + " Dashboard's new-word plan set a limit for that deck.";
+        List<String> newCards = new ArrayList<>(List.of(tr("settings.newWords.hint")));
         boolean ownLimit = reviewSettings.hasOwnNewCardsPerDay(deckId);
         if (ownLimit) {
-            newCards += " " + deck.getName() + " has its own limit: " + reviewSettings.newCardsPerDay(deckId) + ".";
+            newCards.add(tr("settings.newWords.deckOwn", deck.getName(), reviewSettings.newCardsPerDay(deckId)));
         }
-        newCardsHint.setText(newCards);
+        newCardsHint.setText(Messages.sentences(newCards));
         useDefaultNewCardsButton.setVisible(ownLimit);
         useDefaultNewCardsButton.setManaged(ownLimit);
 
         GoalTargets defaults = goalSettings.defaults();
         int session = goalSettings.sessionGoal();
-        String goals = "Every deck: " + goalText(defaults) + "; review sessions of "
-            + (session == 0 ? "all due cards" : session + " cards") + ".";
-        goals += goalSettings.deckGoals(deckId)
-            .map(own -> " " + deck.getName() + " has its own goals: " + goalText(own) + ".")
-            .orElse("");
-        goalsSummary.setText(goals);
+        List<String> goals = new ArrayList<>(List.of(tr("settings.goals.every", goalText(defaults),
+            session == 0 ? tr("settings.goals.sessionAll") : tr("settings.goals.sessionCards", session))));
+        goalSettings.deckGoals(deckId)
+            .ifPresent(own -> goals.add(tr("settings.goals.deckOwn", deck.getName(), goalText(own))));
+        goalsSummary.setText(Messages.sentences(goals));
         examSummary.setText(examText(deck.getName(), examPlans.countdown(deckId),
             examPlans.settings().deckExam(deckId).isPresent(), examPlans.newCardPlan(deckId)));
     }
@@ -372,17 +372,16 @@ final class StudySettingsBox {
     static String examText(String deckName, Optional<ExamCountdown> countdown, boolean ownExam,
                            Optional<NewCardPlan> plan) {
         if (countdown.isEmpty()) {
-            return "No exam date. With one, reviews that would fall on or after it come in the last week before"
-                + " it, and the Dashboard counts down and plans the new words.";
+            return tr("settings.exam.none");
         }
         ExamCountdown exam = countdown.get();
-        String text = exam.toDisplayText() + ": " + EXAM_DATE.format(exam.exam().date()) + ", "
-            + (ownExam ? deckName + "'s own exam." : "every deck's exam.");
-        return plan.map(found -> text + " " + found.toDisplayText()).orElse(text);
+        String text = tr("settings.exam.text", exam.toDisplayText(), Formats.weekdayDate(exam.exam().date()),
+            ownExam ? tr("settings.exam.own", deckName) : tr("settings.exam.every"));
+        return plan.map(found -> Messages.sentences(List.of(text, found.toDisplayText()))).orElse(text);
     }
 
     private static String goalText(GoalTargets goals) {
-        return goals.reviewGoal() + " reviews and " + goals.newWordGoal() + " new words per day";
+        return tr("settings.goals.text", goals.reviewGoal(), goals.newWordGoal());
     }
 
     private static void addRow(GridPane form, int row, Label label, Node control, Label hint) {
@@ -415,7 +414,7 @@ final class StudySettingsBox {
 
     /** "04:00", with "(default)" after the default hour. */
     static String hourText(int hour) {
-        return String.format(Locale.ROOT, "%02d:00", hour)
-            + (hour == StudyDay.DEFAULT_ROLLOVER_HOUR ? " (default)" : "");
+        String time = String.format(Locale.ROOT, "%02d:00", hour);
+        return hour == StudyDay.DEFAULT_ROLLOVER_HOUR ? tr("settings.rollover.default", time) : time;
     }
 }

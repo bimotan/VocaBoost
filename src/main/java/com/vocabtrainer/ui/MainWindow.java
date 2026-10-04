@@ -2,6 +2,7 @@ package com.vocabtrainer.ui;
 
 import com.vocabtrainer.app.AppServices;
 import com.vocabtrainer.service.DisplaySettings;
+import com.vocabtrainer.service.LanguageSettings;
 import com.vocabtrainer.service.ReviewSettings;
 import com.vocabtrainer.service.SchedulingSettings;
 import com.vocabtrainer.ui.dashboard.DashboardView;
@@ -18,6 +19,7 @@ import javafx.scene.layout.BorderPane;
 import javafx.stage.Screen;
 
 import java.nio.file.Path;
+import java.util.Locale;
 
 /**
  * The main window: the deck header above one tab per area. Each tab is its own view class; this
@@ -28,11 +30,17 @@ import java.nio.file.Path;
 public class MainWindow {
     private final AppServices services;
     private final Dialogs dialogs;
+    private final Locale systemLocale;
 
-    /** The main window on {@code services}; {@code dialogs} shows every modal dialog and file chooser. */
-    public MainWindow(AppServices services, Dialogs dialogs) {
+    /**
+     * The main window on {@code services}; {@code dialogs} shows every modal dialog and file chooser.
+     * Its texts are in the language the app was started in; {@code systemLocale} is the computer's
+     * locale, which the language setting Auto follows.
+     */
+    public MainWindow(AppServices services, Dialogs dialogs, Locale systemLocale) {
         this.services = services;
         this.dialogs = dialogs;
+        this.systemLocale = systemLocale;
     }
 
     public Scene createScene() {
@@ -67,7 +75,8 @@ public class MainWindow {
             new SchedulingSettings(services.settingsService(), services.reviewScheduler()),
             new ReviewSettings(services.settingsService()), services.goalService().settings(),
             services.examPlanService(), services.aiCacheRepository(), services.ecdictImportService(), services.localDictionary(), configured,
-            offlineMode, databasePath, display, percent -> AppStyle.applyTextSize(root, percent));
+            offlineMode, databasePath, display, percent -> AppStyle.applyTextSize(root, percent),
+            new LanguageSettings(services.settingsService()), systemLocale);
 
         TabPane tabs = new TabPane();
         tabs.setId("mainTabs");

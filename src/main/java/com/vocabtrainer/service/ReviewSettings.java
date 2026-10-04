@@ -5,6 +5,8 @@ import com.vocabtrainer.domain.ReviewMode;
 import java.util.Optional;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The review settings kept in the {@code settings} table: the new-cards-per-day limit of every deck
  * ({@code review.newCardsPerDay}, set on the Settings tab), a deck's own limit
@@ -77,7 +79,7 @@ public class ReviewSettings {
 
     private static int checkNewCardsPerDay(int limit) {
         if (limit < 0 || limit > MAX_NEW_CARDS_PER_DAY) {
-            throw new IllegalArgumentException("New cards per day must be between 0 and " + MAX_NEW_CARDS_PER_DAY + ".");
+            throw new IllegalArgumentException(tr("validation.newCardsPerDay", MAX_NEW_CARDS_PER_DAY));
         }
         return limit;
     }
@@ -90,7 +92,7 @@ public class ReviewSettings {
     /** @throws IllegalArgumentException if {@code size} is not from 0 (All Due) to {@value #MAX_SESSION_SIZE} */
     public void saveSessionSize(int size) {
         if (size < 0 || size > MAX_SESSION_SIZE) {
-            throw new IllegalArgumentException("Session size must be between 0 and " + MAX_SESSION_SIZE + ".");
+            throw new IllegalArgumentException(tr("validation.sessionSize", MAX_SESSION_SIZE));
         }
         settings.save(SESSION_SIZE_KEY, String.valueOf(size));
     }

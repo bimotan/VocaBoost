@@ -22,6 +22,7 @@ import com.vocabtrainer.service.scheduling.IntervalPreview;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.DataChanges;
 import com.vocabtrainer.ui.Formats;
+import com.vocabtrainer.ui.Labels;
 import com.vocabtrainer.ui.LatestRequest;
 import com.vocabtrainer.ui.TaskRunner;
 import com.vocabtrainer.ui.WordDetails;
@@ -30,6 +31,7 @@ import com.vocabtrainer.util.ErrorMessages;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.List;
@@ -43,6 +45,8 @@ import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
+
+import static com.vocabtrainer.util.Messages.tr;
 
 /**
  * The Review tab without JavaFX: which card is shown, what the user can do next and every text the
@@ -99,20 +103,16 @@ public final class ReviewSessionPresenter {
     }
 
     private static final Logger LOGGER = Logger.getLogger(ReviewSessionPresenter.class.getName());
-    static final String LOADING = "Loading...";
     static final int DEFAULT_SESSION_SIZE = ReviewSettings.DEFAULT_SESSION_SIZE;
     static final int MAX_CUSTOM_SESSION_SIZE = ReviewSettings.MAX_SESSION_SIZE;
-    static final String ALL_DUE = "All Due";
-    static final String CUSTOM = "Custom";
+    /**
+     * The session-size choices besides the numbers: every due card, or a size the user types. They
+     * are choices, not texts; {@link #sessionSizeLabel} names them.
+     */
+    public static final String ALL_DUE = "all";
+    public static final String CUSTOM = "custom";
     /** The session sizes the selector offers, besides All Due and Custom. */
     static final List<Integer> PRESET_SESSION_SIZES = List.of(10, 20, 50);
-    /** What the result area says after practicing a weak word that was not due. */
-    static final String PRACTICE_SAVED = "Practice saved: the word was not due, so its schedule did not change.";
-    /** What the result area says after a failed practice brought the word's due date forward. */
-    static final String PRACTICE_MISSED =
-        "Practice saved: the word was not due, but after this miss it is due again from the next study day.";
-    /** Reminds the user that a mistaken action can be taken back. */
-    static final String UNDO_HINT = "Undo (Ctrl+Z) takes it back.";
     /** Chinese text, which in an example sentence would give an English-to-Chinese answer away. */
     private static final Pattern HAN = Pattern.compile("\\p{IsHan}");
 
@@ -156,9 +156,9 @@ public final class ReviewSessionPresenter {
     /** How long the card was on screen before the tab was last hidden. */
     private Duration shownBefore = Duration.ZERO;
     private String answer = "";
-    private String question = LOADING;
+    private String question = loading();
     private String details = "";
-    private String answerPrompt = ReviewMode.EN_TO_ZH.getPrompt();
+    private String answerPrompt = Labels.modePrompt(ReviewMode.EN_TO_ZH);
     private String hint = "";
     /** The cloze of the card on screen in Cloze mode; null otherwise. */
     private Cloze cloze;
@@ -166,7 +166,7 @@ public final class ReviewSessionPresenter {
     private WordDetails revealed;
     private String result = "";
     private String sessionProgress = "";
-    private String completionTitle = "Review complete";
+    private String completionTitle = tr("review.complete");
     private String completionMetrics = "";
     /** The card the last rating made a leech, while the notice about it is shown; null otherwise. */
     private WordCard leech;
@@ -377,9 +377,9 @@ public final class ReviewSessionPresenter {
         revealed = WordDetails.of(answered, reviewService.exampleSpans(answered));
         previewRatings();
         checkedText = (note.isEmpty() ? "" : note + System.lineSeparator() + System.lineSeparator())
-            + "Correct answer: " + checked.correctAnswer() + formsInSentence(checked, cloze)
-            + System.lineSeparator() + "Your answer: " + checked.userAnswer()
-            + System.lineSeparator() + "Answer similarity: " + Formats.percent(checked.similarity())
+            + tr("review.answer.correct", correctAnswer(checked, cloze))
+            + System.lineSeparator() + tr("review.answer.yours", checked.userAnswer())
+            + System.lineSeparator() + tr("review.answer.similarity", Formats.percent(checked.similarity()))
             + verdict(checked);
         state = State.ANSWERED;
         explanationRequest = new ExplanationRequest(answered, checked.userAnswer(), checked.direction());
@@ -428,13 +428,13 @@ public final class ReviewSessionPresenter {
             // Nothing was saved. The service normally keeps the submitted answer, so the same card
             // and answer stay on screen and rating again retries.
             if (reviewService.hasPendingAnswer(wordId)) {
-                failures.report("Rating not saved - choose a rating again to retry", e);
+                failures.report(tr("review.rate.failedRetry"), e);
                 state = State.RATING_FAILED;
             } else {
-                failures.report("Rating not saved - submit your answer again", e);
+                failures.report(tr("review.rate.failedResubmit"), e);
                 explanations.invalidate();
                 state = State.AWAITING_ANSWER;
-                result = "The rating was not saved. Submit your answer again to retry.";
+                result = tr("review.rate.notSaved");
             }
             fireChanged();
             return;
@@ -443,9 +443,9 @@ public final class ReviewSessionPresenter {
         if (outcome.becameLeech()) {
             leech = outcome.word();
         }
-        showNextCardAfter("Rating saved", () -> savedMessage(outcome, dueBefore, rating, countsAs, override)
-            + " XP +" + outcome.xpEarned() + Formats.unlockedSuffix(outcome.unlockedAchievements())
-            + leechNotice(outcome), DataChange.REVIEWS);
+        showNextCardAfter(tr("review.rate.saved"), () -> tr("review.rate.savedXp",
+                savedMessage(outcome, dueBefore, rating, countsAs, override), outcome.xpEarned())
+            + Formats.unlockedSuffix(outcome.unlockedAchievements()) + leechNotice(outcome), DataChange.REVIEWS);
     }
 
     /**
@@ -467,7 +467,7 @@ public final class ReviewSessionPresenter {
         }
         failure = publish(failure, changed);
         if (failure != null) {
-            failures.report(saved + ", but refreshing the review failed", failure);
+            failures.report(tr("review.refreshFailed", saved), failure);
         }
     }
 
@@ -498,13 +498,12 @@ public final class ReviewSessionPresenter {
         try {
             saved = reviewService.markKnown(known.getId());
         } catch (RuntimeException e) {
-            failures.report("Not marked as known", e);
+            failures.report(tr("review.known.failed"), e);
             fireChanged();
             return;
         }
-        showNextCardAfter("Marked as known", () -> "Marked \"" + known.getEnglish() + "\" as already known: its next"
-            + " review is in " + Formats.interval(IntervalPreview.days(saved.getIntervalDays())) + ". " + UNDO_HINT,
-            DataChange.REVIEWS);
+        showNextCardAfter(tr("review.known.title"), () -> tr("review.known.saved", known.getEnglish(),
+            Formats.interval(IntervalPreview.days(saved.getIntervalDays())), undoHint()), DataChange.REVIEWS);
     }
 
     /**
@@ -519,14 +518,15 @@ public final class ReviewSessionPresenter {
         try {
             reviewService.suspendWord(suspended.getId(), true);
         } catch (RuntimeException e) {
-            failures.report("Not suspended", e);
+            failures.report(tr("review.suspend.failed"), e);
             fireChanged();
             return;
         }
         if (leech != null && leech.getId() == suspended.getId()) {
             leechSuspended = true;
         }
-        showNextCardAfter("Suspended", () -> suspendedMessage(suspended), DataChange.WORDS, DataChange.REVIEWS);
+        showNextCardAfter(tr("review.suspend.title"), () -> suspendedMessage(suspended), DataChange.WORDS,
+            DataChange.REVIEWS);
     }
 
     /**
@@ -545,7 +545,7 @@ public final class ReviewSessionPresenter {
         try {
             reviewService.suspendWord(leech.getId(), false);
         } catch (RuntimeException e) {
-            failures.report("Not suspended", e);
+            failures.report(tr("review.suspend.failed"), e);
             fireChanged();
             return;
         }
@@ -553,7 +553,7 @@ public final class ReviewSessionPresenter {
         fireChanged();
         RuntimeException failure = publish(null, DataChange.WORDS, DataChange.REVIEWS);
         if (failure != null) {
-            failures.report("Suspended, but refreshing the review failed", failure);
+            failures.report(tr("review.refreshFailed", tr("review.suspend.title")), failure);
         }
     }
 
@@ -566,16 +566,16 @@ public final class ReviewSessionPresenter {
             return;
         }
         ExplanationRequest request = ExplanationRequest.memoryAid(leech);
-        memoryAid = "Memory aid: loading...";
+        memoryAid = tr("review.memoryAid.loading");
         memoryAidLoading = true;
         long ticket = memoryAids.next();
         AiService ai = aiServices.get();
         fireChanged();
         tasks.run(
             () -> ai.explain(request),
-            text -> showMemoryAid(ticket, "Memory aid for \"" + request.word().getEnglish() + "\":"
+            text -> showMemoryAid(ticket, tr("review.memoryAid.title", request.word().getEnglish())
                 + System.lineSeparator() + text),
-            error -> showMemoryAid(ticket, "Memory aid unavailable: " + ErrorMessages.rootMessage(error))
+            error -> showMemoryAid(ticket, tr("review.memoryAid.unavailable", ErrorMessages.rootMessage(error)))
         );
     }
 
@@ -603,7 +603,7 @@ public final class ReviewSessionPresenter {
         try {
             undone = reviewService.undoLast();
         } catch (RuntimeException e) {
-            failures.report("Undo failed", e);
+            failures.report(tr("review.undo.failed"), e);
             fireChanged();
             return;
         }
@@ -627,7 +627,7 @@ public final class ReviewSessionPresenter {
         }
         failure = publish(failure, DataChange.WORDS, DataChange.REVIEWS);
         if (failure != null) {
-            failures.report("Undone, but refreshing the review failed", failure);
+            failures.report(tr("review.refreshFailed", tr("review.undo.title")), failure);
         }
     }
 
@@ -644,24 +644,60 @@ public final class ReviewSessionPresenter {
         showChecked(card, undone.answer(), note);
     }
 
-    /** What an undo took back, e.g. "Undid the Good rating of "abate": XP -14." */
+    /** What an undo took back, e.g. "Undid the Good rating of "abate": XP -14. Choose a rating again." */
     static String undoneMessage(UndoAction undone) {
-        String english = "\"" + undone.word().getEnglish() + "\"";
+        String english = undone.word().getEnglish();
         return switch (undone.kind()) {
-            case RATING -> "Undid the " + undone.rating().getLabel() + " rating of " + english
-                + (undone.xp() > 0 ? ": XP -" + undone.xp() : "")
-                + (undone.unlocked().isEmpty() ? "" : (undone.xp() > 0 ? ", " : ": ") + "locked again: "
-                    + Formats.achievementNames(undone.unlocked()))
-                + ". Choose a rating again.";
-            case KNOWN -> "Undid \"Already known\" for " + english + ": it is a new word again.";
-            case SUSPEND -> "Undid suspending " + english + ".";
+            case RATING -> {
+                String undid = tr("review.undone.rating", Labels.rating(undone.rating()), english);
+                List<String> taken = new ArrayList<>();
+                if (undone.xp() > 0) {
+                    taken.add(tr("review.undone.xp", undone.xp()));
+                }
+                if (!undone.unlocked().isEmpty()) {
+                    taken.add(tr("review.undone.locked", Formats.achievementNames(undone.unlocked())));
+                }
+                if (!taken.isEmpty()) {
+                    undid = tr("review.undone.details", undid, String.join(tr("format.clauseSeparator"), taken));
+                }
+                yield tr("review.undone.rateAgain", undid);
+            }
+            case KNOWN -> tr("review.undone.known", english);
+            case SUSPEND -> tr("review.undone.suspend", english);
         };
     }
 
     /** What the result area says after the card on screen was suspended. */
     static String suspendedMessage(WordCard suspended) {
-        return "Suspended \"" + suspended.getEnglish() + "\": it is not reviewed until you unsuspend it in the"
-            + " Word List. " + UNDO_HINT;
+        return tr("review.suspend.saved", suspended.getEnglish(), undoHint());
+    }
+
+    /** What the question shows while the first card is loaded. */
+    static String loading() {
+        return tr("review.loading");
+    }
+
+    /** What the result area says after practicing a weak word that was not due. */
+    static String practiceSaved() {
+        return tr("review.practice.saved");
+    }
+
+    /** What the result area says after a failed practice brought the word's due date forward. */
+    static String practiceMissed() {
+        return tr("review.practice.missed");
+    }
+
+    /** Reminds the user that a mistaken action can be taken back. */
+    static String undoHint() {
+        return tr("review.undo.hint");
+    }
+
+    /** How the session-size selector names a choice: the number, "All Due" or "Custom". */
+    public static String sessionSizeLabel(String choice) {
+        if (ALL_DUE.equals(choice)) {
+            return tr("review.size.allDue");
+        }
+        return CUSTOM.equals(choice) ? tr("review.size.custom") : choice;
     }
 
     /**
@@ -710,7 +746,7 @@ public final class ReviewSessionPresenter {
         return mode;
     }
 
-    /** What the session-size selector shows for the session's target: "10", "20", "50", "All Due" or "Custom". */
+    /** The choice the session-size selector shows for the session's target: "10", "20", "50", {@link #ALL_DUE} or {@link #CUSTOM}. */
     public String sessionSizeChoice() {
         int target = reviewService.sessionTarget();
         if (target == 0) {
@@ -775,11 +811,11 @@ public final class ReviewSessionPresenter {
             return "";
         }
         return reviewService.nextUndo().map(action -> {
-            String english = "\"" + action.word().getEnglish() + "\"";
+            String english = action.word().getEnglish();
             return switch (action.kind()) {
-                case RATING -> "Undo the " + action.rating().getLabel() + " rating of " + english;
-                case KNOWN -> "Undo \"Already known\" for " + english;
-                case SUSPEND -> "Undo suspending " + english;
+                case RATING -> tr("review.undo.rating", Labels.rating(action.rating()), english);
+                case KNOWN -> tr("review.undo.known", english);
+                case SUSPEND -> tr("review.undo.suspend", english);
             };
         }).orElse("");
     }
@@ -794,9 +830,8 @@ public final class ReviewSessionPresenter {
         if (leech == null) {
             return "";
         }
-        return "Leech: \"" + leech.getEnglish() + "\" lapsed " + leech.getLapses() + " times."
-            + (leechSuspended ? " Suspended: unsuspend it in the Word List once you have a way to remember it."
-                : " Suspend it for now, or find a way to remember it.");
+        return leechSuspended ? tr("review.leech.suspended", leech.getEnglish(), leech.getLapses())
+            : tr("review.leech.notice", leech.getEnglish(), leech.getLapses());
     }
 
     /** Whether the new leech can be suspended from the notice about it. */
@@ -850,7 +885,8 @@ public final class ReviewSessionPresenter {
             return "";
         }
         boolean cappedByCheck = checked.countsAs(rating, true) != counted;
-        return cappedByCheck ? counted.getLabel() + " (" + Formats.percent(checked.similarity()) + ")" : counted.getLabel();
+        return cappedByCheck ? tr("review.countsAs.capped", Labels.rating(counted), Formats.percent(checked.similarity()))
+            : Labels.rating(counted);
     }
 
     /**
@@ -933,7 +969,7 @@ public final class ReviewSessionPresenter {
 
     /**
      * The session target for a choice of the session-size selector: a number of cards, 0 for
-     * "All Due", or the custom size for "Custom".
+     * {@link #ALL_DUE}, or the custom size for {@link #CUSTOM}.
      *
      * @throws IllegalArgumentException if the custom size is not a number from 1 to 500
      */
@@ -949,7 +985,7 @@ public final class ReviewSessionPresenter {
                 custom = -1;
             }
             if (custom <= 0 || custom > MAX_CUSTOM_SESSION_SIZE) {
-                throw new IllegalArgumentException("Custom session size must be between 1 and 500.");
+                throw new IllegalArgumentException(tr("review.size.invalid", MAX_CUSTOM_SESSION_SIZE));
             }
             return custom;
         }
@@ -1006,7 +1042,7 @@ public final class ReviewSessionPresenter {
         shownAt = onScreen ? now : null;
         shownBefore = Duration.ZERO;
         questionMode = reviewService.currentQuestionMode();
-        answerPrompt = questionMode.getPrompt();
+        answerPrompt = Labels.modePrompt(questionMode);
         ReviewSessionSummary session = updateSessionProgress();
         if (card == null) {
             showCompletion(session);
@@ -1021,7 +1057,7 @@ public final class ReviewSessionPresenter {
             default -> card.getEnglish();
         };
         hint = hint(card, questionMode);
-        details = questionMode.getLabel() + " | " + cardDetails(card, now);
+        details = Labels.mode(questionMode) + " | " + cardDetails(card, now);
     }
 
     /**
@@ -1038,7 +1074,7 @@ public final class ReviewSessionPresenter {
             return partOfSpeech;
         }
         if (direction == ReviewMode.CLOZE) {
-            return String.join(" · ", nonEmpty("Hint: " + clean(card.getChinese()), partOfSpeech));
+            return String.join(" · ", nonEmpty(tr("review.hint.meaning", clean(card.getChinese())), partOfSpeech));
         }
         String line = String.join(" · ", nonEmpty(clean(card.getPhonetic()), partOfSpeech));
         String example = clean(card.getExampleSentence());
@@ -1058,18 +1094,16 @@ public final class ReviewSessionPresenter {
 
     private ReviewSessionSummary updateSessionProgress() {
         ReviewSessionSummary session = reviewService.sessionSummary();
-        String target = session.sessionGoal() > 0 ? String.valueOf(session.sessionGoal()) : ALL_DUE;
+        String target = session.sessionGoal() > 0 ? String.valueOf(session.sessionGoal()) : tr("review.size.allDue");
         int skipped = reviewService.clozeSkippedCount();
-        sessionProgress = "Session " + session.cardsReviewed() + "/" + target
-            + " | Accuracy " + Formats.percent(session.accuracy())
-            + " | XP " + session.xpEarned()
-            + (skipped > 0 ? " | " + skippedWithoutExamples(skipped) : "");
+        sessionProgress = tr("review.progress", session.cardsReviewed(), target, Formats.percent(session.accuracy()),
+            session.xpEarned()) + (skipped > 0 ? " | " + skippedWithoutExamples(skipped) : "");
         return session;
     }
 
     /** "12 cards without examples skipped", for the cards a Cloze session could not ask. */
     static String skippedWithoutExamples(int count) {
-        return count == 1 ? "1 card without an example skipped" : count + " cards without examples skipped";
+        return tr("review.cloze.skipped", count);
     }
 
     /** Whether the question is a sentence (a cloze) rather than a word or a meaning. */
@@ -1078,17 +1112,18 @@ public final class ReviewSessionPresenter {
     }
 
     /**
-     * For a cloze whose blank held another form of the word, " (in the sentence: admonished)";
-     * otherwise nothing.
+     * The correct answer, followed for a cloze whose blank held another form of the word by that form,
+     * as in "admonish (in the sentence: admonished)".
      */
-    private static String formsInSentence(ReviewAnswer checked, Cloze cloze) {
+    private static String correctAnswer(ReviewAnswer checked, Cloze cloze) {
         if (cloze == null || checked.direction() != ReviewMode.CLOZE) {
-            return "";
+            return checked.correctAnswer();
         }
         List<String> others = cloze.blankedForms().stream()
             .filter(form -> !form.equalsIgnoreCase(checked.correctAnswer()))
             .toList();
-        return others.isEmpty() ? "" : " (in the sentence: " + String.join(", ", others) + ")";
+        return others.isEmpty() ? checked.correctAnswer()
+            : tr("review.answer.inSentence", checked.correctAnswer(), String.join(tr("format.listSeparator"), others));
     }
 
     /**
@@ -1096,27 +1131,18 @@ public final class ReviewSessionPresenter {
      * Difficulty 5.3 | Lapses 1", with "Leech" for a leech.
      */
     static String cardDetails(WordCard card, LocalDateTime now) {
-        StringBuilder text = new StringBuilder(stateName(card.getState()));
+        List<String> parts = new ArrayList<>(List.of(Labels.cardState(card.getState())));
         OptionalDouble recall = ReviewScheduler.retrievability(card, now);
         if (recall.isPresent()) {
-            text.append(" | Recall ").append(Formats.percent(recall.getAsDouble()))
-                .append(" | Stability ").append(String.format(Locale.ROOT, "%.1fd", card.getStability()))
-                .append(" | Difficulty ").append(String.format(Locale.ROOT, "%.1f", card.getDifficulty()));
+            parts.add(tr("review.details.recall", Formats.percent(recall.getAsDouble())));
+            parts.add(tr("review.details.stability", String.format(Locale.ROOT, "%.1f", card.getStability())));
+            parts.add(tr("review.details.difficulty", String.format(Locale.ROOT, "%.1f", card.getDifficulty())));
         }
-        text.append(" | Lapses ").append(card.getLapses());
+        parts.add(tr("review.details.lapses", card.getLapses()));
         if (card.isLeech()) {
-            text.append(" | Leech");
+            parts.add(tr("review.details.leech"));
         }
-        return text.toString();
-    }
-
-    private static String stateName(CardState state) {
-        return switch (state) {
-            case NEW -> "New";
-            case LEARNING -> "Learning";
-            case REVIEW -> "Review";
-            case RELEARNING -> "Relearning";
-        };
+        return String.join(" | ", parts);
     }
 
     /** Asks the service for the interval each rating would give the checked answer. */
@@ -1136,20 +1162,19 @@ public final class ReviewSessionPresenter {
      */
     static String verdict(ReviewAnswer checked) {
         AnswerGrade grade = checked.grade();
-        String cap = grade.maxRating().getLabel();
+        String cap = Labels.rating(grade.maxRating());
         String text = switch (grade.verdict()) {
             case MATCH -> "";
-            case SYNONYM -> "Accepted as a synonym: \"" + grade.otherWord() + "\" (" + grade.otherGloss()
-                + ") also fits this prompt. Counts as right.";
-            case MISSPELLED -> "Misspelled: counts at most as " + cap + ".";
-            case CONFUSABLE -> "\"" + grade.otherWord() + "\" is a different word"
-                + (grade.otherGloss() == null ? ", easily confused with \"" + checked.english() + "\"" : " (" + grade.otherGloss() + ")")
-                + ": counts as " + cap + ".";
-            case PARTIAL -> "Close, but not a listed meaning: counts at most as " + cap + ".";
-            case WRONG -> "Does not match: counts as " + cap + ".";
+            case SYNONYM -> tr("review.verdict.synonym", grade.otherWord(), grade.otherGloss());
+            case MISSPELLED -> tr("review.verdict.misspelled", cap);
+            case CONFUSABLE -> grade.otherGloss() == null
+                ? tr("review.verdict.confusable", grade.otherWord(), checked.english(), cap)
+                : tr("review.verdict.otherWord", grade.otherWord(), grade.otherGloss(), cap);
+            case PARTIAL -> tr("review.verdict.partial", cap);
+            case WRONG -> tr("review.verdict.wrong", cap);
         };
         if (checked.canOverride()) {
-            text += " If your answer was right, choose \"I was right\" and rate it yourself.";
+            text = tr("format.sentences", text, tr("review.verdict.override"));
         }
         return text.isEmpty() ? "" : System.lineSeparator() + text;
     }
@@ -1161,59 +1186,56 @@ public final class ReviewSessionPresenter {
     private static String savedMessage(ReviewOutcome outcome, LocalDateTime dueBefore, ReviewRating rating,
                                        ReviewRating countsAs, boolean overridden) {
         if (outcome.isPractice()) {
-            return Objects.equals(dueBefore, outcome.word().getNextReviewAt()) ? PRACTICE_SAVED : PRACTICE_MISSED;
+            return Objects.equals(dueBefore, outcome.word().getNextReviewAt()) ? practiceSaved() : practiceMissed();
         }
         if (overridden) {
-            return "Saved as " + countsAs.getLabel() + ": you overrode the answer check.";
+            return tr("review.saved.overridden", Labels.rating(countsAs));
         }
-        return countsAs == rating ? "Saved." : "Saved as " + countsAs.getLabel() + ".";
+        return countsAs == rating ? tr("review.saved") : tr("review.saved.as", Labels.rating(countsAs));
     }
 
     private static String leechNotice(ReviewOutcome outcome) {
         return outcome.becameLeech()
-            ? System.lineSeparator() + "\"" + outcome.word().getEnglish() + "\" lapsed " + outcome.word().getLapses()
-                + " times and is now tagged as a leech: try a mnemonic, an example of your own, or edit the card."
+            ? System.lineSeparator() + tr("review.leech.tagged", outcome.word().getEnglish(), outcome.word().getLapses())
             : "";
     }
 
     private void showCompletion(ReviewSessionSummary session) {
         DailyGoalProgress progress = goalService.getTodayProgress(deckId);
         state = State.COMPLETE;
-        question = "Review complete";
+        question = tr("review.complete");
         boolean targetReached = session.sessionGoal() > 0 && session.cardsReviewed() >= session.sessionGoal();
-        details = targetReached ? "Session target reached." : nothingLeft();
-        completionTitle = "Session Complete";
-        completionMetrics = "Completed: " + session.cardsReviewed()
-            + (session.sessionGoal() > 0 ? "/" + session.sessionGoal() : " / All Due")
-            + " | Accuracy: " + Formats.percent(session.accuracy())
-            + " | XP: " + session.xpEarned()
-            + System.lineSeparator() + "Today review goal: " + progress.reviewedCount() + "/" + progress.reviewGoal()
-            + " | New words: " + progress.newWordsCount() + "/" + progress.newWordGoal()
-            + System.lineSeparator() + "Unlocked: " + Formats.achievementNames(session.unlockedAchievements());
+        details = targetReached ? tr("review.complete.targetReached") : nothingLeft();
+        completionTitle = tr("review.complete.title");
+        String accuracy = Formats.percent(session.accuracy());
+        completionMetrics = (session.sessionGoal() > 0
+                ? tr("review.complete.done", session.cardsReviewed(), session.sessionGoal(), accuracy, session.xpEarned())
+                : tr("review.complete.doneAllDue", session.cardsReviewed(), accuracy, session.xpEarned()))
+            + System.lineSeparator() + tr("review.complete.today", progress.reviewedCount(), progress.reviewGoal(),
+                progress.newWordsCount(), progress.newWordGoal())
+            + System.lineSeparator() + tr("format.achievements.unlocked",
+                Formats.achievementNames(session.unlockedAchievements()));
         int skipped = reviewService.clozeSkippedCount();
         if (skipped > 0) {
-            completionMetrics += System.lineSeparator() + skippedWithoutExamples(skipped)
-                + ": an example sentence that contains the word lets Cloze mode ask them.";
+            completionMetrics += System.lineSeparator() + tr("review.complete.skipped", skippedWithoutExamples(skipped));
         }
-        result = mode == ReviewMode.WEAK_WORDS
-            ? "Reset Session to go through the weak words again, or switch deck from the header."
-            : "Use Weak Words mode to keep working on your most fragile cards, or switch deck from the header.";
+        result = mode == ReviewMode.WEAK_WORDS ? tr("review.complete.nextWeakWords") : tr("review.complete.next");
     }
 
     /** Why a session that did not reach its target has no card left. */
     private String nothingLeft() {
         if (mode == ReviewMode.WEAK_WORDS) {
-            return "Every weak word was shown in this session.";
+            return tr("review.nothingLeft.weakWords");
         }
         int skipped = reviewService.clozeSkippedCount();
         if (skipped > 0) {
-            return "No due words with a usable example right now; " + skippedWithoutExamples(skipped) + ".";
+            return tr("review.nothingLeft.cloze", skippedWithoutExamples(skipped));
         }
         ReviewQueueCounts queue = reviewService.queueCounts(deckId);
         if (queue.newCardsDue() > 0 && queue.newAvailableToday() == 0) {
-            return "No due words right now; today's limit of " + queue.newCardsPerDay() + " new words is reached.";
+            return tr("review.nothingLeft.newLimit", queue.newCardsPerDay());
         }
-        return "No due words right now.";
+        return tr("review.nothingLeft");
     }
 
     /** Shows the checked answer with "loading" and asks the AI service for its explanation. */
@@ -1221,7 +1243,7 @@ public final class ReviewSessionPresenter {
         String separator = System.lineSeparator() + System.lineSeparator();
         String shownAnswer = checkedText;
         ExplanationRequest request = explanationRequest;
-        result = shownAnswer + separator + "AI explanation: loading...";
+        result = shownAnswer + separator + tr("review.explanation.loading");
         explanationLoading = true;
         long ticket = explanations.next();
         AiService ai = aiServices.get();
@@ -1230,7 +1252,7 @@ public final class ReviewSessionPresenter {
             () -> regenerate ? ai.regenerate(request) : ai.explain(request),
             explanation -> showExplanation(ticket, shownAnswer + separator + explanation),
             error -> showExplanation(ticket, shownAnswer + separator
-                + "AI explanation unavailable: " + ErrorMessages.rootMessage(error))
+                + tr("review.explanation.unavailable", ErrorMessages.rootMessage(error)))
         );
     }
 

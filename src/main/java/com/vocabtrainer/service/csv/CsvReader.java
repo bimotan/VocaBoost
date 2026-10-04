@@ -14,6 +14,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Reads CSV records one at a time (RFC 4180), so a large file is never held in memory.
  *
@@ -128,13 +130,13 @@ public final class CsvReader implements Closeable {
     /** "comma", "tab" or "semicolon", for messages. */
     public String delimiterName() {
         return switch (delimiter) {
-            case ',' -> "comma";
-            case '\t' -> "tab";
-            case ';' -> "semicolon";
-            case '|' -> "pipe";
-            case ' ' -> "space";
-            case ':' -> "colon";
-            default -> "'" + delimiter + "'";
+            case ',' -> tr("csv.delimiter.comma");
+            case '\t' -> tr("csv.delimiter.tab");
+            case ';' -> tr("csv.delimiter.semicolon");
+            case '|' -> tr("csv.delimiter.pipe");
+            case ' ' -> tr("csv.delimiter.space");
+            case ':' -> tr("csv.delimiter.colon");
+            default -> tr("csv.delimiter.other", String.valueOf(delimiter));
         };
     }
 
@@ -163,7 +165,7 @@ public final class CsvReader implements Closeable {
         while (true) {
             if (c == END) {
                 if (state == State.QUOTED) {
-                    throw new CsvFormatException(startLine, "a quoted field is not closed (a \" is missing)");
+                    throw new CsvFormatException(startLine, tr("csv.error.unclosedQuote"));
                 }
                 fields.add(takeField());
                 return;
@@ -227,8 +229,7 @@ public final class CsvReader implements Closeable {
 
     private void append(int c, int startLine) throws CsvFormatException {
         if (field.length() >= MAX_FIELD_LENGTH) {
-            throw new CsvFormatException(startLine, "a field is longer than " + MAX_FIELD_LENGTH
-                + " characters; is a closing \" missing?");
+            throw new CsvFormatException(startLine, tr("csv.error.fieldTooLong", MAX_FIELD_LENGTH));
         }
         field.append((char) c);
     }
@@ -275,7 +276,7 @@ public final class CsvReader implements Closeable {
             count = in.read(buffer, 0, buffer.length);
         } catch (CharacterCodingException e) {
             String problem = encoding == null
-                ? "the text is not valid in the expected encoding (save the file as UTF-8 and try again)"
+                ? tr("csv.error.encoding")
                 : encoding.undecodableMessage();
             throw new CsvFormatException(line, problem, e);
         }

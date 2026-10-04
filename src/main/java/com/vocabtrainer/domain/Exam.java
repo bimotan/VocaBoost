@@ -3,6 +3,8 @@ package com.vocabtrainer.domain;
 import java.time.LocalDate;
 import java.util.Objects;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The exam a deck is studied for, such as the GRE on 2026-11-16. Reviews that would fall on or after
  * its date are brought forward into the last days before it.
@@ -18,7 +20,7 @@ public record Exam(String name, LocalDate date) {
         Objects.requireNonNull(date, "date");
         name = name == null || name.isBlank() ? DEFAULT_NAME : name.trim().replaceAll("\\s+", " ");
         if (name.length() > MAX_NAME_LENGTH) {
-            throw new IllegalArgumentException("The exam name can have at most " + MAX_NAME_LENGTH + " characters.");
+            throw new IllegalArgumentException(tr("validation.examName", MAX_NAME_LENGTH));
         }
     }
 }

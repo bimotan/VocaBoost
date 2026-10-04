@@ -3,6 +3,8 @@ package com.vocabtrainer.domain;
 import java.util.List;
 import java.util.Objects;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * What a dictionary lookup returned.
  *
@@ -46,7 +48,7 @@ public record DictionaryLookupResult(
 
     /** The lookup was cancelled; the caller's thread keeps its interrupt flag. */
     public static DictionaryLookupResult interrupted() {
-        return unavailable(LookupOutcome.INTERRUPTED, "查词已取消。");
+        return unavailable(LookupOutcome.INTERRUPTED, tr("lookup.outcome.interrupted"));
     }
 
     /** True when the word was found. */

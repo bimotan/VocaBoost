@@ -34,6 +34,8 @@ import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Imports a word list (GRE CSV, TSV, Anki plain-text export or a list of English words), a legacy
  * txt file or the bundled GRE starter words into the current deck.
@@ -49,13 +51,13 @@ final class ImportBox {
     private final SettingsService settingsService;
     private final TextField importPathField = new TextField();
     private final Label importStatus = new Label();
-    private final Button importLegacyButton = new Button("Import legacy txt");
-    private final Button importCsvButton = new Button("Import word list");
-    private final Button previewCsvButton = new Button("Preview and map columns");
-    private final Button importStarterButton = new Button("Import GRE starter deck");
-    private final CheckBox onlineLookup = new CheckBox("Look up meanings the local dictionary does not have online too");
+    private final Button importLegacyButton = new Button(tr("import.legacy"));
+    private final Button importCsvButton = new Button(tr("import.wordList"));
+    private final Button previewCsvButton = new Button(tr("import.preview"));
+    private final Button importStarterButton = new Button(tr("import.starter"));
+    private final CheckBox onlineLookup = new CheckBox(tr("import.onlineLookup"));
     private final ProgressBar progressBar = new ProgressBar(0);
-    private final Button cancelButton = new Button("Cancel import");
+    private final Button cancelButton = new Button(tr("import.cancel"));
     private final HBox progressRow;
     private final ColumnMappingPane mapping;
     private final LatestRequest previews = new LatestRequest();
@@ -74,8 +76,8 @@ final class ImportBox {
         this.mapping = new ColumnMappingPane(this::previewChosenColumns);
 
         importPathField.setId("importPathField");
-        importPathField.setPromptText("Choose a CSV, TSV, Anki export, word list or legacy txt");
-        importPathField.setAccessibleText("File to import");
+        importPathField.setPromptText(tr("import.path.prompt"));
+        importPathField.setAccessibleText(tr("import.path.accessible"));
         importPathField.textProperty().addListener((observable, previous, text) -> {
             if (previewedPath != null && !previewedPath.toString().equals(text.trim())) {
                 // The columns shown belong to another file.
@@ -84,14 +86,14 @@ final class ImportBox {
                 mapping.hide();
             }
         });
-        Button chooseButton = new Button("Choose file");
+        Button chooseButton = new Button(tr("import.choose"));
         chooseButton.setId("chooseImportFileButton");
         chooseButton.setOnAction(event -> {
             List<FileChooser.ExtensionFilter> filters = List.of(
-                new FileChooser.ExtensionFilter("Import Files", "*.txt", "*.csv", "*.tsv"),
-                new FileChooser.ExtensionFilter("All Files", "*.*")
+                new FileChooser.ExtensionFilter(tr("import.filter.files"), "*.txt", "*.csv", "*.tsv"),
+                new FileChooser.ExtensionFilter(tr("file.filter.all"), "*.*")
             );
-            context.dialogs().chooseOpenFile(context.window().get(), "Choose import file", filters)
+            context.dialogs().chooseOpenFile(context.window().get(), tr("import.choose.title"), filters)
                 .ifPresent(file -> importPathField.setText(file.toString()));
         });
         importLegacyButton.setId("importLegacyButton");
@@ -115,9 +117,9 @@ final class ImportBox {
             context.async().run(
                 () -> importExportService.importBundledGreStarter(deck.getId()),
                 result -> afterImport(result, deck),
-                error -> showFailure("Import failed", error),
+                error -> showFailure(tr("import.failed"), error),
                 importStatus,
-                "Importing GRE starter deck...",
+                tr("import.starter.running"),
                 importButtons()
             );
         });
@@ -136,7 +138,7 @@ final class ImportBox {
         progressRow.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(progressBar, Priority.ALWAYS);
         showProgressRow(false);
-        root = new VBox(10, Widgets.sectionTitle("Import"), controls, onlineLookup, mapping.root(), progressRow,
+        root = new VBox(10, Widgets.sectionTitle(tr("import.title")), controls, onlineLookup, mapping.root(), progressRow,
             importStatus);
     }
 
@@ -155,17 +157,14 @@ final class ImportBox {
         try {
             offline = settingsService.isOfflineMode();
         } catch (RuntimeException e) {
-            context.errors().logFailure("Reading offline mode failed", e);
+            context.errors().logFailure(tr("import.offlineReadFailed"), e);
             offline = false;
         }
         onlineLookup.setDisable(offline || importing);
         if (offline) {
             onlineLookup.setSelected(false);
         }
-        onlineLookup.setTooltip(new Tooltip(offline
-            ? "Offline mode is on: only the local dictionaries are used."
-            : "Words that neither the imported ECDICT nor the starter words have are looked up online."
-                + " Without this, they are skipped."));
+        onlineLookup.setTooltip(new Tooltip(offline ? tr("import.onlineLookup.offline") : tr("import.onlineLookup.tooltip")));
     }
 
     /** The file in the path field; empty, with the reason in the status, when there is none. */
@@ -178,13 +177,13 @@ final class ImportBox {
         try {
             return Optional.of(Path.of(text));
         } catch (InvalidPathException e) {
-            importStatus.setText("Not a valid file path: " + text);
+            importStatus.setText(tr("import.badPath", text));
             return Optional.empty();
         }
     }
 
     private void importLegacyTxt() {
-        Optional<Path> chosen = chosenFile("Please choose an import file first.");
+        Optional<Path> chosen = chosenFile(tr("import.chooseFirst"));
         if (chosen.isEmpty()) {
             return;
         }
@@ -194,16 +193,16 @@ final class ImportBox {
         context.async().run(
             () -> importExportService.importLegacyTxt(chosen.get(), deck.getId()),
             result -> afterImport(result, deck),
-            error -> showFailure("Import failed", error),
+            error -> showFailure(tr("import.failed"), error),
             importStatus,
-            "Importing...",
+            tr("import.running"),
             importButtons()
         );
     }
 
     /** Previews the file with the columns the import detects, and shows them for the user to change. */
     private void previewDetectedColumns() {
-        chosenFile("Please choose a word list first.").ifPresent(path -> preview(path, null));
+        chosenFile(tr("import.chooseWordListFirst")).ifPresent(path -> preview(path, null));
     }
 
     /** Previews the shown file again with the columns chosen in the mapping pane. */
@@ -233,14 +232,14 @@ final class ImportBox {
                 if (chosen == null) {
                     mapping.hide();
                     previewedPath = null;
-                    showFailure("Preview failed", error);
+                    showFailure(tr("import.preview.failed"), error);
                 } else {
                     // A column choice that cannot be imported, such as no English column.
-                    importStatus.setText("Deck: " + deck.getName() + System.lineSeparator() + message(error));
+                    importStatus.setText(tr("import.deck", deck.getName()) + System.lineSeparator() + message(error));
                 }
             },
             importStatus,
-            "Analyzing file...",
+            tr("import.analyzing"),
             importButtons()
         );
     }
@@ -257,7 +256,7 @@ final class ImportBox {
             detectedColumns = preview.mapping();
         }
         mapping.show(preview, newFile);
-        importStatus.setText("Deck: " + deck.getName() + System.lineSeparator() + preview.toSummary());
+        importStatus.setText(tr("import.deck", deck.getName()) + System.lineSeparator() + preview.toSummary());
     }
 
     /**
@@ -265,7 +264,7 @@ final class ImportBox {
      * file, otherwise with the detected columns.
      */
     private void importWordList() {
-        Optional<Path> chosen = chosenFile("Please choose an import file first.");
+        Optional<Path> chosen = chosenFile(tr("import.chooseFirst"));
         if (chosen.isEmpty()) {
             return;
         }
@@ -276,7 +275,7 @@ final class ImportBox {
         previews.invalidate();
 
         AtomicBoolean cancelRequested = new AtomicBoolean();
-        String startMessage = "Importing...";
+        String startMessage = tr("import.running");
         Task<ImportResult> task = new Task<>() {
             @Override
             protected ImportResult call() {
@@ -298,7 +297,7 @@ final class ImportBox {
             // The import stops before its next lookup; nothing is written until every lookup is done.
             cancelRequested.set(true);
             cancelButton.setDisable(true);
-            importStatus.setText("Canceling the import...");
+            importStatus.setText(tr("import.canceling"));
         });
         showProgressRow(true);
         for (Node button : importButtons()) {
@@ -318,11 +317,11 @@ final class ImportBox {
             importFinished();
             Throwable error = task.getException();
             if (error instanceof CancellationException) {
-                importStatus.setText("Import canceled. Nothing was imported.");
+                importStatus.setText(tr("import.canceled"));
                 return;
             }
-            context.errors().logFailure("Import failed", error);
-            showFailure("Import failed", error);
+            context.errors().logFailure(tr("import.failed"), error);
+            showFailure(tr("import.failed"), error);
         });
         Thread thread = new Thread(task, UiAsync.THREAD_NAME);
         thread.setDaemon(true);
@@ -353,7 +352,7 @@ final class ImportBox {
      */
     private void showFailure(String title, Throwable error) {
         String message = message(error);
-        importStatus.setText(title + ": " + message);
+        importStatus.setText(tr("import.failure", title, message));
         context.errors().showError(title, message);
     }
 
@@ -367,8 +366,8 @@ final class ImportBox {
     private void afterImport(ImportResult result, Deck deck) {
         // The import itself has finished; show its summary even if refreshing the views fails. Importing
         // earns no XP and no new words: a word counts as new on the day of its first review.
-        importStatus.setText("Deck: " + deck.getName() + System.lineSeparator() + result.toSummary());
-        context.errors().guard("Import finished, but refreshing the views failed",
+        importStatus.setText(tr("import.deck", deck.getName()) + System.lineSeparator() + result.toSummary());
+        context.errors().guard(tr("import.refreshFailed"),
             () -> context.changes().publish(DataChange.WORDS));
     }
 }

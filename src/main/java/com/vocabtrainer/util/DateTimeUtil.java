@@ -5,6 +5,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 public final class DateTimeUtil {
     public static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
     public static final DateTimeFormatter LEGACY_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -32,7 +34,7 @@ public final class DateTimeUtil {
 
     /** A number of days as text: "1 day", "0 days", "12 days". */
     public static String days(long count) {
-        return count == 1 ? "1 day" : count + " days";
+        return tr("format.days", count);
     }
 
     public static String toDisplay(LocalDateTime value) {

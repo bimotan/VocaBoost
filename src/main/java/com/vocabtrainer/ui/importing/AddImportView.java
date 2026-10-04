@@ -12,6 +12,8 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
 import javafx.scene.layout.VBox;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The Add / Import tab: manual add with dictionary lookup, file imports and exports for other apps.
  * The dictionary and AI settings are on the Settings tab.
@@ -30,7 +32,7 @@ public final class AddImportView {
         content.setPadding(new Insets(24));
         ScrollPane scrollPane = new ScrollPane(content);
         scrollPane.setFitToWidth(true);
-        tab = Widgets.tab("addImportTab", "Add / Import", scrollPane);
+        tab = Widgets.tab("addImportTab", tr("addImport.tab"), scrollPane);
     }
 
     public Tab tab() {

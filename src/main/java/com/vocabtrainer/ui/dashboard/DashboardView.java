@@ -28,6 +28,8 @@ import javafx.scene.layout.VBox;
 import java.nio.file.Path;
 import java.util.List;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The Dashboard tab: today's counts, goals, XP and badges for the current deck, the streak of every
  * deck, and the deck's exam with its countdown and new-word plan. Today is the study day; the counts
@@ -69,8 +71,8 @@ public final class DashboardView {
         this.databasePath = databasePath;
         this.examBox = new ExamPlanBox(context, examPlanService);
         // The numbers and goals are taller than a small laptop's window: they scroll.
-        this.tab = Widgets.tab("dashboardTab", "Dashboard", Widgets.tabScroll(createContent(), false));
-        this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh failed", false);
+        this.tab = Widgets.tab("dashboardTab", tr("dashboard.tab"), Widgets.tabScroll(createContent(), false));
+        this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), tr("common.refreshFailed"), false);
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
                 || changes.contains(DataChange.REVIEW_SETTINGS) || changes.contains(DataChange.GOALS)) {
@@ -104,44 +106,44 @@ public final class DashboardView {
         reviewProgress.setId("reviewGoalProgress");
         newWordProgress.setId("newWordGoalProgress");
         goalScopeLabel.setId("goalScopeLabel");
-        addStat(grid, 0, "Total words", totalWordsLabel);
-        addStat(grid, 1, "Due today", dueTodayLabel);
+        addStat(grid, 0, tr("dashboard.totalWords"), totalWordsLabel);
+        addStat(grid, 1, tr("dashboard.dueToday"), dueTodayLabel);
         // "Due today" splits into the two queues: due reviews and the new words the daily limit lets in.
-        addSubStat(grid, 2, "Due reviews", dueReviewsLabel);
-        addSubStat(grid, 3, "New available today", newAvailableTodayLabel);
-        addStat(grid, 4, "Reviews today", reviewedTodayLabel);
-        addStat(grid, 5, "New words today", newWordsTodayLabel);
-        addStat(grid, 6, "Accuracy today", accuracyTodayLabel);
-        addStat(grid, 7, "Mastered words", masteredWordsLabel);
-        addStat(grid, 8, "Streak (all decks)", streakLabel);
-        addStat(grid, 9, "XP", xpLabel);
+        addSubStat(grid, 2, tr("dashboard.dueReviews"), dueReviewsLabel);
+        addSubStat(grid, 3, tr("dashboard.newAvailableToday"), newAvailableTodayLabel);
+        addStat(grid, 4, tr("dashboard.reviewsToday"), reviewedTodayLabel);
+        addStat(grid, 5, tr("dashboard.newWordsToday"), newWordsTodayLabel);
+        addStat(grid, 6, tr("dashboard.accuracyToday"), accuracyTodayLabel);
+        addStat(grid, 7, tr("dashboard.mastered"), masteredWordsLabel);
+        addStat(grid, 8, tr("dashboard.streak"), streakLabel);
+        addStat(grid, 9, tr("dashboard.xp"), xpLabel);
 
         reviewProgress.setPrefWidth(420);
         newWordProgress.setPrefWidth(420);
         badgesLabel.setWrapText(true);
-        Button refreshButton = new Button("Refresh");
+        Button refreshButton = new Button(tr("common.refresh"));
         refreshButton.setId("refreshDashboardButton");
-        refreshButton.setOnAction(event -> context.errors().guard("Refresh failed", () -> lazy.refreshNow()));
+        refreshButton.setOnAction(event -> context.errors().guard(tr("common.refreshFailed"), () -> lazy.refreshNow()));
         // The folder's path names the user's account, so it is not shown on screen (or in screenshots).
-        Button dataFolderButton = new Button("Open data folder");
+        Button dataFolderButton = new Button(tr("settings.data.openDataFolder"));
         dataFolderButton.setId("dashboardDataFolderButton");
         dataFolderButton.setOnAction(event ->
-            Folders.open(context.errors(), "Data folder", databasePath.toAbsolutePath().getParent()));
+            Folders.open(context.errors(), tr("folder.data"), databasePath.toAbsolutePath().getParent()));
 
-        Button editGoalsButton = new Button("Edit goals");
+        Button editGoalsButton = new Button(tr("goals.edit"));
         editGoalsButton.setId("editGoalsButton");
         editGoalsButton.setOnAction(event -> GoalsDialog.open(context, goalService.settings()));
         goalScopeLabel.getStyleClass().add("muted-text");
-        HBox goalsTitle = new HBox(12, Widgets.sectionTitle("Daily Goals"), editGoalsButton, goalScopeLabel);
+        HBox goalsTitle = new HBox(12, Widgets.sectionTitle(tr("dashboard.goals.title")), editGoalsButton, goalScopeLabel);
         goalsTitle.setAlignment(Pos.CENTER_LEFT);
 
         VBox progressBox = new VBox(10,
             goalsTitle,
-            new Label("Review goal"),
+            new Label(tr("dashboard.goals.reviews")),
             reviewProgress,
-            new Label("New-word goal"),
+            new Label(tr("dashboard.goals.newWords")),
             newWordProgress,
-            Widgets.sectionTitle("Unlocked Badges"),
+            Widgets.sectionTitle(tr("dashboard.badges")),
             badgesLabel,
             new HBox(10, refreshButton, dataFolderButton)
         );
@@ -174,8 +176,9 @@ public final class DashboardView {
         DashboardStats stats = statsService.dashboardStats(deckId);
         DailyGoalProgress progress = goalService.getTodayProgress(deckId);
         List<Achievement> achievements = achievementService.getUnlockedAchievements(deckId);
-        totalWordsLabel.setText(stats.totalWords()
-            + (stats.suspendedWords() > 0 ? " (" + stats.suspendedWords() + " suspended)" : ""));
+        totalWordsLabel.setText(stats.suspendedWords() > 0
+            ? tr("dashboard.totalWords.suspended", stats.totalWords(), stats.suspendedWords())
+            : String.valueOf(stats.totalWords()));
         dueTodayLabel.setText(String.valueOf(stats.dueToday()));
         dueReviewsLabel.setText(String.valueOf(stats.dueReviews()));
         newAvailableTodayLabel.setText(String.valueOf(stats.newAvailableToday()));
@@ -185,7 +188,7 @@ public final class DashboardView {
         masteredWordsLabel.setText(String.valueOf(stats.masteredWords()));
         streakLabel.setText(DateTimeUtil.days(progress.currentStreak()));
         goalScopeLabel.setText(goalService.settings().deckGoals(deckId).isPresent()
-            ? "This deck's own goals" : "Default goals of every deck");
+            ? tr("dashboard.goals.deckOwn") : tr("dashboard.goals.default"));
         xpLabel.setText(String.valueOf(progress.totalXp()));
         reviewProgress.setProgress(progress.reviewProgress());
         newWordProgress.setProgress(progress.newWordProgress());

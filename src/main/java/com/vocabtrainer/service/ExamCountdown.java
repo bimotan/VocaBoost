@@ -2,6 +2,8 @@ package com.vocabtrainer.service;
 
 import com.vocabtrainer.domain.Exam;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * How far away the deck's exam is.
  *
@@ -17,14 +19,14 @@ public record ExamCountdown(Exam exam, long daysLeft) {
     public String toDisplayText() {
         String name = exam.name();
         if (daysLeft > 1) {
-            return name + " in " + daysLeft + " days";
+            return tr("exam.countdown.inDays", name, daysLeft);
         }
         if (daysLeft == 1) {
-            return name + " is tomorrow";
+            return tr("exam.countdown.tomorrow", name);
         }
         if (daysLeft == 0) {
-            return name + " is today";
+            return tr("exam.countdown.today", name);
         }
-        return name + " was " + (daysLeft == -1 ? "yesterday" : -daysLeft + " days ago");
+        return daysLeft == -1 ? tr("exam.countdown.yesterday", name) : tr("exam.countdown.daysAgo", name, -daysLeft);
     }
 }

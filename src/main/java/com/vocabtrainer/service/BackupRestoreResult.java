@@ -2,6 +2,8 @@ package com.vocabtrainer.service;
 
 import java.util.List;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /** What a JSON backup restore changed; {@code invalidRows} lists each row it could not use and why. */
 public record BackupRestoreResult(
     int formatVersion,
@@ -23,20 +25,15 @@ public record BackupRestoreResult(
     public String toSummary() {
         String newLine = System.lineSeparator();
         StringBuilder builder = new StringBuilder();
-        builder.append("Backup restored (format version ").append(formatVersion).append(").").append(newLine)
-            .append("Words: ").append(wordsInserted).append(" added, ")
-            .append(wordsUpdated).append(" updated with the backup's progress, ")
-            .append(wordsSkipped).append(" already in the deck and left unchanged.").append(newLine)
-            .append("Review logs: ").append(logsInserted).append(" added, ")
-            .append(duplicateLogsSkipped).append(" already present.").append(newLine)
-            .append("Daily goal days added: ").append(dailyGoalsRestored)
-            .append(", achievements added: ").append(achievementsRestored).append(".");
+        builder.append(tr("backup.result.restored", String.valueOf(formatVersion))).append(newLine)
+            .append(tr("backup.result.words", wordsInserted, wordsUpdated, wordsSkipped)).append(newLine)
+            .append(tr("backup.result.logs", logsInserted, duplicateLogsSkipped)).append(newLine)
+            .append(tr("backup.result.goals", dailyGoalsRestored, achievementsRestored));
         if (!invalidRows.isEmpty()) {
-            builder.append(newLine).append("Invalid rows skipped: ").append(invalidRows.size());
+            builder.append(newLine).append(tr("backup.result.invalid", invalidRows.size()));
             invalidRows.stream().limit(MAX_LISTED_INVALID_ROWS).forEach(row -> builder.append(newLine).append(row));
             if (invalidRows.size() > MAX_LISTED_INVALID_ROWS) {
-                builder.append(newLine).append("... and ").append(invalidRows.size() - MAX_LISTED_INVALID_ROWS)
-                    .append(" more (see the log file).");
+                builder.append(newLine).append(tr("backup.result.moreInvalid", invalidRows.size() - MAX_LISTED_INVALID_ROWS));
             }
         }
         return builder.toString();

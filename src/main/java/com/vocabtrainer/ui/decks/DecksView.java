@@ -26,6 +26,8 @@ import javafx.scene.layout.VBox;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The Decks tab: active and archived decks with their word, due and latest-review counts, and
  * building a deck from the words ECDICT tags with an exam.
@@ -48,8 +50,8 @@ public final class DecksView {
         this.deckService = deckService;
         this.statsService = statsService;
         this.ecdictDeckBox = new EcdictDeckBox(context, ecdictTagDecks);
-        this.tab = Widgets.tab("decksTab", "Decks", createContent());
-        this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh decks failed", false);
+        this.tab = Widgets.tab("decksTab", tr("decks.tab"), createContent());
+        this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), tr("decks.refreshFailed"), false);
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
                 || changes.contains(DataChange.DECKS) || changes.contains(DataChange.REVIEW_SETTINGS)) {
@@ -70,38 +72,38 @@ public final class DecksView {
 
     private VBox createContent() {
         deckTable.setId("deckTable");
-        deckTable.setAccessibleText("Active decks");
+        deckTable.setAccessibleText(tr("decks.active.accessible"));
         deckTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         configureDeckTable(deckTable);
 
         archivedDeckTable.setId("archivedDeckTable");
-        archivedDeckTable.setAccessibleText("Archived decks");
+        archivedDeckTable.setAccessibleText(tr("decks.archived.accessible"));
         archivedDeckTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         configureDeckTable(archivedDeckTable);
         archivedDeckTable.setPrefHeight(180);
 
-        Button switchButton = new Button("Switch selected");
+        Button switchButton = new Button(tr("decks.switch"));
         switchButton.setId("switchDeckButton");
         switchButton.setOnAction(event -> {
             DeckOverview selected = deckTable.getSelectionModel().getSelectedItem();
             if (selected != null) {
-                context.errors().guard("Switch deck failed", () -> context.decks().switchTo(selected.deck()));
+                context.errors().guard(tr("header.switchDeck.failed"), () -> context.decks().switchTo(selected.deck()));
             }
         });
-        Button restoreButton = new Button("Restore selected archived deck");
+        Button restoreButton = new Button(tr("decks.restore"));
         restoreButton.setId("restoreDeckButton");
         restoreButton.setOnAction(event -> restoreSelectedArchivedDeck());
-        Button refreshButton = new Button("Refresh");
+        Button refreshButton = new Button(tr("common.refresh"));
         refreshButton.setId("refreshDecksButton");
         refreshButton.setOnAction(event -> lazy.refreshNow());
         VBox content = new VBox(12,
-            Widgets.sectionTitle("Active Decks"),
+            Widgets.sectionTitle(tr("decks.active.title")),
             deckTable,
             new HBox(10, switchButton, refreshButton),
-            Widgets.sectionTitle("Archived Decks"),
+            Widgets.sectionTitle(tr("decks.archived.title")),
             archivedDeckTable,
             restoreButton,
-            Widgets.sectionTitle("Build a Deck from ECDICT"),
+            Widgets.sectionTitle(tr("decks.ecdict.title")),
             ecdictDeckBox.root()
         );
         content.setPadding(new Insets(24));
@@ -110,14 +112,14 @@ public final class DecksView {
     }
 
     private static void configureDeckTable(TableView<DeckOverview> table) {
-        TableColumn<DeckOverview, String> nameCol = new TableColumn<>("Deck");
+        TableColumn<DeckOverview, String> nameCol = new TableColumn<>(tr("decks.column.deck"));
         nameCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().deck().getName()));
         // Counts and dates sort by value, not as text.
-        TableColumn<DeckOverview, Integer> wordsCol = new TableColumn<>("Words");
+        TableColumn<DeckOverview, Integer> wordsCol = new TableColumn<>(tr("decks.column.words"));
         wordsCol.setCellValueFactory(data -> new ReadOnlyObjectWrapper<>(data.getValue().words()));
-        TableColumn<DeckOverview, Integer> dueCol = new TableColumn<>("Due");
+        TableColumn<DeckOverview, Integer> dueCol = new TableColumn<>(tr("decks.column.due"));
         dueCol.setCellValueFactory(data -> new ReadOnlyObjectWrapper<>(data.getValue().due()));
-        TableColumn<DeckOverview, CellValue<LocalDateTime>> latestCol = new TableColumn<>("Latest review");
+        TableColumn<DeckOverview, CellValue<LocalDateTime>> latestCol = new TableColumn<>(tr("decks.column.latestReview"));
         latestCol.setCellValueFactory(data -> {
             LocalDateTime latest = data.getValue().latestReviewAt();
             return new ReadOnlyObjectWrapper<>(new CellValue<>(latest, DateTimeUtil.toDisplay(latest)));
@@ -128,10 +130,10 @@ public final class DecksView {
     private void restoreSelectedArchivedDeck() {
         DeckOverview selected = archivedDeckTable.getSelectionModel().getSelectedItem();
         if (selected == null) {
-            context.errors().showInfo("Please select an archived deck to restore.");
+            context.errors().showInfo(tr("decks.restore.select"));
             return;
         }
-        context.errors().guard("Restore deck failed", () -> {
+        context.errors().guard(tr("decks.restore.failed"), () -> {
             context.decks().switchTo(deckService.restoreDeck(selected.deck().getId()));
             context.changes().publish(DataChange.DECKS);
         });
@@ -142,7 +144,7 @@ public final class DecksView {
             deckRows.setAll(statsService.deckOverviews(deckService.activeDecks()));
             archivedDeckRows.setAll(statsService.deckOverviews(deckService.archivedDecks()));
         } catch (RuntimeException e) {
-            context.errors().reportFailure("Refresh decks failed", e);
+            context.errors().reportFailure(tr("decks.refreshFailed"), e);
         }
     }
 }

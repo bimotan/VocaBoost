@@ -22,6 +22,8 @@ import java.util.function.BiFunction;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /** Report and CSV exports, and JSON backup export and restore. */
 final class DataActions {
     private static final Logger LOGGER = Logger.getLogger(DataActions.class.getName());
@@ -46,11 +48,11 @@ final class DataActions {
 
     List<Button> exportButtons() {
         return List.of(
-            button("exportReportButton", "Export Markdown report", this::exportReport),
-            button("exportWordsCsvButton", "Export words CSV", this::exportWordsCsv),
-            button("exportReviewLogsCsvButton", "Export review logs CSV", this::exportReviewLogsCsv),
-            button("exportBackupButton", "Export JSON backup", this::exportJsonBackup),
-            button("importBackupButton", "Import JSON backup", this::importJsonBackup)
+            button("exportReportButton", tr("data.report"), this::exportReport),
+            button("exportWordsCsvButton", tr("data.wordsCsv"), this::exportWordsCsv),
+            button("exportReviewLogsCsvButton", tr("data.reviewLogsCsv"), this::exportReviewLogsCsv),
+            button("exportBackupButton", tr("data.backup.export"), this::exportJsonBackup),
+            button("importBackupButton", tr("data.backup.import"), this::importJsonBackup)
         );
     }
 
@@ -62,7 +64,7 @@ final class DataActions {
     }
 
     private void exportReport() {
-        Optional<Path> file = context.dialogs().chooseSaveFile(context.window().get(), "Export learning report",
+        Optional<Path> file = context.dialogs().chooseSaveFile(context.window().get(), tr("data.report.title"),
             "vocaboost-learning-report.md", List.of(new FileChooser.ExtensionFilter("Markdown", "*.md")));
         if (file.isEmpty()) {
             return;
@@ -75,23 +77,23 @@ final class DataActions {
                 goalService.getTodayProgress(deck.getId()),
                 file.get()
             );
-            context.errors().showInfo("Report exported: " + exported.toAbsolutePath());
+            context.errors().showInfo(tr("data.report.done", exported.toAbsolutePath().toString()));
         } catch (RuntimeException e) {
-            context.errors().reportFailure("Export failed", e);
+            context.errors().reportFailure(tr("export.failed"), e);
         }
     }
 
     private void exportWordsCsv() {
-        exportFile("Export words CSV", "vocaboost-words.csv", "CSV", "*.csv", backupService::exportWordsCsv);
+        exportFile(tr("data.wordsCsv"), "vocaboost-words.csv", "CSV", "*.csv", backupService::exportWordsCsv);
     }
 
     private void exportReviewLogsCsv() {
-        exportFile("Export review logs CSV", "vocaboost-review-logs.csv", "CSV", "*.csv",
+        exportFile(tr("data.reviewLogsCsv"), "vocaboost-review-logs.csv", "CSV", "*.csv",
             backupService::exportReviewLogsCsv);
     }
 
     private void exportJsonBackup() {
-        exportFile("Export JSON backup", "vocaboost-backup.json", "JSON", "*.json", backupService::exportJsonBackup);
+        exportFile(tr("data.backup.export"), "vocaboost-backup.json", "JSON", "*.json", backupService::exportJsonBackup);
     }
 
     /** Exports the deck that is current when the user picks the file; the export runs in the background. */
@@ -106,15 +108,15 @@ final class DataActions {
         Path output = file.get();
         context.async().run(
             () -> exporter.apply(deckId, output),
-            exported -> context.errors().showInfo("Exported: " + exported.toAbsolutePath()),
-            error -> context.errors().showError("Export failed", UiErrors.rootMessage(error)),
+            exported -> context.errors().showInfo(tr("export.done", exported.toAbsolutePath().toString())),
+            error -> context.errors().showError(tr("export.failed"), UiErrors.rootMessage(error)),
             status,
-            "Exporting..."
+            tr("export.running")
         );
     }
 
     private void importJsonBackup() {
-        Optional<Path> file = context.dialogs().chooseOpenFile(context.window().get(), "Import JSON backup",
+        Optional<Path> file = context.dialogs().chooseOpenFile(context.window().get(), tr("data.backup.import"),
             List.of(new FileChooser.ExtensionFilter("JSON", "*.json")));
         if (file.isEmpty()) {
             return;
@@ -131,9 +133,9 @@ final class DataActions {
                 return result;
             },
             result -> afterRestore(result, targetDeck),
-            error -> context.errors().showError("Import failed", UiErrors.rootMessage(error)),
+            error -> context.errors().showError(tr("import.failed"), UiErrors.rootMessage(error)),
             status,
-            "Importing backup..."
+            tr("data.backup.importing")
         );
     }
 
@@ -147,12 +149,10 @@ final class DataActions {
     }
 
     private Optional<BackupService.ExistingWordPolicy> askExistingWordPolicy(Deck targetDeck) {
-        ButtonType keepProgress = new ButtonType("Keep current progress", ButtonBar.ButtonData.OK_DONE);
-        ButtonType useBackupProgress = new ButtonType("Use backup progress", ButtonBar.ButtonData.OTHER);
-        Optional<ButtonType> choice = context.dialogs().choose("Import JSON backup",
-            "Restore the backup into " + targetDeck.getName() + "?",
-            "Words missing from this deck are added with the review schedule saved in the backup. "
-                + "For words already in the deck, keep their current review progress or replace it with the backup's.",
+        ButtonType keepProgress = new ButtonType(tr("data.backup.keep"), ButtonBar.ButtonData.OK_DONE);
+        ButtonType useBackupProgress = new ButtonType(tr("data.backup.useBackup"), ButtonBar.ButtonData.OTHER);
+        Optional<ButtonType> choice = context.dialogs().choose(tr("data.backup.import"),
+            tr("data.backup.question", targetDeck.getName()), tr("data.backup.explanation"),
             keepProgress, useBackupProgress, ButtonType.CANCEL);
         if (choice.isEmpty() || choice.get() == ButtonType.CANCEL) {
             return Optional.empty();
@@ -164,9 +164,9 @@ final class DataActions {
 
     private void afterRestore(BackupRestoreResult result, Deck targetDeck) {
         // A restore brings back saved history; unlike adding words it earns no XP or new-word credit.
-        context.errors().guard("Backup restored, but refreshing the views failed",
+        context.errors().guard(tr("data.backup.refreshFailed"),
             () -> context.changes().publish(DataChange.WORDS, DataChange.REVIEWS));
-        context.dialogs().showText("Import JSON backup", "Deck: " + targetDeck.getName(), result.toSummary(),
+        context.dialogs().showText(tr("data.backup.import"), tr("import.deck", targetDeck.getName()), result.toSummary(),
             result.invalidRows().isEmpty() ? 5 : 12);
     }
 }

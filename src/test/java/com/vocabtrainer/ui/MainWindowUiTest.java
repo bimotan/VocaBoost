@@ -8,9 +8,11 @@ import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.service.CompositeDictionaryService;
 import com.vocabtrainer.service.DictionaryService;
+import com.vocabtrainer.service.LanguageSettings;
 import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.MockAiService;
 import com.vocabtrainer.service.ReviewSettings;
+import com.vocabtrainer.util.Messages;
 import javafx.event.ActionEvent;
 import javafx.geometry.Bounds;
 import javafx.scene.Node;
@@ -65,6 +67,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * the app, with {@link ScriptedDialogs} instead of blocking dialogs and with dictionary and AI
  * services that never use the network. Controls are found by the ids MainWindow gives them.
  *
+ * <p>The window is shown in the language saved in its database, as the app does, and the computer's
+ * locale is taken to be English ({@link #TEST_SYSTEM_LOCALE}), so the tests see the English texts
+ * whatever the locale of the machine they run on, unless a test saves another language.
+ *
  * <p>Dashboard, Decks, Statistics and Word List recompute their content only while their tab is
  * shown, like a user would see them, so select the tab before reading its controls.
  */
@@ -75,6 +81,10 @@ abstract class MainWindowUiTest {
     /** The default new-words-per-day limit: how many of the new starter words are due on a day. */
     static final int NEW_WORDS_PER_DAY = ReviewSettings.DEFAULT_NEW_CARDS_PER_DAY;
     static final Path SNAPSHOT_DIR = Path.of("target", "ui-snapshots");
+    /** The computer's locale as the tests see it: the language Auto shows the app in English. */
+    static final Locale TEST_SYSTEM_LOCALE = Locale.ENGLISH;
+    /** The JVM's own default locale, which every test leaves as it found it. */
+    private static final Locale JVM_DEFAULT_LOCALE = Locale.getDefault();
 
     private static final String BACKGROUND_THREAD_NAME = "vocaboost-background-task";
     /** Longer than a debounce of typed input (the Word List's search had one of 250 ms). */
@@ -107,15 +117,18 @@ abstract class MainWindowUiTest {
             .dictionaryService((cache, local) -> offlineDictionary(local))
             .aiService((cache, settings) -> new MockAiService());
         AppServices.Builder configured = configure(builder);
-        // Like VocabTrainerApp.start, the services and the window are created on the FX thread.
+        // Like VocabTrainerApp.start, the services and the window are created on the FX thread, in the
+        // language the database has saved.
         Fx.run(() -> {
+            VocabTrainerApp.useLanguage(LanguageSettings.Language.AUTO, TEST_SYSTEM_LOCALE);
             try {
                 services = configured.open();
             } catch (Exception e) {
                 throw new IllegalStateException("Cannot open the test database", e);
             }
+            VocabTrainerApp.useLanguage(new LanguageSettings(services.settingsService()).language(), TEST_SYSTEM_LOCALE);
             stage = new Stage();
-            VocabTrainerApp.showMainWindow(stage, services.createMainWindow(dialogs));
+            VocabTrainerApp.showMainWindow(stage, services.createMainWindow(dialogs, TEST_SYSTEM_LOCALE));
         });
     }
 
@@ -158,6 +171,9 @@ abstract class MainWindowUiTest {
             if (services != null) {
                 services.close();
             }
+            // The next test, also one without a window, starts in English.
+            Messages.setLocale(Messages.ENGLISH);
+            Locale.setDefault(JVM_DEFAULT_LOCALE);
         }
         List<Throwable> uncaught = Fx.drainUncaught();
         if (!uncaught.isEmpty()) {

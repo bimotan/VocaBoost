@@ -1,10 +1,10 @@
 package com.vocabtrainer.domain;
 
 public enum ReviewRating {
-    AGAIN("Again", 1, 1),
-    HARD("Hard", 3, 2),
-    GOOD("Good", 4, 3),
-    EASY("Easy", 5, 4);
+    AGAIN(1, 1),
+    HARD(3, 2),
+    GOOD(4, 3),
+    EASY(5, 4);
 
     /** The least answer similarity a rating above Again needs; below it any rating counts as Again. */
     public static final double MIN_SIMILARITY_HARD = 0.55;
@@ -13,18 +13,12 @@ public enum ReviewRating {
     /** The least answer similarity Easy needs. */
     public static final double MIN_SIMILARITY_EASY = 0.9;
 
-    private final String label;
     private final int quality;
     private final int grade;
 
-    ReviewRating(String label, int quality, int grade) {
-        this.label = label;
+    ReviewRating(int quality, int grade) {
         this.quality = quality;
         this.grade = grade;
-    }
-
-    public String getLabel() {
-        return label;
     }
 
     /** The old SM-2 quality (1, 3, 4, 5); review XP still uses it. */

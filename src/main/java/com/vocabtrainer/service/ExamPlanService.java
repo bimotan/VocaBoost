@@ -18,6 +18,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Planning for an exam: the exam date of each deck (every deck's, or a deck's own), the countdown to
  * it and the new words a day it takes to start every new word before it. Saving an exam date also
@@ -92,10 +94,10 @@ public class ExamPlanService {
      */
     public NewCardPlan applyNewCardPlan(long deckId) {
         if (reviewSettings == null) {
-            throw new IllegalStateException("The review settings are not saved, so the new-word limit cannot be set.");
+            throw new IllegalStateException(tr("exam.error.noReviewSettings"));
         }
         NewCardPlan plan = newCardPlan(deckId)
-            .orElseThrow(() -> new IllegalStateException("The deck has no exam ahead to plan new words for."));
+            .orElseThrow(() -> new IllegalStateException(tr("exam.error.noPlan")));
         reviewSettings.saveNewCardsPerDay(deckId, plan.limitToApply());
         return plan;
     }

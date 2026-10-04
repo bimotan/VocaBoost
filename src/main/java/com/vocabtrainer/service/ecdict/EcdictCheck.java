@@ -1,6 +1,7 @@
 package com.vocabtrainer.service.ecdict;
 
-import java.util.Locale;
+
+import static com.vocabtrainer.util.Messages.tr;
 
 /**
  * What a quick look at the start of a dictionary CSV found; see {@link EcdictImportService#check}.
@@ -12,9 +13,8 @@ import java.util.Locale;
  */
 public record EcdictCheck(String format, int rowsChecked, int usableRows, String sample) {
     public String toDisplayText() {
-        String result = String.format(Locale.ROOT, "First %,d rows: %,d entries, %,d skipped.",
-            rowsChecked, usableRows, rowsChecked - usableRows);
+        String result = tr("ecdict.check.rows", rowsChecked, usableRows, rowsChecked - usableRows);
         return format + System.lineSeparator() + result
-            + (sample.isEmpty() ? "" : System.lineSeparator() + "Example: " + sample);
+            + (sample.isEmpty() ? "" : System.lineSeparator() + tr("ecdict.check.example", sample));
     }
 }

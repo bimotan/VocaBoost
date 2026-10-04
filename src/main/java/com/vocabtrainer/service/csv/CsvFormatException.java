@@ -2,6 +2,8 @@ package com.vocabtrainer.service.csv;
 
 import java.io.IOException;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /** The text cannot be read as CSV, for example a quoted field is never closed. */
 public class CsvFormatException extends IOException {
     private final int lineNumber;
@@ -11,7 +13,7 @@ public class CsvFormatException extends IOException {
     }
 
     public CsvFormatException(int lineNumber, String problem, Throwable cause) {
-        super("Line " + lineNumber + ": " + problem, cause);
+        super(tr("csv.line", lineNumber, problem), cause);
         this.lineNumber = lineNumber;
     }
 

@@ -5,6 +5,8 @@ import com.vocabtrainer.service.wordlist.WordListFile;
 
 import java.util.List;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * What importing a word list would do, plus how the file was read: {@code encoding} such as
  * "UTF-8" or "GBK/GB18030", {@code delimiter} such as "comma", {@code columns}, the word fields in
@@ -48,22 +50,16 @@ public record ImportPreview(
 
     public String toSummary() {
         StringBuilder builder = new StringBuilder();
-        builder.append("Rows: ").append(totalRows)
-            .append(", importable: ").append(importableCount);
-        if (needMeaningCount > 0) {
-            builder.append(", meanings to look up: ").append(needMeaningCount);
-        }
-        builder.append(", duplicates: ").append(duplicateCount)
-            .append(", invalid: ").append(invalidCount);
-        builder.append(System.lineSeparator())
-            .append("Encoding: ").append(encoding)
-            .append(" | Delimiter: ").append(delimiter)
-            .append(" | Columns: ").append(columns);
+        builder.append(needMeaningCount > 0
+            ? tr("import.preview.countsWithLookups", totalRows, importableCount, needMeaningCount, duplicateCount,
+                invalidCount)
+            : tr("import.preview.counts", totalRows, importableCount, duplicateCount, invalidCount));
+        builder.append(System.lineSeparator()).append(tr("import.preview.format", encoding, delimiter, columns));
         if (!format.isBlank()) {
             builder.append(" | ").append(format);
         }
         if (!firstErrors.isEmpty()) {
-            builder.append(System.lineSeparator()).append("First errors:")
+            builder.append(System.lineSeparator()).append(tr("import.preview.firstErrors"))
                 .append(System.lineSeparator())
                 .append(String.join(System.lineSeparator(), firstErrors));
         }

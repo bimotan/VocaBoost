@@ -2,6 +2,8 @@ package com.vocabtrainer.service.ecdict;
 
 import java.util.Locale;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * How far an ECDICT import is.
  *
@@ -19,8 +21,8 @@ public record EcdictImportProgress(long rows, long bytesRead, long totalBytes) {
     public String toDisplayText() {
         double megabytes = totalBytes / (1024.0 * 1024.0);
         if (rows == 0) {
-            return String.format(Locale.ROOT, "Checking the file (%.1f MB)...", megabytes);
+            return tr("ecdict.progress.checking", String.format(Locale.ROOT, "%.1f", megabytes));
         }
-        return String.format(Locale.ROOT, "Read %,d rows (%d%% of %.1f MB)", rows, Math.round(fraction() * 100), megabytes);
+        return tr("ecdict.progress.read", rows, Math.round(fraction() * 100), String.format(Locale.ROOT, "%.1f", megabytes));
     }
 }

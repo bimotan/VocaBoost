@@ -7,6 +7,7 @@ import com.vocabtrainer.service.ReviewService;
 import com.vocabtrainer.service.ReviewSettings;
 import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.DataChange;
+import com.vocabtrainer.ui.Labels;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import com.vocabtrainer.ui.WordDetails;
@@ -52,6 +53,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The Review tab. It only shows the state of a {@link ReviewSessionPresenter} and forwards the
  * user's input to it; the review flow itself lives in the presenter.
@@ -89,27 +92,27 @@ public final class ReviewView {
     private final TextField customSessionSizeField = new TextField();
     private final Spinner<Integer> newCardsPerDaySpinner = new Spinner<>();
     private final Label sessionProgressLabel = new Label();
-    private final Label reviewWordLabel = new Label(ReviewSessionPresenter.LOADING);
+    private final Label reviewWordLabel = new Label(ReviewSessionPresenter.loading());
     private final Label reviewHintLabel = new Label();
     private final Label reviewMetaLabel = new Label();
     private final TextField answerField = new TextField();
-    private final Button submitAnswerButton = new Button("Submit");
+    private final Button submitAnswerButton = new Button(tr("review.submit"));
     private final TextArea reviewResultArea = new TextArea();
     private final WordDetailsCard detailsCard = new WordDetailsCard("reviewDetails");
-    private final Button regenerateExplanationButton = new Button("Regenerate explanation");
-    private final Label completionTitleLabel = new Label("Review complete");
+    private final Button regenerateExplanationButton = new Button(tr("review.regenerate"));
+    private final Label completionTitleLabel = new Label(tr("review.complete"));
     private final Label completionMetricsLabel = new Label();
     private final VBox completionCard = new VBox(8, completionTitleLabel, completionMetricsLabel);
     private final HBox ratingButtons = new HBox(10);
     private final Map<ReviewRating, Button> ratingButtonsByRating = new EnumMap<>(ReviewRating.class);
-    private final ToggleButton overrideButton = new ToggleButton("I was right");
-    private final Button knownButton = new Button("Already known / 已掌握");
-    private final Button suspendButton = new Button("Suspend / 暂停");
-    private final Button undoButton = new Button("Undo");
+    private final ToggleButton overrideButton = new ToggleButton(tr("review.override"));
+    private final Button knownButton = new Button(tr("review.known"));
+    private final Button suspendButton = new Button(tr("review.suspend"));
+    private final Button undoButton = new Button(tr("review.undo"));
     private final Tooltip undoTooltip = new Tooltip();
     private final Label leechNoticeLabel = new Label();
-    private final Button suspendLeechButton = new Button("Suspend / 暂停");
-    private final Button memoryAidButton = new Button("Get a mnemonic");
+    private final Button suspendLeechButton = new Button(tr("review.suspend"));
+    private final Button memoryAidButton = new Button(tr("review.memoryAid"));
     private final Label memoryAidLabel = new Label();
     private final VBox leechBox = new VBox(6);
     private final Tab tab;
@@ -129,7 +132,7 @@ public final class ReviewView {
         this.context = context;
         this.presenter = new ReviewSessionPresenter(reviewService, goalService, configured::ai, context.async(),
             context.changes(), context.errors()::reportFailure, clock);
-        this.tab = Widgets.tab("reviewTab", "Review", createContent());
+        this.tab = Widgets.tab("reviewTab", tr("review.tab"), createContent());
         presenter.addListener(this::render);
         // Answers are only timed while the tab is shown; the first card is loaded behind the Dashboard.
         presenter.setOnScreen(tab.isSelected());
@@ -254,26 +257,26 @@ public final class ReviewView {
         reviewModeSelector.getSelectionModel().select(presenter.mode());
         reviewModeSelector.valueProperty().addListener((observable, oldMode, newMode) -> {
             if (!rendering) {
-                context.errors().guard("Change review mode failed", () -> presenter.changeMode(newMode));
+                context.errors().guard(tr("review.mode.failed"), () -> presenter.changeMode(newMode));
             }
         });
         configureSessionSize();
         configureNewWordsPerDay();
-        Button startSessionButton = new Button("Start Session");
+        Button startSessionButton = new Button(tr("review.start"));
         startSessionButton.setId("startSessionButton");
-        startSessionButton.setOnAction(event -> context.errors().guard("Start session failed",
+        startSessionButton.setOnAction(event -> context.errors().guard(tr("review.start.failed"),
             () -> presenter.startSession(sessionSizeSelector.getValue(), customSessionSizeField.getText())));
-        Button resetSessionButton = new Button("Reset Session");
+        Button resetSessionButton = new Button(tr("review.reset"));
         resetSessionButton.setId("resetSessionButton");
-        resetSessionButton.setOnAction(event -> context.errors().guard("Reset session failed", presenter::resetSession));
+        resetSessionButton.setOnAction(event -> context.errors().guard(tr("review.reset.failed"), presenter::resetSession));
         sessionProgressLabel.setId("sessionProgressLabel");
         sessionProgressLabel.getStyleClass().add("secondary-text");
-        HBox modeBox = new HBox(10, Widgets.formLabel("_Mode", reviewModeSelector), reviewModeSelector,
+        HBox modeBox = new HBox(10, Widgets.formLabel(tr("review.mode"), reviewModeSelector), reviewModeSelector,
             sessionProgressLabel);
         modeBox.setAlignment(Pos.CENTER_LEFT);
-        HBox sessionBox = new HBox(10, Widgets.formLabel("_Session size", sessionSizeSelector), sessionSizeSelector,
+        HBox sessionBox = new HBox(10, Widgets.formLabel(tr("review.size"), sessionSizeSelector), sessionSizeSelector,
             customSessionSizeField, startSessionButton, resetSessionButton,
-            Widgets.formLabel("_New words/day", newCardsPerDaySpinner), newCardsPerDaySpinner);
+            Widgets.formLabel(tr("review.newPerDay"), newCardsPerDaySpinner), newCardsPerDaySpinner);
         sessionBox.setAlignment(Pos.CENTER_LEFT);
 
         reviewWordLabel.setId("reviewWordLabel");
@@ -288,14 +291,14 @@ public final class ReviewView {
         reviewMetaLabel.setId("reviewMetaLabel");
         reviewMetaLabel.getStyleClass().add("secondary-text");
         answerField.setId("answerField");
-        answerField.setAccessibleText("Your answer");
-        answerField.setPromptText("Enter Chinese meaning");
+        answerField.setAccessibleText(tr("review.answer.accessible"));
+        answerField.setPromptText(Labels.modePrompt(ReviewMode.EN_TO_ZH));
         answerField.setPrefWidth(420);
         answerField.textProperty().addListener((observable, oldText, newText) -> presenter.setAnswer(newText));
         submitAnswerButton.setId("submitAnswerButton");
-        submitAnswerButton.setTooltip(new Tooltip("Press Enter in the answer field"));
-        submitAnswerButton.setOnAction(event -> context.errors().guard("Submit answer failed", presenter::submit));
-        answerField.setOnAction(event -> context.errors().guard("Submit answer failed", presenter::submit));
+        submitAnswerButton.setTooltip(new Tooltip(tr("review.submit.tooltip")));
+        submitAnswerButton.setOnAction(event -> context.errors().guard(tr("review.submit.failed"), presenter::submit));
+        answerField.setOnAction(event -> context.errors().guard(tr("review.submit.failed"), presenter::submit));
 
         reviewResultArea.setId("reviewResultArea");
         reviewResultArea.setEditable(false);
@@ -303,11 +306,11 @@ public final class ReviewView {
         reviewResultArea.setPrefRowCount(8);
         // On a short window the result shrinks to a few lines before the tab has to scroll.
         reviewResultArea.setMinHeight(70);
-        reviewResultArea.setAccessibleText("Answer check and explanation");
+        reviewResultArea.setAccessibleText(tr("review.result.accessible"));
         regenerateExplanationButton.setId("regenerateExplanationButton");
-        regenerateExplanationButton.setTooltip(new Tooltip("Ask the AI provider again, ignoring the cached explanation"));
+        regenerateExplanationButton.setTooltip(new Tooltip(tr("review.regenerate.tooltip")));
         regenerateExplanationButton.setOnAction(event -> {
-            context.errors().guard("Regenerate explanation failed", presenter::regenerateExplanation);
+            context.errors().guard(tr("review.regenerate.failed"), presenter::regenerateExplanation);
             // The button is disabled while the provider answers, which would pass the focus on to
             // Again, where Space would rate Again; keep the keyboard on the suggested rating, as after Submit.
             presenter.suggestedRating().ifPresent(rating -> ratingButtonsByRating.get(rating).requestFocus());
@@ -327,8 +330,7 @@ public final class ReviewView {
             ratingButtons.getChildren().add(ratingButton(rating));
         }
         overrideButton.setId("overrideButton");
-        overrideButton.setTooltip(new Tooltip("我答对了: the answer check capped your rating."
-            + " Count the rating you choose as it is instead."));
+        overrideButton.setTooltip(new Tooltip(tr("review.override.tooltip")));
         overrideButton.setOnAction(event -> presenter.setOverridden(overrideButton.isSelected()));
         HBox.setMargin(overrideButton, new Insets(0, 0, 0, 16));
         ratingButtons.getChildren().add(overrideButton);
@@ -369,16 +371,14 @@ public final class ReviewView {
     /** Already known, Suspend and Undo, next to the answer field. */
     private void configureCardActions() {
         knownButton.setId("knownButton");
-        knownButton.setTooltip(new Tooltip("已掌握: you know this new word already. It skips learning and comes back"
-            + " for a review in about two months."));
-        knownButton.setOnAction(event -> context.errors().guard("Mark as known failed", presenter::markKnown));
+        knownButton.setTooltip(new Tooltip(tr("review.known.tooltip")));
+        knownButton.setOnAction(event -> context.errors().guard(tr("review.known.failed"), presenter::markKnown));
         suspendButton.setId("suspendCardButton");
-        suspendButton.setTooltip(new Tooltip("暂停: stop reviewing this word, keeping it and its history."
-            + " Unsuspend it in the Word List."));
-        suspendButton.setOnAction(event -> context.errors().guard("Suspend failed", presenter::suspendCard));
+        suspendButton.setTooltip(new Tooltip(tr("review.suspend.tooltip")));
+        suspendButton.setOnAction(event -> context.errors().guard(tr("review.suspend.failed"), presenter::suspendCard));
         undoButton.setId("undoButton");
         undoButton.setTooltip(undoTooltip);
-        undoButton.setOnAction(event -> context.errors().guard("Undo failed", presenter::undo));
+        undoButton.setOnAction(event -> context.errors().guard(tr("review.undo.failed"), presenter::undo));
     }
 
     /** The notice under the result when a rating made a card a leech: Suspend, and a memory aid from the AI. */
@@ -387,11 +387,11 @@ public final class ReviewView {
         leechNoticeLabel.setWrapText(true);
         leechNoticeLabel.getStyleClass().add("leech-notice");
         suspendLeechButton.setId("suspendLeechButton");
-        suspendLeechButton.setTooltip(new Tooltip("暂停: stop reviewing this leech for now, keeping its history"));
-        suspendLeechButton.setOnAction(event -> context.errors().guard("Suspend failed", presenter::suspendLeech));
+        suspendLeechButton.setTooltip(new Tooltip(tr("review.suspendLeech.tooltip")));
+        suspendLeechButton.setOnAction(event -> context.errors().guard(tr("review.suspend.failed"), presenter::suspendLeech));
         memoryAidButton.setId("memoryAidButton");
-        memoryAidButton.setTooltip(new Tooltip("Ask the AI provider for a mnemonic for this word"));
-        memoryAidButton.setOnAction(event -> context.errors().guard("Memory aid failed", presenter::requestMemoryAid));
+        memoryAidButton.setTooltip(new Tooltip(tr("review.memoryAid.tooltip")));
+        memoryAidButton.setOnAction(event -> context.errors().guard(tr("review.memoryAid.failed"), presenter::requestMemoryAid));
         memoryAidButton.managedProperty().bind(memoryAidButton.visibleProperty());
         memoryAidLabel.setId("memoryAidLabel");
         memoryAidLabel.setWrapText(true);
@@ -415,10 +415,12 @@ public final class ReviewView {
     private void configureSessionSize() {
         sessionSizeSelector.setId("sessionSizeSelector");
         sessionSizeSelector.getItems().setAll(sessionSizeChoices());
+        sessionSizeSelector.setCellFactory(list -> sessionSizeCell());
+        sessionSizeSelector.setButtonCell(sessionSizeCell());
         sessionSizeSelector.getSelectionModel().select(presenter.sessionSizeChoice());
         customSessionSizeField.setId("customSessionSizeField");
         customSessionSizeField.setPromptText("1-" + ReviewSessionPresenter.MAX_CUSTOM_SESSION_SIZE);
-        customSessionSizeField.setAccessibleText("Custom session size");
+        customSessionSizeField.setAccessibleText(tr("review.size.customAccessible"));
         customSessionSizeField.setPrefWidth(90);
         customSessionSizeField.setTextFormatter(new TextFormatter<String>(change ->
             change.getControlNewText().matches("\\d{0,3}") ? change : null));
@@ -435,12 +437,12 @@ public final class ReviewView {
                 int start = target > 0 ? target : ReviewSessionPresenter.DEFAULT_SESSION_SIZE;
                 customSessionSizeField.setText(String.valueOf(start));
             }
-            context.errors().guard("Change session size failed",
+            context.errors().guard(tr("review.size.failed"),
                 () -> presenter.selectSessionSize(newValue, customSessionSizeField.getText()));
         });
         customSessionSizeField.textProperty().addListener((observable, oldText, newText) -> {
             if (!rendering && ReviewSessionPresenter.CUSTOM.equals(sessionSizeSelector.getValue())) {
-                context.errors().guard("Change session size failed",
+                context.errors().guard(tr("review.size.failed"),
                     () -> presenter.selectSessionSize(ReviewSessionPresenter.CUSTOM, newText));
             }
         });
@@ -471,7 +473,7 @@ public final class ReviewView {
         newCardsPerDaySpinner.setValueFactory(newCardsPerDay);
         newCardsPerDaySpinner.setEditable(true);
         newCardsPerDaySpinner.setPrefWidth(90);
-        newCardsPerDaySpinner.setTooltip(new Tooltip("The most new words this deck introduces per study day"));
+        newCardsPerDaySpinner.setTooltip(new Tooltip(tr("review.newPerDay.tooltip")));
         newCardsPerDaySpinner.getEditor().setTextFormatter(new TextFormatter<String>(change ->
             change.getControlNewText().matches("\\d{0,4}") ? change : null));
         // A typed value counts after Enter and when the field loses the focus.
@@ -484,7 +486,7 @@ public final class ReviewView {
         });
         newCardsPerDaySpinner.valueProperty().addListener((observable, oldValue, newValue) -> {
             if (!rendering && newValue != null) {
-                context.errors().guard("Change new words per day failed", () -> presenter.setNewCardsPerDay(newValue));
+                context.errors().guard(tr("review.newPerDay.failed"), () -> presenter.setNewCardsPerDay(newValue));
             }
         });
     }
@@ -520,7 +522,17 @@ public final class ReviewView {
             @Override
             protected void updateItem(ReviewMode item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.getLabel());
+                setText(empty || item == null ? null : Labels.mode(item));
+            }
+        };
+    }
+
+    private static ListCell<String> sessionSizeCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(String choice, boolean empty) {
+                super.updateItem(choice, empty);
+                setText(empty || choice == null ? null : ReviewSessionPresenter.sessionSizeLabel(choice));
             }
         };
     }
@@ -530,7 +542,7 @@ public final class ReviewView {
      * the interval it gives, as in "Good (3) · 4d" or "Good (3) → Hard (53%) · 1d".
      */
     static String ratingButtonText(ReviewRating rating, String countsAs, String preview) {
-        String text = rating.getLabel() + " (" + shortcutKey(rating) + ")";
+        String text = tr("review.ratingButton", Labels.rating(rating), shortcutKey(rating));
         if (!countsAs.isEmpty()) {
             text += " → " + countsAs;
         }
@@ -542,7 +554,8 @@ public final class ReviewView {
         Button button = new Button(ratingButtonText(rating, "", ""));
         button.setId(ratingButtonId(rating));
         button.setMinWidth(90);
-        button.setTooltip(new Tooltip(rating == ReviewRating.GOOD ? "Press " + key + " or Space" : "Press " + key));
+        button.setTooltip(new Tooltip(rating == ReviewRating.GOOD ? tr("review.ratingButton.tooltipGood", key)
+            : tr("review.ratingButton.tooltip", key)));
         button.setOnAction(event -> presenter.rate(rating));
         ratingButtonsByRating.put(rating, button);
         return button;
@@ -592,7 +605,8 @@ public final class ReviewView {
         knownButton.setDisable(!presenter.canMarkKnown());
         suspendButton.setDisable(!presenter.canSuspend());
         undoButton.setDisable(!presenter.canUndo());
-        undoTooltip.setText(presenter.canUndo() ? presenter.undoDescription() + " (Ctrl+Z)" : "Nothing to undo");
+        undoTooltip.setText(presenter.canUndo() ? tr("review.undo.tooltip", presenter.undoDescription())
+            : tr("review.undo.nothing"));
         showIf(leechBox, presenter.leech().isPresent());
         leechNoticeLabel.setText(presenter.leechNotice());
         suspendLeechButton.setDisable(!presenter.canSuspendLeech());

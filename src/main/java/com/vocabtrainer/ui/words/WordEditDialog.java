@@ -16,6 +16,8 @@ import javafx.scene.layout.Region;
 import java.sql.SQLException;
 import java.util.Optional;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Edits one word's text fields in a modal form; the review schedule is left alone. OK checks the
  * input and saves it while the form is still open: a mistake, an English word another word of the
@@ -44,7 +46,7 @@ final class WordEditDialog {
         TextField tagsField = field("editTagsField", word.getTags());
         TextArea exampleArea = area("editExampleArea", word.getExampleSentence());
         TextArea noteArea = area("editNoteArea", word.getNote());
-        phoneticField.setPromptText("e.g. /əˈbeɪt/");
+        phoneticField.setPromptText(tr("words.edit.phoneticPrompt"));
         Label problemLabel = new Label();
         problemLabel.setId("editWordProblemLabel");
         problemLabel.getStyleClass().add("form-error");
@@ -57,23 +59,23 @@ final class WordEditDialog {
         GridPane form = new GridPane();
         form.setHgap(10);
         form.setVgap(10);
-        form.add(Widgets.formLabel("_English", englishField), 0, 0);
+        form.add(Widgets.formLabel(tr("add.label.english"), englishField), 0, 0);
         form.add(englishField, 1, 0);
-        form.add(Widgets.formLabel("_Chinese", chineseField), 0, 1);
+        form.add(Widgets.formLabel(tr("add.label.chinese"), chineseField), 0, 1);
         form.add(chineseField, 1, 1);
-        form.add(Widgets.formLabel("_Phonetic", phoneticField), 0, 2);
+        form.add(Widgets.formLabel(tr("add.label.phonetic"), phoneticField), 0, 2);
         form.add(phoneticField, 1, 2);
-        form.add(Widgets.formLabel("P_OS", posField), 0, 3);
+        form.add(Widgets.formLabel(tr("add.label.pos"), posField), 0, 3);
         form.add(posField, 1, 3);
-        form.add(Widgets.formLabel("_Tags", tagsField), 0, 4);
+        form.add(Widgets.formLabel(tr("add.label.tags"), tagsField), 0, 4);
         form.add(tagsField, 1, 4);
-        form.add(Widgets.formLabel("E_xample", exampleArea), 0, 5);
+        form.add(Widgets.formLabel(tr("add.label.example"), exampleArea), 0, 5);
         form.add(exampleArea, 1, 5);
-        form.add(Widgets.formLabel("_Notes", noteArea), 0, 6);
+        form.add(Widgets.formLabel(tr("add.label.notes"), noteArea), 0, 6);
         form.add(noteArea, 1, 6);
         form.add(problemLabel, 1, 7);
 
-        return context.dialogs().showForm("Edit word", form, () -> {
+        return context.dialogs().showForm(tr("words.edit.title"), form, () -> {
             Optional<String> problem = save(word, new FormInput(englishField.getText(), chineseField.getText(),
                 phoneticField.getText(), posField.getText(), exampleArea.getText(), noteArea.getText(),
                 tagsField.getText()));
@@ -99,17 +101,15 @@ final class WordEditDialog {
         try {
             Optional<WordCard> duplicate = wordRepository.findByEnglish(word.getDeckId(), validated.english());
             if (duplicate.isPresent() && duplicate.get().getId() != word.getId()) {
-                return Optional.of("Another word in this deck is already \"" + duplicate.get().getEnglish()
-                    + "\": change the English word, or Cancel.");
+                return Optional.of(tr("words.edit.duplicate", duplicate.get().getEnglish()));
             }
             if (!wordRepository.updateText(word.getId(), validated)) {
-                return Optional.of("This word is no longer in the database, so nothing was saved. Cancel to close.");
+                return Optional.of(tr("words.edit.gone"));
             }
             return Optional.empty();
         } catch (SQLException | RuntimeException e) {
-            context.errors().logFailure("Save word failed", e);
-            return Optional.of("Could not save: " + UiErrors.rootMessage(e)
-                + " Your changes are still here: press OK to try again, or Cancel.");
+            context.errors().logFailure(tr("words.edit.failed"), e);
+            return Optional.of(tr("words.edit.saveFailed", UiErrors.rootMessage(e)));
         }
     }
 

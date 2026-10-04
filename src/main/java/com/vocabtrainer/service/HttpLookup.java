@@ -20,6 +20,8 @@ import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Sends the online dictionaries' requests and sorts out how each one ended: the body of a 2xx
  * answer, or a lookup result that says why there is none (not found, refused, rate limited, timed
@@ -80,13 +82,13 @@ final class HttpLookup {
         } catch (HttpTimeoutException e) {
             LOGGER.log(Level.WARNING, dictionary + " did not answer " + request.uri() + " in time", e);
             return failed(LookupOutcome.TIMEOUT,
-                dictionary + "：" + seconds(request.timeout().orElse(REQUEST_TIMEOUT)) + " 秒内没有响应。");
+                tr("dictionary.http.timeout", dictionary, seconds(request.timeout().orElse(REQUEST_TIMEOUT))));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return new Reply(null, DictionaryLookupResult.interrupted());
         } catch (IOException e) {
             LOGGER.log(Level.WARNING, "Cannot reach " + dictionary + " at " + request.uri(), e);
-            return failed(LookupOutcome.NETWORK_ERROR, dictionary + "：无法连接（" + ErrorMessages.rootMessage(e) + "）。");
+            return failed(LookupOutcome.NETWORK_ERROR, tr("dictionary.http.network", dictionary, ErrorMessages.rootMessage(e)));
         }
         int status = response.statusCode();
         if (status >= 200 && status < 300) {
@@ -97,17 +99,17 @@ final class HttpLookup {
         }
         LOGGER.warning(dictionary + " answered HTTP " + status + " for " + request.uri());
         if (status == 401 || status == 403) {
-            return failed(LookupOutcome.AUTH_ERROR, dictionary + "：拒绝了请求（HTTP " + status + "）。");
+            return failed(LookupOutcome.AUTH_ERROR, tr("dictionary.http.refused", dictionary, String.valueOf(status)));
         }
         if (status >= 300 && status < 400) {
-            return failed(LookupOutcome.SERVICE_ERROR, dictionary + "：服务器把请求转到了另一个地址（HTTP " + status
-                + "），没有跟随。");
+            return failed(LookupOutcome.SERVICE_ERROR, tr("dictionary.http.redirect", dictionary, String.valueOf(status)));
         }
         if (status == 429) {
-            return failed(LookupOutcome.RATE_LIMITED, dictionary + "：查询次数受限（HTTP 429）"
-                + retryAfter(response).map(seconds -> "，请在 " + seconds + " 秒后再试。").orElse("，请稍后再试。"));
+            return failed(LookupOutcome.RATE_LIMITED, retryAfter(response)
+                .map(seconds -> tr("dictionary.http.rateLimitedFor", dictionary, String.valueOf(seconds)))
+                .orElse(tr("dictionary.http.rateLimited", dictionary)));
         }
-        return failed(LookupOutcome.SERVICE_ERROR, dictionary + "：服务出错（HTTP " + status + "）。");
+        return failed(LookupOutcome.SERVICE_ERROR, tr("dictionary.http.serviceError", dictionary, String.valueOf(status)));
     }
 
     /** {@code word} as one URL path segment: every reserved character and space percent-encoded. */

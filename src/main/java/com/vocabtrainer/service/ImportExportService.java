@@ -16,6 +16,7 @@ import com.vocabtrainer.service.wordlist.HtmlText;
 import com.vocabtrainer.service.wordlist.WordListFile;
 import com.vocabtrainer.util.DateTimeUtil;
 import com.vocabtrainer.util.ErrorMessages;
+import com.vocabtrainer.util.Messages;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -41,6 +42,8 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Imports word lists into a deck and exports a deck's words for other apps.
  *
@@ -63,11 +66,6 @@ public class ImportExportService {
     static final int MAX_LISTED_MESSAGES = 100;
     /** Rows the preview shows as they would be imported. */
     static final int PREVIEW_ROWS = 8;
-    private static final String LOCAL_DICTIONARY = "the local dictionary";
-    private static final String ALL_DICTIONARIES = "the local and online dictionaries";
-    /** What the preview says will happen to a row. */
-    private static final String NEEDS_MEANING = "Needs a meaning";
-    private static final String IMPORT = "Import";
 
     private final WordRepository wordRepository;
     private final WordValidationService validationService;
@@ -110,7 +108,7 @@ public class ImportExportService {
                 return importLegacyTxt(reader, encoding, deckId);
             }
         } catch (IOException e) {
-            throw new IllegalStateException(cannotRead("import file", path, e), e);
+            throw new IllegalStateException(cannotRead(tr("import.what.importFile"), path, e), e);
         }
     }
 
@@ -140,14 +138,14 @@ public class ImportExportService {
                 analysis.messages.toList().stream().limit(10).toList(),
                 file.encodingName(),
                 file.delimiterName(),
-                analysis.columns.describe() + analysis.layout,
+                tr("import.columns.layout", analysis.columns.describe(), analysis.layout),
                 file.anki().describe(),
                 analysis.columns,
                 file.columns(),
                 previewRows(analysis, options)
             );
         } catch (IOException e) {
-            throw new IllegalStateException(cannotRead("word list", path, e), e);
+            throw new IllegalStateException(cannotRead(tr("import.what.wordList"), path, e), e);
         }
     }
 
@@ -163,19 +161,19 @@ public class ImportExportService {
         try (WordListFile file = WordListFile.open(path)) {
             return importWordList(file, deckId, options, progress, cancelled);
         } catch (IOException e) {
-            throw new IllegalStateException(cannotRead("word list", path, e), e);
+            throw new IllegalStateException(cannotRead(tr("import.what.wordList"), path, e), e);
         }
     }
 
     public ImportResult importBundledGreStarter(long deckId) {
         InputStream stream = ImportExportService.class.getResourceAsStream(GRE_STARTER_RESOURCE);
         if (stream == null) {
-            throw new IllegalStateException("Bundled GRE starter deck is missing: " + GRE_STARTER_RESOURCE);
+            throw new IllegalStateException(tr("import.starter.missing", GRE_STARTER_RESOURCE));
         }
         try (InputStream in = stream; WordListFile file = WordListFile.open(in, StandardCharsets.UTF_8)) {
             return importWordList(file, deckId, WordListOptions.DETECT, progress -> { }, () -> false);
         } catch (IOException e) {
-            throw new IllegalStateException("Cannot read bundled GRE starter deck: " + reason(e), e);
+            throw new IllegalStateException(tr("import.starter.unreadable", reason(e)), e);
         }
     }
 
@@ -202,9 +200,9 @@ public class ImportExportService {
             }
             return output;
         } catch (IOException e) {
-            throw new IllegalStateException(cannotWrite("Anki export", output, e), e);
+            throw new IllegalStateException(cannotWrite(tr("import.what.ankiExport"), output, e), e);
         } catch (SQLException e) {
-            throw new IllegalStateException("Cannot read the deck's words: " + ErrorMessages.rootMessage(e), e);
+            throw new IllegalStateException(tr("import.error.readDeck", ErrorMessages.rootMessage(e)), e);
         }
     }
 
@@ -224,9 +222,9 @@ public class ImportExportService {
             }
             return output;
         } catch (IOException e) {
-            throw new IllegalStateException(cannotWrite("word list", output, e), e);
+            throw new IllegalStateException(cannotWrite(tr("import.what.wordList"), output, e), e);
         } catch (SQLException e) {
-            throw new IllegalStateException("Cannot read the deck's words: " + ErrorMessages.rootMessage(e), e);
+            throw new IllegalStateException(tr("import.error.readDeck", ErrorMessages.rootMessage(e)), e);
         }
     }
 
@@ -248,7 +246,7 @@ public class ImportExportService {
             try {
                 line = reader.readLine();
             } catch (CharacterCodingException e) {
-                throw new IOException("Line " + (lineNumber + 1) + ": " + encoding.undecodableMessage(), e);
+                throw new IOException(tr("csv.line", lineNumber + 1, encoding.undecodableMessage()), e);
             }
             if (line == null) {
                 break;
@@ -264,7 +262,7 @@ public class ImportExportService {
                 WordCard card = parseLegacyLine(line, deckId);
                 if (known.contains(key(card.getEnglish()))) {
                     skipped++;
-                    messages.add("Line " + lineNumber + " skipped: duplicate word " + card.getEnglish());
+                    messages.add(duplicate(lineNumber, card.getEnglish()));
                     continue;
                 }
                 wordRepository.insert(card);
@@ -272,7 +270,7 @@ public class ImportExportService {
                 imported++;
             } catch (IllegalArgumentException | SQLException e) {
                 skipped++;
-                messages.add("Line " + lineNumber + " skipped: " + e.getMessage());
+                messages.add(skippedLine(lineNumber, e.getMessage()));
             }
         }
         return new ImportResult(imported, skipped, messages.toList());
@@ -282,7 +280,7 @@ public class ImportExportService {
                                         Consumer<ImportProgress> progress, BooleanSupplier cancelled)
         throws IOException {
         DictionaryService dictionary = dictionaryFor(options);
-        String dictionaryName = dictionary == localDictionary ? LOCAL_DICTIONARY : ALL_DICTIONARIES;
+        String dictionaryName = dictionary == localDictionary ? tr("import.dictionary.local") : tr("import.dictionary.all");
         Analysis analysis = analyze(file, deckId, options, dictionary != null, cancelled);
         int toLookUp = analysis.pendingCount();
         int lookedUp = 0;
@@ -307,7 +305,7 @@ public class ImportExportService {
                 ready.add(row);
             } catch (IllegalArgumentException e) {
                 skipped++;
-                analysis.messages.add("Line " + row.line + " skipped: " + e.getMessage());
+                analysis.messages.add(skippedLine(row.line, e.getMessage()));
             }
         }
         // The lookups can take minutes online, and the user can add a word meanwhile; a word
@@ -317,8 +315,7 @@ public class ImportExportService {
         for (Row row : ready) {
             if (inDeck.contains(key(row.english))) {
                 skipped++;
-                analysis.messages.add("Line " + row.line + " skipped: duplicate word " + row.english
-                    + " (added to the deck during the import)");
+                analysis.messages.add(tr("import.row.addedMeanwhile", row.line, row.english));
             } else {
                 stillNew.add(row);
             }
@@ -330,7 +327,7 @@ public class ImportExportService {
             return new ImportResult(imported, skipped, analysis.messagesWithNotes(), filled,
                 filled > 0 ? dictionaryName : "");
         } catch (SQLException e) {
-            throw new IllegalStateException("The import transaction failed: " + ErrorMessages.rootMessage(e), e);
+            throw new IllegalStateException(tr("import.error.transaction", ErrorMessages.rootMessage(e)), e);
         }
     }
 
@@ -353,32 +350,31 @@ public class ImportExportService {
     private WordCard wordFromDictionary(Row row, DictionaryLookupResult result, long deckId, String dictionaryName) {
         if (!result.success()) {
             throw new IllegalArgumentException(result.unavailable()
-                ? row.english + " could not be looked up (" + result.message() + ")"
-                : row.english + " is not in " + dictionaryName + ", so it has no meaning to import");
+                ? tr("import.row.lookupFailed", row.english, result.message())
+                : tr("import.row.notInDictionary", row.english, dictionaryName));
         }
         DictionaryEntry entry = result.entries().stream()
             .filter(candidate -> candidate.chinese() != null && !candidate.chinese().isBlank())
             .findFirst()
-            .orElseThrow(() -> new IllegalArgumentException(
-                "the dictionaries have only an English definition of " + row.english + ", no Chinese meaning"));
+            .orElseThrow(() -> new IllegalArgumentException(tr("import.row.englishOnly", row.english)));
         List<String> note = new ArrayList<>();
         if (!row.fields.get(WordColumn.NOTE).isBlank()) {
             note.add(row.fields.get(WordColumn.NOTE));
         }
         if (!entry.english().equalsIgnoreCase(row.english)) {
-            note.add("Meaning of its base form " + entry.english() + ".");
+            note.add(tr("import.note.baseForm", entry.english()));
         }
         if (entry.note() != null && !entry.note().isBlank()) {
             note.add(entry.note());
         }
-        note.add("Meaning from " + entry.source() + ".");
+        note.add(tr("import.note.source", LocalDictionaryService.sourceLabel(entry.source())));
         ValidatedWord validated = validationService.validate(
             row.english,
             entry.chinese(),
             orElse(row.fields.get(WordColumn.PHONETIC), entry.phonetic()),
             orElse(row.fields.get(WordColumn.POS), entry.partOfSpeech()),
             orElse(row.fields.get(WordColumn.EXAMPLE), entry.example()),
-            String.join(" ", note),
+            Messages.sentences(note),
             row.fields.get(WordColumn.TAGS));
         return newWord(deckId, validated);
     }
@@ -399,9 +395,9 @@ public class ImportExportService {
         String layout;
         if (options.chosenColumns().isPresent()) {
             columns = options.columns();
-            layout = " (chosen)";
+            layout = tr("import.layout.chosen");
             if (!columns.has(WordColumn.ENGLISH)) {
-                throw new IllegalArgumentException("Choose the column that holds the English word.");
+                throw new IllegalArgumentException(tr("import.error.chooseEnglish"));
             }
         } else {
             columns = file.detectColumns();
@@ -453,18 +449,19 @@ public class ImportExportService {
                 row.english = english;
                 if (!seen.add(key(english))) {
                     row.word = null;
-                    row.status = "Duplicate";
+                    row.status = tr("import.row.duplicate");
                     analysis.skipped++;
                     analysis.duplicates++;
-                    analysis.messages.add("Line " + row.line + " skipped: duplicate word " + english);
+                    analysis.messages.add(duplicate(row.line, english));
                     continue;
                 }
-                row.status = needsMeaning ? NEEDS_MEANING : IMPORT;
+                row.needsMeaning = needsMeaning;
+                row.status = needsMeaning ? tr("import.row.needsMeaning") : tr("import.row.import");
                 analysis.rows.add(row);
             } catch (IllegalArgumentException e) {
                 row.status = e.getMessage();
                 analysis.skipped++;
-                analysis.messages.add("Line " + row.line + " skipped: " + e.getMessage());
+                analysis.messages.add(skippedLine(row.line, e.getMessage()));
             }
         }
         return analysis;
@@ -485,7 +482,7 @@ public class ImportExportService {
             String status = row.status;
             if (row.word != null) {
                 chinese = row.word.getChinese();
-            } else if (NEEDS_MEANING.equals(status)) {
+            } else if (row.needsMeaning) {
                 DictionaryLookupResult result = localDictionary == null
                     ? DictionaryLookupResult.notFound("")
                     : localDictionary.lookup(row.english);
@@ -496,10 +493,9 @@ public class ImportExportService {
                     chinese = entry.get().chinese();
                     pos = orElse(pos, entry.get().partOfSpeech());
                     phonetic = orElse(phonetic, entry.get().phonetic());
-                    status = "Meaning from " + entry.get().source();
+                    status = tr("import.row.meaningFrom", LocalDictionaryService.sourceLabel(entry.get().source()));
                 } else {
-                    status = online ? "Not in the local dictionary: looked up online"
-                        : "Not in the local dictionary: skipped";
+                    status = online ? tr("import.row.lookUpOnline") : tr("import.row.notLocal");
                 }
             }
             rows.add(new ImportPreview.Row(row.line, fields.get(WordColumn.ENGLISH), chinese, pos, phonetic,
@@ -520,8 +516,8 @@ public class ImportExportService {
 
     private static void requireColumn(WordColumns columns, WordColumn column, CsvRecord header) {
         if (!columns.has(column)) {
-            throw new IllegalArgumentException("The header row (line " + header.lineNumber() + ") has no "
-                + column.headerName() + " column. Name it one of: " + String.join(", ", column.aliases()) + ".");
+            throw new IllegalArgumentException(tr("import.error.headerColumn", header.lineNumber(), column.headerName(),
+                String.join(", ", column.aliases())));
         }
     }
 
@@ -529,7 +525,7 @@ public class ImportExportService {
         try {
             return wordRepository.findEnglishKeys(deckId);
         } catch (SQLException e) {
-            throw new IllegalStateException("Cannot read the deck's words: " + ErrorMessages.rootMessage(e), e);
+            throw new IllegalStateException(tr("import.error.readDeck", ErrorMessages.rootMessage(e)), e);
         }
     }
 
@@ -538,19 +534,28 @@ public class ImportExportService {
     }
 
     private static String cannotRead(String what, Path path, IOException e) {
-        return "Cannot read " + what + " " + path + ": " + reason(e);
+        return tr("import.error.read", what, path.toString(), reason(e));
     }
 
     private static String cannotWrite(String what, Path path, IOException e) {
-        return "Cannot write the " + what + " " + path + ": " + reason(e);
+        return tr("import.error.write", what, path.toString(), reason(e));
+    }
+
+    /** "Line 12 skipped: {@code reason}". */
+    private static String skippedLine(int line, String reason) {
+        return tr("import.row.skipped", line, reason);
+    }
+
+    private static String duplicate(int line, String english) {
+        return tr("import.row.skippedDuplicate", line, english);
     }
 
     private static String reason(IOException e) {
         if (e instanceof NoSuchFileException) {
-            return "the file does not exist";
+            return tr("import.error.noFile");
         }
         if (e instanceof AccessDeniedException) {
-            return "access to the file was denied";
+            return tr("import.error.accessDenied");
         }
         String message = e.getMessage();
         return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
@@ -574,7 +579,7 @@ public class ImportExportService {
                 return listed;
             }
             List<String> all = new ArrayList<>(listed);
-            all.add("... and " + unlisted + " more rows skipped.");
+            all.add(tr("import.row.moreSkipped", unlisted));
             return all;
         }
     }
@@ -587,6 +592,8 @@ public class ImportExportService {
         WordCard word;
         /** True when the word's meaning came from the dictionary. */
         boolean filled;
+        /** True when the row has no meaning and waits for the dictionary's. */
+        boolean needsMeaning;
         String status = "";
 
         Row(int line, Map<WordColumn, String> fields) {
@@ -631,7 +638,7 @@ public class ImportExportService {
         List<String> messagesWithNotes() {
             List<String> all = new ArrayList<>(messages.toList());
             if (stoppedAtLimit) {
-                all.add("GRE import stopped at " + MAX_GRE_IMPORT_WORDS + " imported words.");
+                all.add(tr("import.stoppedAtLimit", MAX_GRE_IMPORT_WORDS));
             }
             return all;
         }
@@ -640,7 +647,7 @@ public class ImportExportService {
     private WordCard parseLegacyLine(String line, long deckId) {
         String[] parts = line.split(";", -1);
         if (parts.length != 7) {
-            throw new IllegalArgumentException("field count is not 7");
+            throw new IllegalArgumentException(tr("import.legacy.fieldCount"));
         }
         ValidatedWord validated = validationService.validate(parts[0], parts[1]);
         try {
@@ -664,9 +671,9 @@ public class ImportExportService {
             }
             return card;
         } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException("date format is invalid (" + e.getMessage() + ")", e);
+            throw new IllegalArgumentException(tr("import.legacy.date", e.getMessage()), e);
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("review parameters must be numeric (" + e.getMessage() + ")", e);
+            throw new IllegalArgumentException(tr("import.legacy.numbers", e.getMessage()), e);
         }
     }
 }

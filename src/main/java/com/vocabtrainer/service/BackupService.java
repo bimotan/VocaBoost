@@ -48,6 +48,8 @@ import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 public class BackupService {
     private static final Logger LOGGER = Logger.getLogger(BackupService.class.getName());
 
@@ -125,7 +127,7 @@ public class BackupService {
             }
             return outputPath;
         } catch (IOException | SQLException e) {
-            throw new IllegalStateException("无法导出单词 CSV", e);
+            throw new IllegalStateException(tr("backup.error.exportWords"), e);
         }
     }
 
@@ -153,7 +155,7 @@ public class BackupService {
             }
             return outputPath;
         } catch (IOException | SQLException e) {
-            throw new IllegalStateException("无法导出复习记录 CSV", e);
+            throw new IllegalStateException(tr("backup.error.exportLogs"), e);
         }
     }
 
@@ -194,7 +196,7 @@ public class BackupService {
             Files.writeString(outputPath, objectMapper.writeValueAsString(backup), StandardCharsets.UTF_8);
             return outputPath;
         } catch (IOException | SQLException e) {
-            throw new IllegalStateException("无法导出 JSON 备份", e);
+            throw new IllegalStateException(tr("backup.error.export"), e);
         }
     }
 
@@ -214,7 +216,7 @@ public class BackupService {
         try {
             tally = databaseManager.inTransaction(() -> restore(root, version, deckId, policy));
         } catch (SQLException e) {
-            throw new IllegalStateException("无法恢复 JSON 备份，数据库未作任何更改", e);
+            throw new IllegalStateException(tr("backup.error.restore"), e);
         }
         if (!tally.invalidRows.isEmpty()) {
             LOGGER.log(Level.WARNING, "Skipped " + tally.invalidRows.size() + " invalid row(s) while restoring "
@@ -302,21 +304,20 @@ public class BackupService {
         try (InputStream input = Files.newInputStream(inputPath)) {
             return objectMapper.readTree(input);
         } catch (IOException e) {
-            throw new IllegalStateException("无法读取 JSON 备份", e);
+            throw new IllegalStateException(tr("backup.error.read"), e);
         }
     }
 
     private int formatVersion(JsonNode root) {
         if (root == null || !root.isObject() || !root.path("words").isArray()
             || (root.hasNonNull("format") && !BackupFile.FORMAT.equals(root.get("format").asText()))) {
-            throw new IllegalArgumentException("This file is not a VocaBoost JSON backup.");
+            throw new IllegalArgumentException(tr("backup.error.notBackup"));
         }
         JsonNode version = root.get("version");
         // Version 1 files may lack the field; their writer also put numbers in strings.
         int number = version == null || version.isNull() ? 1 : version.asInt(-1);
         if (number < 1 || number > BackupFile.VERSION) {
-            throw new IllegalArgumentException("Unsupported backup version " + version.asText()
-                + "; this VocaBoost reads versions 1 to " + BackupFile.VERSION + ".");
+            throw new IllegalArgumentException(tr("backup.error.version", version.asText(), BackupFile.VERSION));
         }
         return number;
     }
@@ -331,11 +332,11 @@ public class BackupService {
 
         Set<String> restoredWords = new HashSet<>();
         List<WordCard> withoutCardState = new ArrayList<>();
-        restoreRows(root, "words", "Word", tally,
+        restoreRows(root, "words", tr("backup.row.word"), tally,
             row -> restoreWord(row, deckId, policy, deckWords, restoredWords, withoutCardState, tally));
 
         List<ReviewLog> logs = new ArrayList<>();
-        restoreRows(root, "reviewLogs", "Review log", tally, row -> logs.add(reviewLog(row, deckWords)));
+        restoreRows(root, "reviewLogs", tr("backup.row.reviewLog"), tally, row -> logs.add(reviewLog(row, deckWords)));
         // A log with the same word, time and rating is the same review, already in the deck or earlier in the file.
         int logsInserted = reviewLogRepository.insertAllIfAbsent(logs);
         tally.logsInserted += logsInserted;
@@ -344,8 +345,9 @@ public class BackupService {
         for (WordCard word : withoutCardState) {
             cardStates.deriveAndSave(word);
         }
-        restoreRows(root, "dailyGoals", "Daily goal", tally, row -> restoreDailyGoal(row, deckId, tally));
-        restoreRows(root, "achievements", "Achievement", tally, row -> restoreAchievement(row, deckId, tally));
+        restoreRows(root, "dailyGoals", tr("backup.row.dailyGoal"), tally, row -> restoreDailyGoal(row, deckId, tally));
+        restoreRows(root, "achievements", tr("backup.row.achievement"), tally,
+            row -> restoreAchievement(row, deckId, tally));
         return tally;
     }
 
@@ -356,22 +358,22 @@ public class BackupService {
             return;
         }
         if (!rows.isArray()) {
-            tally.invalid("\"" + field + "\" is not a list", null);
+            tally.invalid(tr("backup.invalid.notList", field), null);
             return;
         }
         int index = 0;
         for (JsonNode row : rows) {
             index++;
             if (!row.isObject()) {
-                tally.invalid(rowName + " #" + index + ": not a JSON object", null);
+                tally.invalid(tr("backup.invalid.row", rowName, index, tr("backup.invalid.notObject")), null);
                 continue;
             }
             try {
                 restorer.restore(row);
             } catch (JsonProcessingException e) {
-                tally.invalid(rowName + " #" + index + rowLabel(row) + ": " + e.getOriginalMessage(), e);
+                tally.invalid(tr("backup.invalid.row", rowName, index + rowLabel(row), e.getOriginalMessage()), e);
             } catch (IllegalArgumentException e) {
-                tally.invalid(rowName + " #" + index + rowLabel(row) + ": " + e.getMessage(), e);
+                tally.invalid(tr("backup.invalid.row", rowName, index + rowLabel(row), e.getMessage()), e);
             }
         }
     }
@@ -386,7 +388,7 @@ public class BackupService {
         Schedule schedule = scheduleOf(entry);
         String key = wordKey(validated.english());
         if (!restoredWords.add(key)) {
-            throw new IllegalArgumentException("the word appears more than once in the backup");
+            throw new IllegalArgumentException(tr("backup.invalid.repeatedWord"));
         }
 
         WordCard existing = deckWords.get(key);
@@ -432,7 +434,7 @@ public class BackupService {
         }
         double easiness = entry.easinessFactor() == null ? WordCard.DEFAULT_EASINESS : entry.easinessFactor();
         if (!Double.isFinite(easiness) || easiness <= 0) {
-            throw new IllegalArgumentException("invalid easinessFactor " + easiness);
+            throw new IllegalArgumentException(tr("backup.invalid.value", "easinessFactor", String.valueOf(easiness)));
         }
         CardState state = cardState(entry.cardState());
         return new Schedule(
@@ -458,7 +460,7 @@ public class BackupService {
         try {
             return CardState.valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("unknown cardState \"" + value + "\"", e);
+            throw new IllegalArgumentException(tr("backup.invalid.unknown", "cardState", value), e);
         }
     }
 
@@ -467,7 +469,7 @@ public class BackupService {
             return 0;
         }
         if (!Double.isFinite(value) || value < 0) {
-            throw new IllegalArgumentException("invalid " + field + " " + value);
+            throw new IllegalArgumentException(tr("backup.invalid.value", field, String.valueOf(value)));
         }
         return value;
     }
@@ -477,19 +479,19 @@ public class BackupService {
         BackupFile.ReviewLogEntry entry = objectMapper.treeToValue(row, BackupFile.ReviewLogEntry.class);
         String english = validationService.normalizeEnglish(entry.english());
         if (english.isEmpty()) {
-            throw new IllegalArgumentException("missing english");
+            throw new IllegalArgumentException(tr("backup.invalid.missing", "english"));
         }
         WordCard word = deckWords.get(wordKey(english));
         if (word == null) {
-            throw new IllegalArgumentException("no word \"" + english + "\" in the backup or the deck");
+            throw new IllegalArgumentException(tr("backup.invalid.noWord", english));
         }
         LocalDateTime reviewedAt = dateTime(entry.reviewedAt(), "reviewedAt");
         if (reviewedAt == null) {
-            throw new IllegalArgumentException("missing reviewedAt");
+            throw new IllegalArgumentException(tr("backup.invalid.missing", "reviewedAt"));
         }
         ReviewRating rating = rating(entry.rating());
         if (entry.similarity() == null || !Double.isFinite(entry.similarity())) {
-            throw new IllegalArgumentException("missing or invalid similarity");
+            throw new IllegalArgumentException(tr("backup.invalid.missingOrInvalid", "similarity"));
         }
         return new ReviewLog(
             0,
@@ -515,7 +517,7 @@ public class BackupService {
         try {
             return ReviewKind.valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("unknown kind \"" + value + "\"", e);
+            throw new IllegalArgumentException(tr("backup.invalid.unknown", "kind", value), e);
         }
     }
 
@@ -530,20 +532,20 @@ public class BackupService {
                 return direction;
             }
         }
-        throw new IllegalArgumentException("unknown direction \"" + value + "\"");
+        throw new IllegalArgumentException(tr("backup.invalid.unknown", "direction", value));
     }
 
     private void restoreDailyGoal(JsonNode row, long deckId, RestoreTally tally)
         throws SQLException, JsonProcessingException {
         BackupFile.DailyGoalEntry entry = objectMapper.treeToValue(row, BackupFile.DailyGoalEntry.class);
         if (entry.date() == null || entry.date().isBlank()) {
-            throw new IllegalArgumentException("missing date");
+            throw new IllegalArgumentException(tr("backup.invalid.missing", "date"));
         }
         LocalDate date;
         try {
             date = LocalDate.parse(entry.date().trim());
         } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException("invalid date \"" + entry.date() + "\"", e);
+            throw new IllegalArgumentException(tr("backup.invalid.quoted", "date", entry.date()), e);
         }
         GoalRepository.GoalRow goal = new GoalRepository.GoalRow(
             deckId,
@@ -567,11 +569,11 @@ public class BackupService {
         BackupFile.AchievementEntry entry = objectMapper.treeToValue(row, BackupFile.AchievementEntry.class);
         String code = entry.code() == null ? "" : entry.code().trim();
         if (code.isEmpty()) {
-            throw new IllegalArgumentException("missing code");
+            throw new IllegalArgumentException(tr("backup.invalid.missing", "code"));
         }
         LocalDateTime unlockedAt = dateTime(entry.unlockedAt(), "unlockedAt");
         if (unlockedAt == null) {
-            throw new IllegalArgumentException("missing unlockedAt");
+            throw new IllegalArgumentException(tr("backup.invalid.missing", "unlockedAt"));
         }
         Achievement achievement = new Achievement(
             code,
@@ -616,7 +618,7 @@ public class BackupService {
         try {
             return DateTimeUtil.fromDatabase(value.trim());
         } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException("invalid " + field + " \"" + value + "\"", e);
+            throw new IllegalArgumentException(tr("backup.invalid.quoted", field, value), e);
         }
     }
 
@@ -625,7 +627,7 @@ public class BackupService {
             return fallback;
         }
         if (value < 0) {
-            throw new IllegalArgumentException("negative " + field + " " + value);
+            throw new IllegalArgumentException(tr("backup.invalid.negative", field, String.valueOf(value)));
         }
         return value;
     }
@@ -638,7 +640,7 @@ public class BackupService {
                 }
             }
         }
-        throw new IllegalArgumentException("unknown rating \"" + value + "\"");
+        throw new IllegalArgumentException(tr("backup.invalid.unknown", "rating", value));
     }
 
     private void ensureParent(Path outputPath) throws IOException {

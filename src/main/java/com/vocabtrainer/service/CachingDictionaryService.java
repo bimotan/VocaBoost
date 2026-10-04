@@ -20,6 +20,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Keeps what an online dictionary found in {@code dictionary_cache}, so the word is not looked up
  * online again for {@link #FOUND_TTL}. An older entry is looked up again, and is still shown, with
@@ -39,7 +41,6 @@ public class CachingDictionaryService implements DictionaryService {
     public static final Duration NOT_FOUND_TTL = Duration.ofMinutes(10);
 
     private static final Logger LOGGER = Logger.getLogger(CachingDictionaryService.class.getName());
-    private static final String BLANK_WORD = "Please enter an English word first.";
     /** What earlier versions wrote as the source of every cache entry, whichever dictionary answered. */
     private static final String LEGACY_SOURCE = "dictionary";
 
@@ -62,7 +63,7 @@ public class CachingDictionaryService implements DictionaryService {
     public DictionaryLookupResult lookup(String english) {
         String key = english == null ? "" : english.trim();
         if (key.isBlank()) {
-            return DictionaryLookupResult.notFound(BLANK_WORD);
+            return DictionaryLookupResult.notFound(tr("dictionary.enterWord"));
         }
         LocalDateTime now = LocalDateTime.now(clock);
         RememberedMiss miss = misses.get(missKey(key));
@@ -71,7 +72,7 @@ public class CachingDictionaryService implements DictionaryService {
         }
         Optional<Cached> cached = readCache(key);
         if (cached.isPresent() && cached.get().isFreshAt(now)) {
-            return DictionaryLookupResult.success("Loaded from dictionary cache.", cached.get().entries());
+            return DictionaryLookupResult.success(tr("dictionary.cache.loaded"), cached.get().entries());
         }
         return remember(key, delegate.lookup(key), cached, now);
     }
@@ -80,7 +81,7 @@ public class CachingDictionaryService implements DictionaryService {
     public DictionaryLookupResult refresh(String english) {
         String key = english == null ? "" : english.trim();
         if (key.isBlank()) {
-            return DictionaryLookupResult.notFound(BLANK_WORD);
+            return DictionaryLookupResult.notFound(tr("dictionary.enterWord"));
         }
         misses.remove(missKey(key));
         DictionaryLookupResult result = delegate.refresh(key);
@@ -120,9 +121,8 @@ public class CachingDictionaryService implements DictionaryService {
             default -> {
                 // Better an old entry than none while the dictionaries cannot be asked.
                 return expired
-                    .map(entry -> DictionaryLookupResult.success("Loaded from dictionary cache (saved "
-                        + entry.savedOn() + ") because the online dictionaries could not be asked: "
-                        + result.message(), entry.entries()))
+                    .map(entry -> DictionaryLookupResult.success(tr("dictionary.cache.stale", entry.savedOn(),
+                        result.message()), entry.entries()))
                     .orElse(result);
             }
         }
@@ -180,7 +180,7 @@ public class CachingDictionaryService implements DictionaryService {
         }
 
         String savedOn() {
-            return savedAt == null ? "earlier" : savedAt.toLocalDate().toString();
+            return savedAt == null ? tr("dictionary.cache.earlier") : savedAt.toLocalDate().toString();
         }
     }
 

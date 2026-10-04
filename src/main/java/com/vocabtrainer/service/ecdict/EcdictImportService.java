@@ -21,6 +21,8 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Imports an ECDICT CSV (or a word-list CSV) into the dictionary file of {@link EcdictRepository},
  * so the CSV is parsed once instead of at every start.
@@ -133,11 +135,11 @@ public class EcdictImportService {
                 }
             }
             if (columns == null) {
-                throw new IOException("The ECDICT CSV is empty: " + file);
+                throw new IOException(tr("ecdict.error.empty", file.toString()));
             }
             return new EcdictCheck(format, rows, usable, sample);
         } catch (CsvFormatException e) {
-            throw new IOException("Cannot read ECDICT CSV " + file + ": " + e.getMessage(), e);
+            throw new IOException(tr("ecdict.error.readCsv", file.toString(), e.getMessage()), e);
         }
     }
 
@@ -164,7 +166,7 @@ public class EcdictImportService {
             // Reads the whole file once; a file that is not valid UTF-8 is GBK.
             encoding = TextEncoding.detect(file);
         } catch (IOException e) {
-            throw new IOException("Cannot read ECDICT CSV " + file + ": " + e.getMessage(), e);
+            throw new IOException(tr("ecdict.error.readCsv", file.toString(), e.getMessage()), e);
         }
         stopIfCancelled(cancelled);
         try (CountingInputStream counting = new CountingInputStream(Files.newInputStream(file));
@@ -202,12 +204,11 @@ public class EcdictImportService {
                 }
             }
             if (columns == null) {
-                throw new IOException("The ECDICT CSV is empty: " + file);
+                throw new IOException(tr("ecdict.error.empty", file.toString()));
             }
             int rows = target.countRows();
             if (rows == 0) {
-                throw new IOException("No dictionary entries in " + file
-                    + ": no row has both a word and a Chinese meaning. " + format);
+                throw new IOException(tr("ecdict.error.noEntries", file.toString(), format));
             }
             stopIfCancelled(cancelled);
             EcdictMetadata metadata = new EcdictMetadata(file.toString(), size, modified, rows,
@@ -218,7 +219,7 @@ public class EcdictImportService {
             LOGGER.info("Imported " + rows + " ECDICT entries from " + file + " in " + metadata.durationMillis() + " ms");
             return metadata;
         } catch (CsvFormatException e) {
-            throw new IOException("Cannot import ECDICT CSV " + file + ": " + e.getMessage(), e);
+            throw new IOException(tr("ecdict.error.importCsv", file.toString(), e.getMessage()), e);
         }
     }
 
@@ -264,14 +265,13 @@ public class EcdictImportService {
     private static Path existingFile(Path csv) throws IOException {
         Path file = csv.toAbsolutePath().normalize();
         if (!Files.isRegularFile(file)) {
-            throw new IOException("ECDICT CSV not found: " + file);
+            throw new IOException(tr("ecdict.notFound", file.toString()));
         }
         return file;
     }
 
     private static String format(TextEncoding encoding, CsvReader reader, EcdictColumns columns) {
-        return "Encoding: " + encoding.displayName() + " | Delimiter: " + reader.delimiterName()
-            + " | Columns: " + columns.description();
+        return tr("import.preview.format", encoding.displayName(), reader.delimiterName(), columns.description());
     }
 
     private static void stopIfCancelled(BooleanSupplier cancelled) {

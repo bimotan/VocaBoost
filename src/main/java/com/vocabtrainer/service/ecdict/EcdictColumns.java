@@ -13,6 +13,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Which field of a dictionary CSV record holds which ECDICT column. The file can be ECDICT itself
  * (with or without its header row) or a word list such as the GRE CSVs.
@@ -44,7 +46,7 @@ final class EcdictColumns {
 
     private EcdictColumns(int[] indexes, String layout) {
         this.indexes = indexes;
-        this.description = describe(indexes) + " (" + layout + ")";
+        this.description = tr("import.columns.layout", describe(indexes), layout);
     }
 
     /**
@@ -58,12 +60,12 @@ final class EcdictColumns {
             return new Detection(fromHeader(first, header.get()), true);
         }
         if (WordColumns.startsWithEnglishColumnName(first)) {
-            return new Detection(positional(WORD_LIST_ORDER, "header row with unknown names, read by position"), true);
+            return new Detection(positional(WORD_LIST_ORDER, tr("ecdict.layout.unknownHeader")), true);
         }
         if (looksLikeHeaderlessEcdict(first)) {
-            return new Detection(positional(ECDICT_ORDER, "no header row, ECDICT column order"), false);
+            return new Detection(positional(ECDICT_ORDER, tr("ecdict.layout.ecdictOrder")), false);
         }
-        return new Detection(positional(WORD_LIST_ORDER, "no header row"), false);
+        return new Detection(positional(WORD_LIST_ORDER, tr("import.layout.none")), false);
     }
 
     /** @param headerRow whether the first record is a header, not an entry */
@@ -147,13 +149,13 @@ final class EcdictColumns {
         }
         if (indexes[Field.WORD.ordinal()] < 0) {
             throw new CsvFormatException(header.lineNumber(),
-                "the header row has no word column (word, english or 单词)");
+                tr("ecdict.error.noWordColumn"));
         }
         if (indexes[Field.TRANSLATION.ordinal()] < 0) {
             throw new CsvFormatException(header.lineNumber(),
-                "the header row has no Chinese meaning column (translation, chinese or 释义)");
+                tr("ecdict.error.noMeaningColumn"));
         }
-        return new EcdictColumns(indexes, "header row");
+        return new EcdictColumns(indexes, tr("import.layout.header"));
     }
 
     private static EcdictColumns positional(Field[] order, String layout) {

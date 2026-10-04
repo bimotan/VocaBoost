@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vocabtrainer.domain.DictionaryEntry;
 import com.vocabtrainer.domain.DictionaryLookupResult;
 import com.vocabtrainer.domain.LookupOutcome;
+import com.vocabtrainer.util.Messages;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -19,6 +20,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static com.vocabtrainer.util.Messages.tr;
 
 /**
  * The free online dictionaries, which give English definitions only: dictionaryapi.dev, then the
@@ -34,7 +37,6 @@ public class PublicOnlineDictionaryService implements DictionaryService {
     public static final String WIKTIONARY_SOURCE = "Wiktionary";
 
     private static final Logger LOGGER = Logger.getLogger(PublicOnlineDictionaryService.class.getName());
-    private static final String ENGLISH_ONLY_NOTE = "该来源主要返回英文释义，请确认或填写中文释义。";
     private static final int MAX_ENTRIES = 5;
     /** "Misspelling of receive.", also after usage labels such as "(nonstandard)" or "(proscribed, common)". */
     private static final Pattern MISSPELLING = Pattern.compile(
@@ -72,7 +74,7 @@ public class PublicOnlineDictionaryService implements DictionaryService {
     public DictionaryLookupResult lookup(String english) {
         String clean = english == null ? "" : english.trim();
         if (clean.isBlank()) {
-            return DictionaryLookupResult.notFound("Please enter an English word first.");
+            return DictionaryLookupResult.notFound(tr("dictionary.enterWord"));
         }
         DictionaryLookupResult dictionaryApiResult = lookupDictionaryApi(clean);
         if (dictionaryApiResult.success() || dictionaryApiResult.outcome() == LookupOutcome.INTERRUPTED) {
@@ -90,9 +92,14 @@ public class PublicOnlineDictionaryService implements DictionaryService {
         return true;
     }
 
+    /** "Loaded from Wiktionary.", with a note that the meaning is English only. */
+    private static String loadedEnglishOnly(String dictionary) {
+        return Messages.sentences(List.of(tr("dictionary.loadedFrom", dictionary), tr("dictionary.online.englishOnly")));
+    }
+
     private DictionaryLookupResult lookupDictionaryApi(String english) {
         return fetch(dictionaryApi.resolve(HttpLookup.pathSegment(english)), DICTIONARY_API_SOURCE,
-            "词条未找到：dictionaryapi.dev 没有该词条。", this::parseDictionaryApi, english);
+            tr("dictionary.notFoundIn", DICTIONARY_API_SOURCE), this::parseDictionaryApi, english);
     }
 
     /** Wiktionary titles are case-sensitive: "Lucid" is looked up as typed, then as "lucid". */
@@ -107,7 +114,7 @@ public class PublicOnlineDictionaryService implements DictionaryService {
 
     private DictionaryLookupResult lookupWiktionaryTitle(String english) {
         return fetch(wiktionary.resolve(HttpLookup.pathSegment(english.replace(' ', '_'))), WIKTIONARY_SOURCE,
-            "词条未找到：Wiktionary 没有该词条。", this::parseWiktionary, english);
+            tr("dictionary.notFoundIn", WIKTIONARY_SOURCE), this::parseWiktionary, english);
     }
 
     private DictionaryLookupResult fetch(URI uri, String dictionary, String notFoundMessage,
@@ -127,7 +134,7 @@ public class PublicOnlineDictionaryService implements DictionaryService {
         } catch (JsonProcessingException e) {
             LOGGER.log(Level.WARNING, dictionary + "'s answer for '" + english + "' is not JSON", e);
             return DictionaryLookupResult.unavailable(LookupOutcome.BAD_RESPONSE,
-                dictionary + "：返回的内容不是有效的 JSON（" + e.getOriginalMessage() + "）。");
+                tr("dictionary.badJson", dictionary, e.getOriginalMessage()));
         }
     }
 
@@ -149,9 +156,9 @@ public class PublicOnlineDictionaryService implements DictionaryService {
             }
         }
         if (entries.isEmpty()) {
-            return DictionaryLookupResult.notFound("词条未找到：dictionaryapi.dev 没有该词条。");
+            return DictionaryLookupResult.notFound(tr("dictionary.notFoundIn", DICTIONARY_API_SOURCE));
         }
-        return DictionaryLookupResult.success("Loaded from dictionaryapi.dev. " + ENGLISH_ONLY_NOTE, entries);
+        return DictionaryLookupResult.success(loadedEnglishOnly(DICTIONARY_API_SOURCE), entries);
     }
 
     /**
@@ -179,12 +186,12 @@ public class PublicOnlineDictionaryService implements DictionaryService {
             }
         }
         if (!entries.isEmpty()) {
-            return DictionaryLookupResult.success("Loaded from Wiktionary. " + ENGLISH_ONLY_NOTE, entries);
+            return DictionaryLookupResult.success(loadedEnglishOnly(WIKTIONARY_SOURCE), entries);
         }
         if (!misspelling.isEmpty()) {
-            return DictionaryLookupResult.notFound("词条未找到：Wiktionary 只把该词列为拼写错误（" + misspelling + "）。");
+            return DictionaryLookupResult.notFound(tr("dictionary.wiktionary.misspelling", misspelling));
         }
-        return DictionaryLookupResult.notFound("词条未找到：Wiktionary 没有该词的英语词条。");
+        return DictionaryLookupResult.notFound(tr("dictionary.wiktionary.noEnglish"));
     }
 
     private static String firstExample(JsonNode definitionNode) {

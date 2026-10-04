@@ -1,5 +1,7 @@
 package com.vocabtrainer.domain;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The daily goals a deck works towards: how many reviews and how many new words a study day should
  * have. A new word counts on the day of its first review, not when it is added or imported.
@@ -12,10 +14,10 @@ public record GoalTargets(int reviewGoal, int newWordGoal) {
 
     public GoalTargets {
         if (reviewGoal < 0 || reviewGoal > MAX_GOAL) {
-            throw new IllegalArgumentException("Reviews per day must be a whole number from 0 to " + MAX_GOAL + ".");
+            throw new IllegalArgumentException(tr("validation.reviewGoal", MAX_GOAL));
         }
         if (newWordGoal < 0 || newWordGoal > MAX_GOAL) {
-            throw new IllegalArgumentException("New words per day must be a whole number from 0 to " + MAX_GOAL + ".");
+            throw new IllegalArgumentException(tr("validation.newWordGoal", MAX_GOAL));
         }
     }
 }

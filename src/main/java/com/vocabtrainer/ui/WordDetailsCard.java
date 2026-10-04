@@ -16,6 +16,8 @@ import javafx.scene.text.TextFlow;
 import java.util.ArrayList;
 import java.util.List;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * A card with a word's phonetic, part of speech, example sentence (the word in bold), note and tags,
  * one row each; rows without a value are hidden. Used under the checked answer on the Review tab
@@ -62,11 +64,11 @@ public final class WordDetailsCard {
         empty.getStyleClass().add("muted-text");
         note.setMaxHeight(NOTE_MAX_HEIGHT);
 
-        addRow("Phonetic", phonetic);
-        addRow("Part of speech", partOfSpeech);
-        addRow("Example", example);
-        addRow("Note", note);
-        addRow("Tags", tags);
+        addRow(tr("word.phonetic"), phonetic);
+        addRow(tr("word.partOfSpeech"), partOfSpeech);
+        addRow(tr("word.example"), example);
+        addRow(tr("word.note"), note);
+        addRow(tr("word.tags"), tags);
 
         root.getChildren().addAll(title, rowBox, empty);
         root.setPadding(new Insets(10, 14, 10, 14));

@@ -1,6 +1,7 @@
 package com.vocabtrainer.service;
 
-import java.util.Locale;
+
+import static com.vocabtrainer.util.Messages.tr;
 
 /**
  * How many new words a day the deck must introduce to start every new word before the exam.
@@ -76,13 +77,10 @@ public record NewCardPlan(int newWords, int introducedToday, long daysLeft, int 
      */
     public String toDisplayText() {
         if (isDone()) {
-            return "Every new word of this deck has been started.";
+            return tr("exam.plan.done");
         }
-        String perDay = String.format(Locale.ROOT, "To finish %,d new %s before the exam you need ~%,d new %s/day",
-            newWords, newWords == 1 ? "word" : "words", wordsPerDay, wordsPerDay == 1 ? "word" : "words");
-        return perDay + (isOnTrack()
-            ? String.format(Locale.ROOT, "; the limit of %,d/day is enough.", currentLimit)
-            : String.format(Locale.ROOT, " (now %,d).", currentLimit));
+        return isOnTrack() ? tr("exam.plan.onTrack", newWords, wordsPerDay, currentLimit)
+            : tr("exam.plan.behind", newWords, wordsPerDay, currentLimit);
     }
 
     private static long ceilDiv(long dividend, long divisor) {

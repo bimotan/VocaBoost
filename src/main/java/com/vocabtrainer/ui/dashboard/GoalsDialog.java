@@ -16,6 +16,8 @@ import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Edits the goals in a modal form: the daily review and new-word goals, either the defaults of
  * every deck or the current deck's own, and the session goal, which is the review session size of
@@ -35,9 +37,9 @@ public final class GoalsDialog {
      * Failures, also reading the goals for the form, are reported.
      */
     public static void open(ViewContext context, GoalSettings settings) {
-        context.errors().guard("Goals not saved", () -> {
+        context.errors().guard(tr("goals.notSaved"), () -> {
             if (new GoalsDialog(context, settings).edit(context.decks().current())) {
-                context.errors().guard("Goals saved, but refreshing the views failed",
+                context.errors().guard(tr("goals.refreshFailed"),
                     () -> context.changes().publish(DataChange.GOALS));
             }
         });
@@ -50,10 +52,10 @@ public final class GoalsDialog {
         GoalTargets shown = settings.goalsFor(deck.getId());
 
         ToggleGroup scope = new ToggleGroup();
-        RadioButton everyDeck = new RadioButton("Every deck (default goals)");
+        RadioButton everyDeck = new RadioButton(tr("goals.form.everyDeck"));
         everyDeck.setId("goalScopeEveryDeck");
         everyDeck.setToggleGroup(scope);
-        RadioButton thisDeck = new RadioButton("Only " + deck.getName());
+        RadioButton thisDeck = new RadioButton(tr("form.onlyDeck", deck.getName()));
         thisDeck.setId("goalScopeThisDeck");
         thisDeck.setToggleGroup(scope);
         (ownGoals ? thisDeck : everyDeck).setSelected(true);
@@ -69,37 +71,33 @@ public final class GoalsDialog {
             newWordGoal.getValueFactory().setValue(goals.newWordGoal());
         });
 
-        Label newWordsHint = hint("A word counts as a new word on the day of its first review. "
-            + deck.getName() + " introduces at most " + settings.newCardsPerDay(deck.getId())
-            + " new words per study day: the limit of every deck is on the Settings tab, this deck's own on"
-            + " the Review tab.");
-        Label sessionHint = hint("Cards per review session, in every deck, as on the Review tab; 0 means All Due.");
+        Label newWordsHint = hint(tr("goals.form.newWordsHint", deck.getName(), settings.newCardsPerDay(deck.getId())));
+        Label sessionHint = hint(tr("goals.form.sessionHint"));
 
         GridPane form = new GridPane();
         form.setId("goalsForm");
         form.setHgap(10);
         form.setVgap(10);
-        form.add(Widgets.formLabel("Daily goals _for", everyDeck), 0, 0);
+        form.add(Widgets.formLabel(tr("goals.form.for"), everyDeck), 0, 0);
         form.add(new HBox(16, everyDeck, thisDeck), 1, 0);
-        form.add(Widgets.formLabel("_Reviews per day", reviewGoal), 0, 1);
+        form.add(Widgets.formLabel(tr("goals.form.reviews"), reviewGoal), 0, 1);
         form.add(reviewGoal, 1, 1);
-        form.add(Widgets.formLabel("_New words per day", newWordGoal), 0, 2);
+        form.add(Widgets.formLabel(tr("goals.form.newWords"), newWordGoal), 0, 2);
         form.add(newWordGoal, 1, 2);
         form.add(newWordsHint, 1, 3);
-        form.add(Widgets.formLabel("_Session size", sessionGoal), 0, 4);
+        form.add(Widgets.formLabel(tr("goals.form.session"), sessionGoal), 0, 4);
         form.add(sessionGoal, 1, 4);
         form.add(sessionHint, 1, 5);
 
-        if (!context.dialogs().showForm("Edit goals", form)) {
+        if (!context.dialogs().showForm(tr("goals.edit"), form)) {
             return false;
         }
         try {
-            GoalTargets goals = new GoalTargets(value(reviewGoal, "Reviews per day"),
-                value(newWordGoal, "New words per day"));
-            int session = value(sessionGoal, "Session size");
+            GoalTargets goals = new GoalTargets(value(reviewGoal, tr("goals.name.reviews")),
+                value(newWordGoal, tr("goals.name.newWords")));
+            int session = value(sessionGoal, tr("goals.name.session"));
             if (session > ReviewSettings.MAX_SESSION_SIZE) {
-                throw new IllegalArgumentException("Session size must be a whole number from 0 to "
-                    + ReviewSettings.MAX_SESSION_SIZE + ".");
+                throw new IllegalArgumentException(tr("goals.error.sessionRange", ReviewSettings.MAX_SESSION_SIZE));
             }
             if (thisDeck.isSelected()) {
                 settings.saveDeckGoals(deck.getId(), goals);
@@ -110,10 +108,10 @@ public final class GoalsDialog {
             settings.saveSessionGoal(session);
             return true;
         } catch (IllegalArgumentException e) {
-            context.errors().showError("Goals not saved", e.getMessage());
+            context.errors().showError(tr("goals.notSaved"), e.getMessage());
             return false;
         } catch (RuntimeException e) {
-            context.errors().reportFailure("Goals not saved", e);
+            context.errors().reportFailure(tr("goals.notSaved"), e);
             return false;
         }
     }
@@ -134,7 +132,7 @@ public final class GoalsDialog {
     private static int value(Spinner<Integer> spinner, String name) {
         String text = spinner.getEditor().getText().trim();
         if (text.isEmpty()) {
-            throw new IllegalArgumentException(name + " must be a whole number.");
+            throw new IllegalArgumentException(tr("goals.error.wholeNumber", name));
         }
         return Integer.parseInt(text);
     }

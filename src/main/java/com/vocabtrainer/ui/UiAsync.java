@@ -11,6 +11,8 @@ import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Runs slow work on a background thread and hands the result back on the JavaFX thread.
  *
@@ -130,8 +132,8 @@ public final class UiAsync implements TaskRunner {
     private void handleFailure(Throwable error, Consumer<Throwable> onFailure, Labeled status, String runningMessage) {
         LOGGER.log(Level.WARNING, "Background task failed" + (runningMessage == null ? "" : ": " + runningMessage), error);
         if (status != null && runningMessage != null && runningMessage.equals(status.getText())) {
-            status.setText("Failed: " + UiErrors.rootMessage(error));
+            status.setText(tr("task.failed", UiErrors.rootMessage(error)));
         }
-        errors.guard("Unexpected error", () -> onFailure.accept(error));
+        errors.guard(tr("error.unexpected.title"), () -> onFailure.accept(error));
     }
 }

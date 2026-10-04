@@ -8,19 +8,35 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.Predicate;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The Word List's status, tag and part-of-speech filters and its Status column, without JavaFX.
  * The rules for weak and mastered words come from {@link WordCard}, so the list agrees with the
  * weak-words review mode and the dashboard. Suspended words are listed under All, Suspended, Leech,
  * Unverified and the tag and part-of-speech filters, never as due, weak or mastered.
  *
- * @param status       one of {@link #STATUSES}; null means All
+ * @param status       one of {@link #STATUSES}, which name the filters, not texts ({@link #statusLabel} names
+ *                     them); null means All
  * @param tag          part of a tag, ignoring case; blank matches every word
  * @param partOfSpeech part of the part of speech, ignoring case; blank matches every word
  */
 public record WordListFilter(String status, String tag, String partOfSpeech) {
     public static final List<String> STATUSES =
         List.of("All", "Due", "Weak", "Mastered", "Leech", "Suspended", "Unverified");
+
+    /** What the status filter shows for one of {@link #STATUSES}. */
+    public static String statusLabel(String status) {
+        return switch (status) {
+            case "Due" -> tr("words.status.due");
+            case "Weak" -> tr("words.status.weak");
+            case "Mastered" -> tr("words.status.mastered");
+            case "Leech" -> tr("words.status.leech");
+            case "Suspended" -> tr("words.status.suspended");
+            case "Unverified" -> tr("words.status.unverified");
+            default -> tr("words.status.all");
+        };
+    }
 
     /** @param dayEnd the end of the current study day, which decides which words are due today */
     public boolean matches(WordCard word, LocalDateTime now, LocalDateTime dayEnd) {
@@ -65,18 +81,18 @@ public record WordListFilter(String status, String tag, String partOfSpeech) {
     /** The Status column: Suspended, Mastered, Due, New or Learning. */
     public static String statusOf(WordCard word, LocalDateTime now, LocalDateTime dayEnd) {
         if (word.isSuspended()) {
-            return "Suspended";
+            return tr("words.status.suspended");
         }
         if (word.isMastered()) {
-            return "Mastered";
+            return tr("words.status.mastered");
         }
         if (word.isDue(now, dayEnd)) {
-            return "Due";
+            return tr("words.status.due");
         }
         if (word.getState() == CardState.NEW) {
-            return "New";
+            return tr("cardState.new");
         }
-        return "Learning";
+        return tr("cardState.learning");
     }
 
     private static boolean containsIgnoreCase(String value, String needle) {

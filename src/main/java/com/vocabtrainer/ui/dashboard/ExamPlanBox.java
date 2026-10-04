@@ -4,6 +4,7 @@ import com.vocabtrainer.service.ExamCountdown;
 import com.vocabtrainer.service.ExamPlanService;
 import com.vocabtrainer.service.NewCardPlan;
 import com.vocabtrainer.ui.DataChange;
+import com.vocabtrainer.ui.Formats;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import javafx.scene.Node;
@@ -12,10 +13,10 @@ import javafx.scene.control.Label;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
-import java.time.format.DateTimeFormatter;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.OptionalInt;
+
+import static com.vocabtrainer.util.Messages.tr;
 
 /**
  * The Dashboard's exam box: the countdown to the current deck's exam ("GRE in 45 days"), "Set exam
@@ -23,8 +24,6 @@ import java.util.OptionalInt;
  * button that sets the deck's new-words-per-day limit to it.
  */
 final class ExamPlanBox {
-    private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("EEE yyyy-MM-dd", Locale.ENGLISH);
-
     private final ViewContext context;
     private final ExamPlanService planService;
     private final Label countdownLabel = new Label();
@@ -43,19 +42,19 @@ final class ExamPlanBox {
         dateLabel.setId("examDateLabel");
         dateLabel.getStyleClass().add("muted-text");
         dateLabel.setWrapText(true);
-        Button editButton = new Button("Set exam date");
+        Button editButton = new Button(tr("exam.edit"));
         editButton.setId("editExamButton");
-        editButton.setOnAction(event -> context.errors().guard("Exam date not saved", this::editExam));
+        editButton.setOnAction(event -> context.errors().guard(tr("exam.notSaved"), this::editExam));
         planLabel.setId("newWordPlanLabel");
         planLabel.setWrapText(true);
         planLabel.setMinHeight(Region.USE_PREF_SIZE);
         applyPlanButton.setId("applyNewWordPlanButton");
-        applyPlanButton.setOnAction(event -> context.errors().guard("New words per day not changed", this::applyPlan));
+        applyPlanButton.setOnAction(event -> context.errors().guard(tr("exam.plan.failed"), this::applyPlan));
         statusLabel.setId("examStatusLabel");
         statusLabel.setWrapText(true);
         statusLabel.setMinHeight(Region.USE_PREF_SIZE);
         statusLabel.getStyleClass().add("hint-text");
-        root = new VBox(10, Widgets.sectionTitle("Exam"), countdownLabel, dateLabel, editButton, planLabel,
+        root = new VBox(10, Widgets.sectionTitle(tr("exam.title")), countdownLabel, dateLabel, editButton, planLabel,
             applyPlanButton, statusLabel);
         root.setId("examPlanBox");
         root.setMaxWidth(360);
@@ -71,15 +70,15 @@ final class ExamPlanBox {
     void refresh(long deckId) {
         Optional<ExamCountdown> countdown = planService.countdown(deckId);
         if (countdown.isEmpty()) {
-            countdownLabel.setText("No exam date");
-            dateLabel.setText("Set the date of your exam to see a countdown, plan your new words and keep reviews"
-                + " before it.");
+            countdownLabel.setText(tr("exam.none"));
+            dateLabel.setText(tr("exam.none.hint"));
         } else {
             ExamCountdown exam = countdown.get();
             countdownLabel.setText(exam.toDisplayText());
-            String scope = planService.settings().deckExam(deckId).isPresent() ? "this deck's exam" : "every deck's exam";
-            dateLabel.setText(DATE.format(exam.exam().date()) + " · " + scope
-                + (exam.isOver() ? ". Set the next date or clear it." : ""));
+            String scope = planService.settings().deckExam(deckId).isPresent() ? tr("exam.scope.deck")
+                : tr("exam.scope.every");
+            String date = Formats.weekdayDate(exam.exam().date()) + " · " + scope;
+            dateLabel.setText(exam.isOver() ? tr("exam.over", date) : date);
         }
         Optional<NewCardPlan> plan = planService.newCardPlan(deckId);
         planLabel.setText(plan.map(NewCardPlan::toDisplayText).orElse(""));
@@ -87,7 +86,7 @@ final class ExamPlanBox {
         boolean canApply = plan.isPresent() && !plan.get().isDone() && !plan.get().isOnTrack();
         show(applyPlanButton, canApply);
         if (canApply) {
-            applyPlanButton.setText("Use " + plan.get().limitToApply() + " new words/day");
+            applyPlanButton.setText(tr("exam.plan.apply", plan.get().limitToApply()));
         }
     }
 
@@ -97,15 +96,13 @@ final class ExamPlanBox {
             return;
         }
         int count = moved.getAsInt();
-        statusLabel.setText(count == 0 ? "Saved."
-            : count == 1 ? "Saved. 1 review due on or after the exam now comes before it."
-            : "Saved. " + count + " reviews due on or after the exam now come before it.");
+        statusLabel.setText(count == 0 ? tr("review.saved") : tr("exam.saved.moved", count));
     }
 
     private void applyPlan() {
         long deckId = context.decks().currentId();
         NewCardPlan plan = planService.applyNewCardPlan(deckId);
-        statusLabel.setText("New words per day set to " + plan.limitToApply() + ".");
+        statusLabel.setText(tr("exam.plan.applied", plan.limitToApply()));
         context.changes().publish(DataChange.REVIEW_SETTINGS);
     }
 

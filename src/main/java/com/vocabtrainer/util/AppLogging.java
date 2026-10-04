@@ -15,6 +15,8 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Configures java.util.logging once at startup: a rotating UTF-8 log file in the data folder
  * (~/.vocab-trainer/logs) plus console output. Logging problems never stop the app; when the
@@ -67,8 +69,8 @@ public final class AppLogging {
     /** A sentence for error dialogs telling the user where the details can be found. */
     public static String logLocationText() {
         return logDirectory()
-            .map(directory -> "Details were written to the log folder: " + directory)
-            .orElse("File logging is unavailable; details were written to the console only.");
+            .map(directory -> tr("error.logFolder", directory.toString()))
+            .orElse(tr("error.consoleOnly"));
     }
 
     /** Logs exceptions that nothing else caught, e.g. a failure while JavaFX is still starting. */

@@ -12,6 +12,7 @@ import com.vocabtrainer.service.csv.WordColumn;
 import com.vocabtrainer.service.csv.WordColumns;
 import com.vocabtrainer.service.ecdict.EcdictExchange;
 import com.vocabtrainer.service.ecdict.EcdictTranslationCleaner;
+import com.vocabtrainer.util.Messages;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -28,6 +29,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The offline dictionaries: the imported ECDICT dictionary (an indexed SQLite file, see
  * {@link EcdictRepository}), then the bundled GRE starter words. Nothing is loaded into memory
@@ -41,16 +44,14 @@ import java.util.regex.Pattern;
 public class LocalDictionaryService implements DictionaryService {
     public static final String ECDICT_SOURCE = "ECDICT/local CSV";
     public static final String STARTER_SOURCE = "Bundled GRE starter";
+    /** The source of a word the offline dictionaries verified, which "Add word" adds to its tags. */
+    public static final String LOCAL_SOURCE = "Local dictionary";
 
     private static final Logger LOGGER = Logger.getLogger(LocalDictionaryService.class.getName());
     private static final String STARTER_RESOURCE = "/data/gre_starter_sample.csv";
-    private static final String NOT_FOUND = "词条未找到：本地词库没有该词条。";
     /** ECDICT's pos column is a distribution such as "v:46/n:54", not a part of speech to show. */
     private static final Pattern POS_DISTRIBUTION = Pattern.compile("[a-z]+:\\d+(/[a-z]+:\\d+)*");
     private static final String FORM_KIND_ORDER = "pdi3rts";
-    private static final Map<Character, String> FORM_KINDS = Map.of(
-        'p', "past tense", 'd', "past participle", 'i', "present participle", '3', "third-person singular",
-        'r', "comparative", 't', "superlative", 's', "plural");
 
     private final EcdictRepository ecdict;
     private final Map<String, DictionaryEntry> starterEntries;
@@ -70,11 +71,11 @@ public class LocalDictionaryService implements DictionaryService {
     public DictionaryLookupResult lookup(String english) {
         String key = normalizeKey(english);
         if (key.isBlank()) {
-            return DictionaryLookupResult.notFound("Please enter an English word first.");
+            return DictionaryLookupResult.notFound(tr("dictionary.enterWord"));
         }
         Optional<DictionaryEntry> entry = find(key);
         if (entry.isPresent()) {
-            return DictionaryLookupResult.success("Loaded from local dictionary.", List.of(entry.get()));
+            return DictionaryLookupResult.success(tr("dictionary.local.loaded"), List.of(entry.get()));
         }
         List<EcdictRepository.BaseForm> baseForms = findBaseForms(key);
         if (!baseForms.isEmpty()) {
@@ -82,13 +83,13 @@ public class LocalDictionaryService implements DictionaryService {
             List<String> explanations = new ArrayList<>();
             for (EcdictRepository.BaseForm baseForm : baseForms) {
                 entries.add(toEntry(baseForm.row()));
-                explanations.add(key + " is " + describeKinds(baseForm.kinds()) + " " + baseForm.row().word() + ".");
+                explanations.add(tr("dictionary.local.formOf", key, describeKinds(baseForm.kinds()),
+                    baseForm.row().word()));
             }
-            return DictionaryLookupResult.success("Not in the local dictionary as written: "
-                + String.join(" ", explanations) + (entries.size() == 1 ? " Showing the base form." : " Showing the base forms."),
-                entries);
+            return DictionaryLookupResult.success(tr("dictionary.local.baseForms",
+                    Messages.sentences(explanations), entries.size()), entries);
         }
-        return DictionaryLookupResult.notFound(NOT_FOUND);
+        return DictionaryLookupResult.notFound(notFound());
     }
 
     @Override
@@ -96,15 +97,15 @@ public class LocalDictionaryService implements DictionaryService {
         String key = normalizeKey(english);
         Optional<DictionaryEntry> entry = find(key);
         if (entry.isPresent()) {
-            return WordVerificationResult.found("Local dictionary", "本地词库已验证该词条。")
+            return WordVerificationResult.found(LOCAL_SOURCE, tr("dictionary.local.verified"))
                 .withPhonetic(entry.get().phonetic());
         }
         List<EcdictRepository.BaseForm> baseForms = findBaseForms(key);
         if (!baseForms.isEmpty()) {
-            return WordVerificationResult.found("Local dictionary",
-                "本地词库已验证该词条：" + key + " 是 " + baseForms.get(0).row().word() + " 的变形。");
+            return WordVerificationResult.found(LOCAL_SOURCE,
+                tr("dictionary.local.verifiedForm", key, baseForms.get(0).row().word()));
         }
-        return WordVerificationResult.missing(NOT_FOUND);
+        return WordVerificationResult.missing(notFound());
     }
 
     @Override
@@ -195,15 +196,49 @@ public class LocalDictionaryService implements DictionaryService {
         );
     }
 
-    /** "the past tense and past participle of" for "dp"; "a form of" when ECDICT does not say. */
+    /** "the past tense and past participle" for "dp"; "a form" when ECDICT does not say. */
     private static String describeKinds(String kinds) {
         List<String> names = new ArrayList<>();
         for (char kind : FORM_KIND_ORDER.toCharArray()) {
             if (kinds != null && kinds.indexOf(kind) >= 0) {
-                names.add(FORM_KINDS.get(kind));
+                names.add(formKind(kind));
             }
         }
-        return names.isEmpty() ? "a form of" : "the " + String.join(" and ", names) + " of";
+        return names.isEmpty() ? tr("dictionary.form.any") : tr("dictionary.form.kinds", String.join(tr("dictionary.form.and"), names));
+    }
+
+    private static String formKind(char kind) {
+        return switch (kind) {
+            case 'p' -> tr("dictionary.form.past");
+            case 'd' -> tr("dictionary.form.pastParticiple");
+            case 'i' -> tr("dictionary.form.presentParticiple");
+            case '3' -> tr("dictionary.form.thirdPerson");
+            case 'r' -> tr("dictionary.form.comparative");
+            case 't' -> tr("dictionary.form.superlative");
+            default -> tr("dictionary.form.plural");
+        };
+    }
+
+    private static String notFound() {
+        return tr("dictionary.local.notFound");
+    }
+
+    /**
+     * How a dictionary is named on screen: the local dictionaries and the configured API by a name in
+     * the app's language, the online ones by their own name. A source is also saved with cached
+     * lookups and added to a word's tags, so it stays as it is there.
+     */
+    public static String sourceLabel(String source) {
+        if (source == null) {
+            return "";
+        }
+        return switch (source) {
+            case ECDICT_SOURCE -> tr("dictionary.source.ecdict");
+            case STARTER_SOURCE -> tr("dictionary.source.starter");
+            case LOCAL_SOURCE -> tr("dictionary.source.local");
+            case HttpDictionaryService.SOURCE -> tr("dictionary.source.api");
+            default -> source;
+        };
     }
 
     private static Map<String, DictionaryEntry> loadStarterEntries() {

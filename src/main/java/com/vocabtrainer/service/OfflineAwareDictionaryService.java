@@ -6,6 +6,8 @@ import com.vocabtrainer.domain.WordVerificationResult;
 
 import java.util.function.BooleanSupplier;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * An online dictionary that is not asked while offline mode is on: every lookup then ends with
  * {@link LookupOutcome#OFFLINE} without a request. Offline mode is checked at each lookup, so
@@ -16,7 +18,7 @@ final class OfflineAwareDictionaryService implements DictionaryService {
     private final BooleanSupplier offline;
     private final String name;
 
-    /** @param name the dictionary in messages, e.g. "在线词典" */
+    /** @param name the dictionary in messages, e.g. "Online dictionaries" */
     OfflineAwareDictionaryService(DictionaryService online, BooleanSupplier offline, String name) {
         this.online = online;
         this.offline = offline;
@@ -44,6 +46,6 @@ final class OfflineAwareDictionaryService implements DictionaryService {
     }
 
     private DictionaryLookupResult skipped() {
-        return DictionaryLookupResult.unavailable(LookupOutcome.OFFLINE, name + "：离线模式已开启，没有查询。");
+        return DictionaryLookupResult.unavailable(LookupOutcome.OFFLINE, tr("dictionary.offline", name));
     }
 }

@@ -33,6 +33,7 @@ import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TableColumn;
@@ -64,6 +65,8 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The Word List tab: search and filter the current deck's words, suspended ones included, or every
  * active deck's ("All decks", which adds a Deck column); edit one, and suspend, unsuspend or delete
@@ -91,14 +94,14 @@ public final class WordListView {
     private final FilteredList<WordCard> filteredWords = new FilteredList<>(words);
     private final SortedList<WordCard> sortedWords = new SortedList<>(filteredWords);
     private final TableView<WordCard> wordTable = new TableView<>(sortedWords);
-    private final TableColumn<WordCard, String> deckCol = new TableColumn<>("Deck");
+    private final TableColumn<WordCard, String> deckCol = new TableColumn<>(tr("decks.column.deck"));
     private final TextField searchField = new TextField();
     private final ComboBox<String> wordStatusFilter = new ComboBox<>();
     private final TextField tagFilterField = new TextField();
     private final TextField posFilterField = new TextField();
-    private final CheckBox allDecksToggle = new CheckBox("All decks");
-    private final Button suspendButton = new Button("Suspend");
-    private final Button unsuspendButton = new Button("Unsuspend");
+    private final CheckBox allDecksToggle = new CheckBox(tr("words.allDecks"));
+    private final Button suspendButton = new Button(tr("review.suspend"));
+    private final Button unsuspendButton = new Button(tr("words.unsuspend"));
     private final Tab tab;
     private final LazyRefresh lazy;
     /** The cell values computed since the last refresh, by row; see {@link #computeOnce}. */
@@ -125,8 +128,8 @@ public final class WordListView {
         this.clock = clock;
         this.studyDays = studyDays;
         this.editDialog = new WordEditDialog(context, wordRepository, validationService);
-        this.tab = Widgets.tab("wordListTab", "Word List", createContent());
-        this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), "Refresh failed", false);
+        this.tab = Widgets.tab("wordListTab", tr("words.tab"), createContent());
+        this.lazy = new LazyRefresh(tab, this::refresh, context.errors(), tr("common.refreshFailed"), false);
         context.changes().subscribe(changes -> {
             if (changes.contains(DataChange.WORDS) || changes.contains(DataChange.REVIEWS)
                 || changes.contains(DataChange.REVIEW_SETTINGS) || changes.contains(DataChange.DECKS)) {
@@ -147,44 +150,44 @@ public final class WordListView {
 
     private VBox createContent() {
         searchField.setId("wordSearchField");
-        searchField.setPromptText("Search English, Chinese or tags");
-        searchField.setAccessibleText("Search English, Chinese or tags");
+        searchField.setPromptText(tr("words.search"));
+        searchField.setAccessibleText(tr("words.search"));
         wordStatusFilter.setId("wordStatusFilter");
         wordStatusFilter.getItems().setAll(WordListFilter.STATUSES);
+        wordStatusFilter.setCellFactory(list -> statusCell());
+        wordStatusFilter.setButtonCell(statusCell());
         wordStatusFilter.getSelectionModel().select("All");
-        wordStatusFilter.setAccessibleText("Status");
+        wordStatusFilter.setAccessibleText(tr("words.status.accessible"));
         tagFilterField.setId("wordTagFilterField");
-        tagFilterField.setPromptText("Tag");
-        tagFilterField.setAccessibleText("Tag filter");
+        tagFilterField.setPromptText(tr("words.tagFilter"));
+        tagFilterField.setAccessibleText(tr("words.tagFilter.accessible"));
         tagFilterField.setPrefWidth(120);
         posFilterField.setId("wordPosFilterField");
-        posFilterField.setPromptText("POS");
-        posFilterField.setAccessibleText("Part of speech filter");
+        posFilterField.setPromptText(tr("import.mapping.column.pos"));
+        posFilterField.setAccessibleText(tr("words.posFilter.accessible"));
         posFilterField.setPrefWidth(120);
         allDecksToggle.setId("wordAllDecksToggle");
-        allDecksToggle.setTooltip(new Tooltip("Search the words of every active deck; the Deck column says"
-            + " which deck each one is in"));
+        allDecksToggle.setTooltip(new Tooltip(tr("words.allDecks.tooltip")));
         searchField.textProperty().addListener((observable, oldValue, newValue) -> applyFilters());
         tagFilterField.textProperty().addListener((observable, oldValue, newValue) -> applyFilters());
         posFilterField.textProperty().addListener((observable, oldValue, newValue) -> applyFilters());
         wordStatusFilter.valueProperty().addListener((observable, oldValue, newValue) -> applyFilters());
         allDecksToggle.selectedProperty().addListener((observable, wasSelected, selected) ->
-            context.errors().guard("Refresh failed", lazy::refreshNow));
-        Button refreshButton = new Button("Refresh");
+            context.errors().guard(tr("common.refreshFailed"), lazy::refreshNow));
+        Button refreshButton = new Button(tr("common.refresh"));
         refreshButton.setId("refreshWordsButton");
-        refreshButton.setOnAction(event -> context.errors().guard("Refresh failed", lazy::refreshNow));
-        Button editButton = new Button("Edit selected");
+        refreshButton.setOnAction(event -> context.errors().guard(tr("common.refreshFailed"), lazy::refreshNow));
+        Button editButton = new Button(tr("words.edit"));
         editButton.setId("editWordButton");
         editButton.setOnAction(event -> editSelectedWord());
-        Button deleteButton = new Button("Delete selected");
+        Button deleteButton = new Button(tr("words.delete"));
         deleteButton.setId("deleteWordButton");
         deleteButton.setOnAction(event -> deleteSelectedWords());
         suspendButton.setId("suspendWordsButton");
-        suspendButton.setTooltip(new Tooltip("暂停: stop reviewing the selected words, keeping them and their"
-            + " history"));
+        suspendButton.setTooltip(new Tooltip(tr("words.suspend.tooltip")));
         suspendButton.setOnAction(event -> setSelectedSuspended(true));
         unsuspendButton.setId("unsuspendWordsButton");
-        unsuspendButton.setTooltip(new Tooltip("Review the selected suspended words again"));
+        unsuspendButton.setTooltip(new Tooltip(tr("words.unsuspend.tooltip")));
         unsuspendButton.setOnAction(event -> setSelectedSuspended(false));
 
         HBox filters = new HBox(10, searchField, wordStatusFilter, tagFilterField, posFilterField, allDecksToggle,
@@ -197,13 +200,13 @@ public final class WordListView {
             editButton, suspendButton, unsuspendButton, deleteButton)) {
             region.setMinWidth(Region.USE_PREF_SIZE);
         }
-        Label selectionHint = Widgets.styled(new Label("Shift- or Ctrl-click to select several words."), "muted-text");
+        Label selectionHint = Widgets.styled(new Label(tr("words.selectionHint")), "muted-text");
         HBox actions = new HBox(10, editButton, suspendButton, unsuspendButton, deleteButton, selectionHint);
         actions.setAlignment(Pos.CENTER_LEFT);
         VBox controls = new VBox(8, filters, actions);
 
         wordTable.setId("wordTable");
-        wordTable.setAccessibleText("Words");
+        wordTable.setAccessibleText(tr("words.table.accessible"));
         wordTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         // Several words can be selected (Shift or Ctrl) to suspend, unsuspend or delete them together.
         wordTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
@@ -214,21 +217,21 @@ public final class WordListView {
         sortedWords.comparatorProperty().bind(wordTable.comparatorProperty());
         // Sorting asks for a row's cell values many times, so they are computed once per word and refresh,
         // and text is compared by collation keys computed once per text.
-        TableColumn<WordCard, String> englishCol = new TableColumn<>("English");
+        TableColumn<WordCard, String> englishCol = new TableColumn<>(tr("import.mapping.column.english"));
         englishCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getEnglish()));
         englishCol.setComparator(collated());
-        TableColumn<WordCard, String> chineseCol = new TableColumn<>("Chinese");
+        TableColumn<WordCard, String> chineseCol = new TableColumn<>(tr("import.mapping.column.chinese"));
         chineseCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getChinese()));
         chineseCol.setComparator(collated());
-        TableColumn<WordCard, CellValue<LocalDateTime>> nextCol = new TableColumn<>("Next review");
+        TableColumn<WordCard, CellValue<LocalDateTime>> nextCol = new TableColumn<>(tr("words.column.next"));
         computeOnce(nextCol, word -> new CellValue<>(word.getNextReviewAt(),
             DateTimeUtil.toDisplay(word.getNextReviewAt())));
-        TableColumn<WordCard, CellValue<Integer>> intervalCol = new TableColumn<>("Interval");
+        TableColumn<WordCard, CellValue<Integer>> intervalCol = new TableColumn<>(tr("words.column.interval"));
         computeOnce(intervalCol, WordListView::interval);
         // The chance of recalling the word now (FSRS retrievability); "New" before its first review.
-        TableColumn<WordCard, CellValue<Double>> strengthCol = new TableColumn<>("Memory");
+        TableColumn<WordCard, CellValue<Double>> strengthCol = new TableColumn<>(tr("words.column.memory"));
         computeOnce(strengthCol, word -> memory(word, listedAt));
-        TableColumn<WordCard, String> statusCol = new TableColumn<>("Status");
+        TableColumn<WordCard, String> statusCol = new TableColumn<>(tr("import.mapping.column.status"));
         statusCol.setComparator(collated());
         computeOnce(statusCol, word -> WordListFilter.statusOf(word, listedAt, listedDayEnd));
         deckCol.setCellValueFactory(data ->
@@ -280,7 +283,7 @@ public final class WordListView {
         OptionalDouble recall = ReviewScheduler.retrievability(word, now);
         return recall.isPresent()
             ? new CellValue<>(recall.getAsDouble(), Formats.percent(recall.getAsDouble()))
-            : new CellValue<>(null, "New");
+            : new CellValue<>(null, tr("cardState.new"));
     }
 
     /** Reads the words of the current deck, or of every active deck, from the database. */
@@ -313,8 +316,18 @@ public final class WordListView {
             // Keep the selected words selected, with their details as they are now (e.g. after an edit).
             reselect(selected, selectedIds, true);
         } catch (SQLException e) {
-            context.errors().reportFailure("Refresh failed", e);
+            context.errors().reportFailure(tr("common.refreshFailed"), e);
         }
+    }
+
+    private static ListCell<String> statusCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(String status, boolean empty) {
+                super.updateItem(status, empty);
+                setText(empty || status == null ? null : WordListFilter.statusLabel(status));
+            }
+        };
     }
 
     /** Shows the words that match the search box and the filters; the database is not read again. */
@@ -368,23 +381,23 @@ public final class WordListView {
 
     private void showDetails(WordCard word) {
         if (word == null) {
-            detailsCard.showMessage("Select a word to see its phonetic, part of speech, example, note and tags.");
+            detailsCard.showMessage(tr("words.details.select"));
             return;
         }
         String deck = deckCol.isVisible() ? "   (" + deckNames.getOrDefault(word.getDeckId(), "") + ")" : "";
         detailsCard.show(word.getEnglish() + "   " + word.getChinese() + deck,
             WordDetails.of(word, examples.highlight(word.getExampleSentence(), word.getEnglish())),
-            "No phonetic, part of speech, example, note or tags yet: choose Edit selected to add them.");
+            tr("words.details.empty"));
     }
 
     private void editSelectedWord() {
         WordCard selected = wordTable.getSelectionModel().getSelectedItem();
         if (selected == null) {
-            context.errors().showInfo("Please select a word to edit.");
+            context.errors().showInfo(tr("words.edit.select"));
             return;
         }
         if (editDialog.edit(selected)) {
-            context.errors().guard("Word saved, but refreshing the views failed",
+            context.errors().guard(tr("words.edit.refreshFailed"),
                 () -> context.changes().publish(DataChange.WORDS));
         }
     }
@@ -407,14 +420,14 @@ public final class WordListView {
     private void setSelectedSuspended(boolean suspended) {
         List<Long> ids = selectedWords().stream().map(WordCard::getId).toList();
         if (ids.isEmpty()) {
-            context.errors().showInfo("Please select the words to " + (suspended ? "suspend." : "unsuspend."));
+            context.errors().showInfo(suspended ? tr("words.suspend.select") : tr("words.unsuspend.select"));
             return;
         }
         try {
             wordRepository.setSuspended(ids, suspended);
             context.changes().publish(DataChange.WORDS);
         } catch (SQLException | RuntimeException e) {
-            context.errors().reportFailure(suspended ? "Suspend failed" : "Unsuspend failed", e);
+            context.errors().reportFailure(suspended ? tr("review.suspend.failed") : tr("words.unsuspend.failed"), e);
         }
     }
 
@@ -426,20 +439,21 @@ public final class WordListView {
     private void deleteSelectedWords() {
         List<WordCard> selected = selectedWords();
         if (selected.isEmpty()) {
-            context.errors().showInfo("Please select a word to delete.");
+            context.errors().showInfo(tr("words.delete.select"));
             return;
         }
         List<Long> ids = selected.stream().map(WordCard::getId).toList();
         try {
             int reviews = reviewLogRepository.countByWords(ids);
             boolean canSuspend = selected.stream().anyMatch(word -> !word.isSuspended());
-            ButtonType delete = new ButtonType("Delete", ButtonBar.ButtonData.OK_DONE);
-            ButtonType suspendInstead = new ButtonType("Suspend instead", ButtonBar.ButtonData.OTHER);
-            ButtonType cancel = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+            ButtonType delete = new ButtonType(tr("words.delete.button"), ButtonBar.ButtonData.OK_DONE);
+            ButtonType suspendInstead = new ButtonType(tr("words.delete.suspendInstead"), ButtonBar.ButtonData.OTHER);
+            ButtonType cancel = new ButtonType(tr("common.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
             ButtonType[] buttons = canSuspend
                 ? new ButtonType[] {delete, suspendInstead, cancel}
                 : new ButtonType[] {delete, cancel};
-            Optional<ButtonType> choice = context.dialogs().choose(selected.size() == 1 ? "Delete word" : "Delete words",
+            Optional<ButtonType> choice = context.dialogs().choose(selected.size() == 1 ? tr("words.delete.title.one")
+                    : tr("words.delete.title.many"),
                 deleteHeader(selected), deleteWarning(selected.size(), reviews, canSuspend), buttons);
             if (choice.isEmpty() || choice.get() == cancel) {
                 return;
@@ -451,22 +465,23 @@ public final class WordListView {
             }
             context.changes().publish(DataChange.WORDS);
         } catch (SQLException | RuntimeException e) {
-            context.errors().reportFailure("Delete failed", e);
+            context.errors().reportFailure(tr("words.delete.failed"), e);
         }
     }
 
     /** "Delete "lucid"?" or "Delete 3 words?", naming the deck (or the number of decks) with "All decks". */
     private String deleteHeader(List<WordCard> selected) {
-        String fromDeck = "";
-        if (deckCol.isVisible()) {
-            Set<Long> decks = selected.stream().map(WordCard::getDeckId).collect(Collectors.toSet());
-            fromDeck = decks.size() == 1
-                ? " from " + deckNames.getOrDefault(selected.get(0).getDeckId(), "its deck")
-                : " from " + decks.size() + " decks";
+        boolean one = selected.size() == 1;
+        Object what = one ? selected.get(0).getEnglish() : selected.size();
+        if (!deckCol.isVisible()) {
+            return one ? tr("words.delete.header.one", what) : tr("words.delete.header.many", what);
         }
-        return selected.size() == 1
-            ? "Delete \"" + selected.get(0).getEnglish() + "\"" + fromDeck + "?"
-            : "Delete " + selected.size() + " words" + fromDeck + "?";
+        Set<Long> decks = selected.stream().map(WordCard::getDeckId).collect(Collectors.toSet());
+        if (decks.size() > 1) {
+            return tr("words.delete.header.manyFromDecks", what, decks.size());
+        }
+        String deck = deckNames.getOrDefault(selected.get(0).getDeckId(), tr("words.delete.itsDeck"));
+        return one ? tr("words.delete.header.oneFromDeck", what, deck) : tr("words.delete.header.manyFromDeck", what, deck);
     }
 
     /**
@@ -476,17 +491,13 @@ public final class WordListView {
     static String deleteWarning(int words, int reviews, boolean canSuspend) {
         boolean one = words == 1;
         String history = reviews == 0
-            ? (one ? "It has no review history yet." : "They have no review history yet.")
-            : (one ? "Its review history" : "Their review history") + " (" + reviews
-                + (reviews == 1 ? " review" : " reviews") + ") will be deleted with "
-                + (one ? "it" : "them") + ", and those reviews no longer count in the daily numbers and statistics.";
-        String text = history + System.lineSeparator() + System.lineSeparator()
-            + "Deleting cannot be undone: only restoring a JSON backup made before brings "
-            + (one ? "it" : "them") + " back.";
+            ? (one ? tr("words.delete.noHistory.one") : tr("words.delete.noHistory.many"))
+            : (one ? tr("words.delete.history.one", reviews) : tr("words.delete.history.many", reviews));
+        String paragraph = System.lineSeparator() + System.lineSeparator();
+        String text = history + paragraph
+            + (one ? tr("words.delete.permanent.one") : tr("words.delete.permanent.many"));
         if (canSuspend) {
-            text += System.lineSeparator() + System.lineSeparator() + "Suspend instead to stop reviewing "
-                + (one ? "it" : "them") + " and keep the history; you can unsuspend " + (one ? "it" : "them")
-                + " here at any time.";
+            text += paragraph + (one ? tr("words.delete.suspendHint.one") : tr("words.delete.suspendHint.many"));
         }
         return text;
     }

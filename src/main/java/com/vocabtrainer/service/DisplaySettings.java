@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * How the window shows text, kept in the {@code settings} table: the text size in percent of the
  * system's ({@code ui.textSize}: 100, 115 or 130; 100 until changed). A saved value that is not one
@@ -57,7 +59,7 @@ public class DisplaySettings {
      */
     public void saveTextSizePercent(int percent) {
         if (!TEXT_SIZES.contains(percent)) {
-            throw new IllegalArgumentException("Text size must be one of " + TEXT_SIZES + " percent.");
+            throw new IllegalArgumentException(tr("validation.textSize", TEXT_SIZES.toString()));
         }
         settings.save(TEXT_SIZE_KEY, String.valueOf(percent));
     }

@@ -8,6 +8,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The header lines of an Anki plain-text file ("Notes in Plain Text", Anki 2.1.55 and later): the
  * lines at the top of the file that start with '#', such as
@@ -131,16 +133,16 @@ public final class AnkiHeader {
             return Optional.empty();
         }
         if (column == guidColumn) {
-            return Optional.of("Anki guid");
+            return Optional.of(tr("anki.column.guid"));
         }
         if (column == notetypeColumn) {
-            return Optional.of("Anki note type");
+            return Optional.of(tr("anki.column.noteType"));
         }
         if (column == deckColumn) {
-            return Optional.of("Anki deck");
+            return Optional.of(tr("anki.column.deck"));
         }
         if (column == tagsColumn) {
-            return Optional.of("Anki tags");
+            return Optional.of(tr("anki.column.tags"));
         }
         return Optional.empty();
     }
@@ -152,7 +154,7 @@ public final class AnkiHeader {
 
     /** For the preview, e.g. "Anki headers: separator, html, columns, tags column". */
     public String describe() {
-        return isAnki() ? "Anki headers: " + String.join(", ", keys.stream().sorted().toList()) : "";
+        return isAnki() ? tr("anki.headers", String.join(", ", keys.stream().sorted().toList())) : "";
     }
 
     private static final class Parser {

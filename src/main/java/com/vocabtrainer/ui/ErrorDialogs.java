@@ -10,6 +10,8 @@ import javafx.scene.layout.Region;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /** Error alerts shared by startup, the uncaught-exception handler and the main window. */
 public final class ErrorDialogs {
     private static final Logger LOGGER = Logger.getLogger(ErrorDialogs.class.getName());
@@ -62,7 +64,7 @@ public final class ErrorDialogs {
             return;
         }
         try {
-            Alert alert = exceptionAlert("Unexpected error", "Something went wrong", error);
+            Alert alert = exceptionAlert(tr("error.unexpected.title"), tr("error.unexpected.header"), error);
             alert.setOnHidden(event -> uncaughtAlertShowing = false);
             uncaughtAlertShowing = true;
             alert.show();

@@ -22,6 +22,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The column mapping of the import preview: which column of the file holds the English word, the
  * meaning, the example, the tags, the phonetic, the part of speech and the note, pre-selected as the
@@ -29,20 +31,9 @@ import java.util.function.Function;
  * calls {@code onChange}, which previews the file again with the chosen columns.
  */
 final class ColumnMappingPane {
-    /** The fields in the order the pane lists them, with their labels. */
-    private static final Map<WordColumn, String> FIELDS = new LinkedHashMap<>();
-
-    static {
-        FIELDS.put(WordColumn.ENGLISH, "English");
-        FIELDS.put(WordColumn.CHINESE, "Chinese meaning");
-        FIELDS.put(WordColumn.EXAMPLE, "Example");
-        FIELDS.put(WordColumn.TAGS, "Tags");
-        FIELDS.put(WordColumn.PHONETIC, "Phonetic");
-        FIELDS.put(WordColumn.POS, "Part of speech");
-        FIELDS.put(WordColumn.NOTE, "Note");
-    }
-
-    private static final ColumnChoice NONE = new ColumnChoice(-1, "(none)");
+    /** The fields in the order the pane lists them. */
+    private static final List<WordColumn> FIELDS = List.of(WordColumn.ENGLISH, WordColumn.CHINESE,
+        WordColumn.EXAMPLE, WordColumn.TAGS, WordColumn.PHONETIC, WordColumn.POS, WordColumn.NOTE);
 
     /** A choice in a column combo box: a column of the file, or {@link #NONE}. */
     record ColumnChoice(int index, String label) {
@@ -52,6 +43,8 @@ final class ColumnMappingPane {
         }
     }
 
+    /** No column of the file holds the field. */
+    private final ColumnChoice none = new ColumnChoice(-1, tr("import.mapping.none"));
     private final Map<WordColumn, ComboBox<ColumnChoice>> comboBoxes = new LinkedHashMap<>();
     private final Label formatLabel = new Label();
     private final Label chineseHint = new Label();
@@ -64,17 +57,17 @@ final class ColumnMappingPane {
         grid.setHgap(10);
         grid.setVgap(8);
         int position = 0;
-        for (Map.Entry<WordColumn, String> field : FIELDS.entrySet()) {
+        for (WordColumn field : FIELDS) {
             ComboBox<ColumnChoice> comboBox = new ComboBox<>();
-            comboBox.setId("map" + idPart(field.getKey()) + "Column");
+            comboBox.setId("map" + idPart(field) + "Column");
             comboBox.setMaxWidth(Double.MAX_VALUE);
             comboBox.valueProperty().addListener((observable, previous, chosen) -> {
                 if (!showing && chosen != null) {
                     onChange.run();
                 }
             });
-            comboBoxes.put(field.getKey(), comboBox);
-            Label label = new Label(field.getValue());
+            comboBoxes.put(field, comboBox);
+            Label label = new Label(fieldLabel(field));
             label.setLabelFor(comboBox);
             int row = position / 2;
             int column = (position % 2) * 2;
@@ -96,21 +89,21 @@ final class ColumnMappingPane {
         chineseHint.setId("importMeaningHint");
         chineseHint.setWrapText(true);
         table.setId("importPreviewTable");
-        table.setAccessibleText("The first rows as they would be imported");
+        table.setAccessibleText(tr("import.mapping.table.accessible"));
         table.setPrefHeight(250);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        table.setPlaceholder(new Label("No rows to import."));
-        table.getColumns().add(column("Line", 45, row -> String.valueOf(row.line())));
-        table.getColumns().add(column("English", 110, ImportPreview.Row::english));
-        table.getColumns().add(column("Chinese", 150, ImportPreview.Row::chinese));
-        table.getColumns().add(column("POS", 65, ImportPreview.Row::partOfSpeech));
-        table.getColumns().add(column("Phonetic", 80, ImportPreview.Row::phonetic));
-        table.getColumns().add(column("Example", 140, ImportPreview.Row::example));
-        table.getColumns().add(column("Note", 100, ImportPreview.Row::note));
-        table.getColumns().add(column("Tags", 70, ImportPreview.Row::tags));
-        table.getColumns().add(column("Status", 270, ImportPreview.Row::status));
+        table.setPlaceholder(new Label(tr("import.mapping.table.empty")));
+        table.getColumns().add(column(tr("import.mapping.column.line"), 45, row -> String.valueOf(row.line())));
+        table.getColumns().add(column(tr("import.mapping.column.english"), 110, ImportPreview.Row::english));
+        table.getColumns().add(column(tr("import.mapping.column.chinese"), 150, ImportPreview.Row::chinese));
+        table.getColumns().add(column(tr("import.mapping.column.pos"), 65, ImportPreview.Row::partOfSpeech));
+        table.getColumns().add(column(tr("word.phonetic"), 80, ImportPreview.Row::phonetic));
+        table.getColumns().add(column(tr("word.example"), 140, ImportPreview.Row::example));
+        table.getColumns().add(column(tr("word.note"), 100, ImportPreview.Row::note));
+        table.getColumns().add(column(tr("word.tags"), 70, ImportPreview.Row::tags));
+        table.getColumns().add(column(tr("import.mapping.column.status"), 270, ImportPreview.Row::status));
 
-        Label title = new Label("Columns: choose which column holds each field; the first rows below show the result.");
+        Label title = new Label(tr("import.mapping.title"));
         title.setWrapText(true);
         root = new VBox(8, formatLabel, title, grid, chineseHint, table);
         root.setId("columnMappingPane");
@@ -134,7 +127,7 @@ final class ColumnMappingPane {
         try {
             if (selectColumns) {
                 List<ColumnChoice> choices = new ArrayList<>();
-                choices.add(NONE);
+                choices.add(none);
                 for (WordListFile.FileColumn column : preview.fileColumns()) {
                     choices.add(new ColumnChoice(column.index(), column.label()));
                 }
@@ -145,18 +138,15 @@ final class ColumnMappingPane {
                     comboBox.getSelectionModel().select(choices.stream()
                         .filter(choice -> choice.index() == index)
                         .findFirst()
-                        .orElse(NONE));
+                        .orElse(none));
                 }
             }
             int width = preview.fileColumns().size();
-            formatLabel.setText("File: " + preview.encoding() + ", "
-                + (width == 1 ? "1 column (a list of words)" : preview.delimiter() + "-separated, " + width + " columns")
-                + (preview.format().isBlank() ? "" : ", " + preview.format()));
+            String file = tr("import.mapping.file", preview.encoding(), width == 1 ? tr("import.mapping.oneColumn")
+                : tr("import.mapping.columns", preview.delimiter(), width));
+            formatLabel.setText(preview.format().isBlank() ? file : tr("import.mapping.fileFormat", file, preview.format()));
             chineseHint.setText(preview.mapping().has(WordColumn.CHINESE) && preview.needMeaningCount() == 0
-                ? ""
-                : "Words without a Chinese meaning get theirs, with the phonetic and part of speech, from the local"
-                    + " dictionary (imported ECDICT, then the starter words). Words it does not have are skipped,"
-                    + " unless online lookups are on and a dictionary online has them.");
+                ? "" : tr("import.mapping.meaningHint"));
             chineseHint.setVisible(!chineseHint.getText().isEmpty());
             chineseHint.setManaged(chineseHint.isVisible());
             table.getItems().setAll(preview.rows());
@@ -180,6 +170,18 @@ final class ColumnMappingPane {
             columns = columns.with(entry.getKey(), choice == null ? -1 : choice.index());
         }
         return columns;
+    }
+
+    private static String fieldLabel(WordColumn field) {
+        return switch (field) {
+            case ENGLISH -> tr("import.mapping.field.english");
+            case CHINESE -> tr("add.prompt.chinese");
+            case EXAMPLE -> tr("word.example");
+            case TAGS -> tr("word.tags");
+            case PHONETIC -> tr("word.phonetic");
+            case POS -> tr("word.partOfSpeech");
+            case NOTE -> tr("word.note");
+        };
     }
 
     private static String idPart(WordColumn field) {

@@ -21,6 +21,8 @@ import java.time.format.DateTimeParseException;
 import java.util.Optional;
 import java.util.OptionalInt;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Edits the exam date in a modal form: the exam of every deck or the current deck's own, its name
  * and its date (empty for none). Saving brings the reviews scheduled on or after the exam forward
@@ -45,7 +47,7 @@ public final class ExamDialog {
         OptionalInt moved = new ExamDialog(context, planService).edit(context.decks().current());
         if (moved.isPresent()) {
             boolean reviewsMoved = moved.getAsInt() > 0;
-            context.errors().guard("Exam date saved, but refreshing the views failed", () -> {
+            context.errors().guard(tr("exam.refreshFailed"), () -> {
                 if (reviewsMoved) {
                     context.changes().publish(DataChange.REVIEW_SETTINGS, DataChange.WORDS);
                 } else {
@@ -65,10 +67,10 @@ public final class ExamDialog {
         boolean ownExam = settings.deckExam(deck.getId()).isPresent();
 
         ToggleGroup scope = new ToggleGroup();
-        RadioButton everyDeck = new RadioButton("Every deck");
+        RadioButton everyDeck = new RadioButton(tr("exam.form.everyDeck"));
         everyDeck.setId("examScopeEveryDeck");
         everyDeck.setToggleGroup(scope);
-        RadioButton thisDeck = new RadioButton("Only " + deck.getName());
+        RadioButton thisDeck = new RadioButton(tr("form.onlyDeck", deck.getName()));
         thisDeck.setId("examScopeThisDeck");
         thisDeck.setToggleGroup(scope);
         (ownExam ? thisDeck : everyDeck).setSelected(true);
@@ -80,7 +82,7 @@ public final class ExamDialog {
         DatePicker datePicker = new DatePicker();
         datePicker.setId("examDatePicker");
         datePicker.setConverter(new IsoDates());
-        datePicker.setPromptText("yyyy-mm-dd");
+        datePicker.setPromptText(tr("exam.form.datePrompt"));
         datePicker.setEditable(true);
         show(settings.examFor(deck.getId()), nameField, datePicker);
         // Switching between every deck's exam and the deck's own shows the exam of that choice.
@@ -91,17 +93,15 @@ public final class ExamDialog {
         form.setId("examForm");
         form.setHgap(10);
         form.setVgap(10);
-        form.add(Widgets.formLabel("Exam _for", everyDeck), 0, 0);
+        form.add(Widgets.formLabel(tr("exam.form.for"), everyDeck), 0, 0);
         form.add(new HBox(16, everyDeck, thisDeck), 1, 0);
-        form.add(Widgets.formLabel("_Exam", nameField), 0, 1);
+        form.add(Widgets.formLabel(tr("exam.form.name"), nameField), 0, 1);
         form.add(nameField, 1, 1);
-        form.add(Widgets.formLabel("_Date", datePicker), 0, 2);
+        form.add(Widgets.formLabel(tr("exam.form.date"), datePicker), 0, 2);
         form.add(datePicker, 1, 2);
-        form.add(hint("Reviews that would fall on or after the exam day come in the last week before it instead."
-            + " Leave the date empty for no exam; for " + deck.getName() + " only, an empty date means it has"
-            + " every deck's exam."), 1, 3);
+        form.add(hint(tr("exam.form.hint", deck.getName())), 1, 3);
 
-        if (!context.dialogs().showForm("Exam date", form)) {
+        if (!context.dialogs().showForm(tr("exam.form.title"), form)) {
             return OptionalInt.empty();
         }
         try {
@@ -109,10 +109,10 @@ public final class ExamDialog {
             Exam exam = date == null ? null : new Exam(nameField.getText(), date);
             return OptionalInt.of(planService.saveExam(deck.getId(), thisDeck.isSelected(), exam));
         } catch (IllegalArgumentException e) {
-            context.errors().showError("Exam date not saved", e.getMessage());
+            context.errors().showError(tr("exam.notSaved"), e.getMessage());
             return OptionalInt.empty();
         } catch (RuntimeException e) {
-            context.errors().reportFailure("Exam date not saved", e);
+            context.errors().reportFailure(tr("exam.notSaved"), e);
             return OptionalInt.empty();
         }
     }
@@ -132,7 +132,7 @@ public final class ExamDialog {
         try {
             return LocalDate.parse(text);
         } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException("Enter the exam date as year-month-day, for example 2026-11-16.");
+            throw new IllegalArgumentException(tr("exam.form.badDate"));
         }
     }
 

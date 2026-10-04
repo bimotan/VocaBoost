@@ -26,6 +26,8 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * A word list opened for import: a GRE CSV, a TSV, an Anki plain-text export, or a list of English
  * words, one per line. It reads the Anki header lines at the top ({@link AnkiHeader}), then the
@@ -69,14 +71,11 @@ public final class WordListFile implements Closeable {
     public record FileColumn(int index, String name, String sample) {
         /** "Column 2 · Back: 减弱" */
         public String label() {
-            StringBuilder label = new StringBuilder("Column ").append(index + 1);
+            String label = tr("import.column.label", index + 1);
             if (!name.isBlank()) {
-                label.append(" · ").append(name);
+                label += " · " + name;
             }
-            if (!sample.isBlank()) {
-                label.append(": ").append(sample);
-            }
-            return label.toString();
+            return sample.isBlank() ? label : tr("import.column.sample", label, sample);
         }
     }
 
@@ -222,7 +221,7 @@ public final class WordListFile implements Closeable {
 
     /** "UTF-8", "GBK/GB18030", ... */
     public String encodingName() {
-        return csv.encoding().map(TextEncoding::displayName).orElse("decoded text");
+        return csv.encoding().map(TextEncoding::displayName).orElse(tr("csv.encoding.decoded"));
     }
 
     /** "comma", "tab", ... */
@@ -242,7 +241,7 @@ public final class WordListFile implements Closeable {
             String name = index < names.size() ? names.get(index).replace('﻿', ' ').strip() : "";
             Optional<String> role = anki.columnRole(index);
             if (role.isPresent()) {
-                name = name.isEmpty() ? role.get() : name + " (" + role.get() + ")";
+                name = name.isEmpty() ? role.get() : tr("import.column.role", name, role.get());
             }
             String value = "";
             for (CsvRecord record : sample) {
@@ -295,13 +294,13 @@ public final class WordListFile implements Closeable {
         return ColumnDetector.detect(columns, rows, width, skipped, true);
     }
 
-    /** Where the detected column names came from, for the preview, e.g. " (header row)". */
+    /** Where the detected column names came from, for the preview, e.g. "header row". */
     public String describeLayout() {
         return switch (layout) {
-            case HEADER_ROW -> " (header row)";
-            case SKIPPED_HEADER_ROW -> " (header row line " + headerRow.lineNumber() + " skipped)";
-            case ANKI_COLUMNS -> " (Anki #columns)";
-            case NO_HEADER -> " (no header row)";
+            case HEADER_ROW -> tr("import.layout.header");
+            case SKIPPED_HEADER_ROW -> tr("import.layout.skippedHeader", headerRow.lineNumber());
+            case ANKI_COLUMNS -> tr("import.layout.anki");
+            case NO_HEADER -> tr("import.layout.none");
         };
     }
 

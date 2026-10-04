@@ -12,6 +12,7 @@ import com.vocabtrainer.service.DeckService;
 import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.WordValidationService;
 import com.vocabtrainer.util.ErrorMessages;
+import com.vocabtrainer.util.Messages;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -24,6 +25,8 @@ import java.util.concurrent.CancellationException;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
+
+import static com.vocabtrainer.util.Messages.tr;
 
 /**
  * Builds a deck from the words ECDICT tags with an exam, such as every GRE word, most common first.
@@ -47,21 +50,19 @@ public class EcdictTagDeckService {
 
     /** The exam tags of ECDICT's {@code tag} field. */
     public enum Tag {
-        GRE("gre", "GRE"),
-        TOEFL("toefl", "TOEFL"),
-        IELTS("ielts", "IELTS"),
-        CET4("cet4", "CET-4"),
-        CET6("cet6", "CET-6"),
-        KY("ky", "考研 Kaoyan"),
-        GK("gk", "高考 Gaokao"),
-        ZK("zk", "中考 Zhongkao");
+        GRE("gre"),
+        TOEFL("toefl"),
+        IELTS("ielts"),
+        CET4("cet4"),
+        CET6("cet6"),
+        KY("ky"),
+        GK("gk"),
+        ZK("zk");
 
         private final String code;
-        private final String label;
 
-        Tag(String code, String label) {
+        Tag(String code) {
             this.code = code;
-            this.label = label;
         }
 
         /** The tag as ECDICT writes it, such as "gre" or "ky". */
@@ -69,19 +70,29 @@ public class EcdictTagDeckService {
             return code;
         }
 
-        /** The exam's name, such as "GRE" or "考研 Kaoyan". */
+        /** The exam's name in the app's language, such as "GRE" or "Kaoyan (考研)". */
         public String label() {
-            return label;
+            return switch (this) {
+                case GRE -> tr("ecdict.tag.gre");
+                case TOEFL -> tr("ecdict.tag.toefl");
+                case IELTS -> tr("ecdict.tag.ielts");
+                case CET4 -> tr("ecdict.tag.cet4");
+                case CET6 -> tr("ecdict.tag.cet6");
+                case KY -> tr("ecdict.tag.ky");
+                case GK -> tr("ecdict.tag.gk");
+                case ZK -> tr("ecdict.tag.zk");
+            };
         }
 
         /** The deck name the form suggests, such as "GRE (ECDICT)". */
         public String defaultDeckName() {
-            return label + " (ECDICT)";
+            return tr("ecdict.tag.deckName", label());
         }
 
+        /** The exam's name and the tag, as the form lists them: "GRE (gre)". */
         @Override
         public String toString() {
-            return label + " (" + code + ")";
+            return tr("ecdict.tag.choice", label(), code);
         }
     }
 
@@ -94,13 +105,13 @@ public class EcdictTagDeckService {
     public record Request(Tag tag, String deckName, int limit, EcdictRepository.TagOrder order) {
         public Request {
             if (tag == null || order == null) {
-                throw new IllegalArgumentException("Choose a tag and an order.");
+                throw new IllegalArgumentException(tr("ecdict.deck.error.tagOrder"));
             }
             if (deckName == null || deckName.isBlank()) {
-                throw new IllegalArgumentException("Enter the name of the deck to create or fill.");
+                throw new IllegalArgumentException(tr("ecdict.deck.error.name"));
             }
             if (limit < 0) {
-                throw new IllegalArgumentException("The limit must be a whole number, or empty for every word.");
+                throw new IllegalArgumentException(tr("ecdict.deck.error.limit"));
             }
         }
     }
@@ -117,23 +128,22 @@ public class EcdictTagDeckService {
      * @param tagged        words ECDICT tags with the exam
      */
     public record Result(Deck deck, boolean created, int added, int alreadyInDeck, int skipped, int tagged) {
-        /** For example "Added 7,504 GRE words to GRE (ECDICT) (new deck); 12 already in it, 3 skipped." */
+        /** For example "Added 7,504 GRE words to GRE (ECDICT) (new deck). 12 already in the deck." */
         public String toDisplayText(Tag tag) {
-            StringBuilder text = new StringBuilder(deck == null
-                ? "No " + tag.label() + " word could be added, so no deck was created."
-                : String.format(Locale.ROOT, "Added %,d %s %s to %s%s.", added, tag.label(),
-                    added == 1 ? "word" : "words", deck.getName(), created ? " (new deck)" : ""));
+            List<String> text = new ArrayList<>();
+            text.add(deck == null ? tr("ecdict.deck.noneAdded", tag.label())
+                : created ? tr("ecdict.deck.addedNew", added, tag.label(), deck.getName())
+                : tr("ecdict.deck.added", added, tag.label(), deck.getName()));
             if (alreadyInDeck > 0) {
-                text.append(String.format(Locale.ROOT, " %,d already in the deck.", alreadyInDeck));
+                text.add(tr("ecdict.deck.alreadyIn", alreadyInDeck));
             }
             if (skipped > 0) {
-                text.append(String.format(Locale.ROOT, " %,d skipped (no Chinese meaning or a spelling with"
-                    + " characters other than letters, spaces, hyphens and apostrophes).", skipped));
+                text.add(tr("ecdict.deck.skipped", skipped));
             }
             if (tagged == 0) {
-                text.append(" ECDICT tags no word with ").append(tag.code()).append('.');
+                text.add(tr("ecdict.deck.noTagged", tag.code()));
             }
-            return text.toString();
+            return Messages.sentences(text);
         }
     }
 
@@ -145,8 +155,7 @@ public class EcdictTagDeckService {
      */
     public record Progress(int added, int total) {
         public String toDisplayText() {
-            return total < 0 ? "Reading ECDICT..."
-                : String.format(Locale.ROOT, "Adding words: %,d / %,d", added, total);
+            return total < 0 ? tr("ecdict.deck.reading") : tr("ecdict.deck.adding", added, total);
         }
     }
 
@@ -170,7 +179,7 @@ public class EcdictTagDeckService {
         try {
             return ecdict.metadata().map(imported -> imported.rowCount() > 0).orElse(false);
         } catch (SQLException e) {
-            throw new IllegalStateException("Cannot read the imported ECDICT dictionary: " + ErrorMessages.rootMessage(e), e);
+            throw new IllegalStateException(tr("ecdict.error.read", ErrorMessages.rootMessage(e)), e);
         }
     }
 
@@ -184,15 +193,14 @@ public class EcdictTagDeckService {
      */
     public Result build(Request request, Consumer<Progress> progress, BooleanSupplier cancelled) {
         if (!isAvailable()) {
-            throw new IllegalStateException("No ECDICT dictionary is imported. Import ecdict.csv in the ECDICT box"
-                + " of the Settings tab first.");
+            throw new IllegalStateException(tr("ecdict.error.notImported"));
         }
         progress.accept(new Progress(0, -1));
         List<EcdictRow> rows;
         try {
             rows = ecdict.findByTag(request.tag().code(), request.order());
         } catch (SQLException e) {
-            throw new IllegalStateException("Cannot read the ECDICT dictionary: " + ErrorMessages.rootMessage(e), e);
+            throw new IllegalStateException(tr("ecdict.error.read", ErrorMessages.rootMessage(e)), e);
         }
         checkCancelled(cancelled);
         try {
@@ -203,7 +211,7 @@ public class EcdictTagDeckService {
             }
             return result;
         } catch (SQLException e) {
-            throw new IllegalStateException("Cannot add the words: " + ErrorMessages.rootMessage(e), e);
+            throw new IllegalStateException(tr("ecdict.deck.error.add", ErrorMessages.rootMessage(e)), e);
         }
     }
 

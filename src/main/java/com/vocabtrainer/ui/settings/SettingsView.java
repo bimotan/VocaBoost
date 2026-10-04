@@ -4,6 +4,8 @@ import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.service.DisplaySettings;
 import com.vocabtrainer.service.ExamPlanService;
 import com.vocabtrainer.service.GoalSettings;
+import com.vocabtrainer.service.LanguageSettings;
+import com.vocabtrainer.service.LanguageSettings.Language;
 import com.vocabtrainer.service.LocalDictionaryService;
 import com.vocabtrainer.service.ReviewSettings;
 import com.vocabtrainer.service.SchedulingSettings;
@@ -15,6 +17,7 @@ import com.vocabtrainer.ui.OfflineMode;
 import com.vocabtrainer.ui.ViewContext;
 import com.vocabtrainer.ui.Widgets;
 import com.vocabtrainer.util.AppLogging;
+import com.vocabtrainer.util.Messages;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -32,39 +35,52 @@ import javafx.scene.layout.VBox;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.function.IntConsumer;
+
+import static com.vocabtrainer.util.Messages.tr;
 
 /**
  * The Settings tab: study settings (scheduler, new words per day, goals, exam date), offline mode (the same
  * switch as the header's), the ECDICT dictionary, the AI provider, the data and log folders, the
  * text size and the language. Every setting is saved in the {@code settings} table when it is
- * changed and applies at once.
+ * changed and applies at once, except the language, which applies when the app starts again.
  */
 public final class SettingsView {
     private final ViewContext context;
     private final Path databasePath;
     private final DisplaySettings display;
     private final IntConsumer applyTextSize;
+    private final LanguageSettings languages;
+    private final Locale systemLocale;
     private final ComboBox<Integer> textSizeSelector = new ComboBox<>();
+    private final ComboBox<Language> languageSelector = new ComboBox<>();
+    private final Label languageNote = new Label();
     private final Tab tab;
     /** Set while the text size selector is made to show the saved size, which is not saved again. */
     private boolean showingSavedTextSize;
+    /** Set while the language selector is made to show the saved language, which is not saved again. */
+    private boolean showingSavedLanguage;
 
     /**
      * {@code databasePath} is the database file, whose folder "Open data folder" opens;
-     * {@code applyTextSize} shows the window's text at a saved text size.
+     * {@code applyTextSize} shows the window's text at a saved text size; {@code systemLocale} is the
+     * computer's locale, which the language Auto follows.
      */
     public SettingsView(ViewContext context, SettingsService settingsService, SchedulingSettings scheduling,
                         ReviewSettings reviewSettings, GoalSettings goalSettings, ExamPlanService examPlans,
                         AiCacheRepository aiCacheRepository,
                         EcdictImportService ecdictImportService, LocalDictionaryService localDictionary,
                         ConfiguredServices configured, OfflineMode offlineMode, Path databasePath,
-                        DisplaySettings display, IntConsumer applyTextSize) {
+                        DisplaySettings display, IntConsumer applyTextSize, LanguageSettings languages,
+                        Locale systemLocale) {
         this.context = context;
         this.databasePath = databasePath;
         this.display = display;
         this.applyTextSize = applyTextSize;
+        this.languages = languages;
+        this.systemLocale = systemLocale;
 
         StudySettingsBox study = new StudySettingsBox(context, scheduling, reviewSettings, goalSettings, examPlans);
         EcdictSettingsBox ecdict = new EcdictSettingsBox(context, settingsService, ecdictImportService, localDictionary);
@@ -84,7 +100,7 @@ public final class SettingsView {
         content.setPadding(new Insets(24));
         ScrollPane scrollPane = new ScrollPane(content);
         scrollPane.setFitToWidth(true);
-        tab = Widgets.tab("settingsTab", "Settings", scrollPane);
+        tab = Widgets.tab("settingsTab", tr("settings.tab"), scrollPane);
         study.refreshWhenShown(tab);
     }
 
@@ -93,33 +109,31 @@ public final class SettingsView {
     }
 
     private static Node offlineSection(OfflineMode offlineMode) {
-        return new VBox(10, Widgets.sectionTitle("Online Services"),
-            offlineMode.checkBox("settingsOfflineModeToggle", "Offline mode / 离线模式"),
-            note(OfflineMode.DESCRIPTION + " The switch in the window header is the same setting."));
+        return new VBox(10, Widgets.sectionTitle(tr("settings.online.title")),
+            offlineMode.checkBox("settingsOfflineModeToggle", tr("offline.toggle")),
+            note(tr("settings.online.note", OfflineMode.description())));
     }
 
     /** The folders are opened, not shown: their paths name the user's account. */
     private Node dataSection() {
-        Button dataFolderButton = new Button("Open data folder");
+        Button dataFolderButton = new Button(tr("settings.data.openDataFolder"));
         dataFolderButton.setId("openDataFolderButton");
         dataFolderButton.setOnAction(event ->
-            Folders.open(context.errors(), "Data folder", databasePath.toAbsolutePath().getParent()));
-        Button logFolderButton = new Button("Open log folder");
+            Folders.open(context.errors(), tr("folder.data"), databasePath.toAbsolutePath().getParent()));
+        Button logFolderButton = new Button(tr("settings.data.openLogFolder"));
         logFolderButton.setId("openLogFolderButton");
         logFolderButton.setOnAction(event -> openLogFolder());
-        return new VBox(10, Widgets.sectionTitle("Data and Logs"), new HBox(10, dataFolderButton, logFolderButton),
-            note("The data folder holds vocab.db (words, reviews, goals and settings, including a saved API key)"
-                + " and the imported ECDICT dictionary, ecdict.db. The log folder holds the app's logs, which help"
-                + " when something went wrong."));
+        return new VBox(10, Widgets.sectionTitle(tr("settings.data.title")), new HBox(10, dataFolderButton, logFolderButton),
+            note(tr("settings.data.note")));
     }
 
     private void openLogFolder() {
         Optional<Path> logDirectory = AppLogging.logDirectory();
         if (logDirectory.isEmpty()) {
-            context.errors().showInfo("File logging is unavailable; logs are written to the console only.");
+            context.errors().showInfo(tr("settings.data.noLogFolder"));
             return;
         }
-        Folders.open(context.errors(), "Log folder", logDirectory.get());
+        Folders.open(context.errors(), tr("folder.log"), logDirectory.get());
     }
 
     /**
@@ -139,16 +153,16 @@ public final class SettingsView {
             try {
                 display.saveTextSizePercent(size);
             } catch (RuntimeException e) {
-                context.errors().reportFailure("Text size not saved", e);
+                context.errors().reportFailure(tr("settings.display.textSize.failed"), e);
                 showSavedTextSize();
                 return;
             }
             applyTextSize.accept(size);
         });
-        HBox row = new HBox(12, Widgets.formLabel("Te_xt size", textSizeSelector), textSizeSelector);
+        HBox row = new HBox(12, Widgets.formLabel(tr("settings.display.textSize"), textSizeSelector), textSizeSelector);
         row.setAlignment(Pos.CENTER_LEFT);
-        return new VBox(10, Widgets.sectionTitle("Display"), row,
-            note("Makes the text of the window and its dialogs larger; 100% is the system's text size."));
+        return new VBox(10, Widgets.sectionTitle(tr("settings.display.title")), row,
+            note(tr("settings.display.note")));
     }
 
     private void showSavedTextSize() {
@@ -165,23 +179,80 @@ public final class SettingsView {
             @Override
             protected void updateItem(Integer percent, boolean empty) {
                 super.updateItem(percent, empty);
-                setText(empty || percent == null ? null : percent + "%"
-                    + (percent == DisplaySettings.DEFAULT_TEXT_SIZE ? " (system size)" : ""));
+                setText(empty || percent == null ? null
+                    : percent == DisplaySettings.DEFAULT_TEXT_SIZE ? tr("settings.display.textSize.system", percent)
+                    : tr("settings.display.textSize.percent", percent));
             }
         };
     }
 
-    /** A placeholder until the app is translated: English is the only language. */
-    private static Node languageSection() {
-        ComboBox<String> languageSelector = new ComboBox<>();
+    /**
+     * The language of the app: Auto (the computer's language), Simplified Chinese or English. It is
+     * saved at once and applies when the app starts again, which the note under it says in the chosen
+     * language; a language that cannot be saved is reported and the selector goes back to the saved one.
+     */
+    private Node languageSection() {
         languageSelector.setId("languageSelector");
-        languageSelector.getItems().add("English");
-        languageSelector.getSelectionModel().selectFirst();
-        languageSelector.setDisable(true);
-        HBox row = new HBox(12, Widgets.formLabel("Interface language", languageSelector), languageSelector);
+        languageSelector.getItems().setAll(Language.values());
+        languageSelector.setCellFactory(list -> languageCell());
+        languageSelector.setButtonCell(languageCell());
+        showSavedLanguage();
+        languageSelector.valueProperty().addListener((observable, oldLanguage, language) -> {
+            if (showingSavedLanguage || language == null) {
+                return;
+            }
+            try {
+                languages.saveLanguage(language);
+            } catch (RuntimeException e) {
+                context.errors().reportFailure(tr("settings.language.failed"), e);
+                showSavedLanguage();
+                return;
+            }
+            showLanguageNote(language);
+        });
+        languageNote.setId("languageNoteLabel");
+        languageNote.setWrapText(true);
+        languageNote.setMinHeight(Region.USE_PREF_SIZE);
+        languageNote.getStyleClass().add("muted-text");
+        showLanguageNote(languageSelector.getValue());
+        HBox row = new HBox(12, Widgets.formLabel(tr("settings.language.label"), languageSelector), languageSelector);
         row.setAlignment(Pos.CENTER_LEFT);
-        return new VBox(10, Widgets.sectionTitle("Language"), row,
-            note("The app is in English for now; other languages will be offered here."));
+        return new VBox(10, Widgets.sectionTitle(tr("settings.language.title")), row, languageNote);
+    }
+
+    private void showSavedLanguage() {
+        showingSavedLanguage = true;
+        try {
+            languageSelector.setValue(languages.language());
+        } finally {
+            showingSavedLanguage = false;
+        }
+    }
+
+    /**
+     * What the language selector applies: nothing more when the app is shown in that language already,
+     * otherwise that it applies once the app starts again, said in the chosen language.
+     */
+    private void showLanguageNote(Language language) {
+        Locale chosen = language.locale(systemLocale);
+        languageNote.setText(chosen.equals(Messages.locale()) ? tr("settings.language.note")
+            : Messages.trIn(chosen, "settings.language.restart"));
+    }
+
+    private ListCell<Language> languageCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(Language language, boolean empty) {
+                super.updateItem(language, empty);
+                setText(empty || language == null ? null : switch (language) {
+                    case AUTO -> tr("settings.language.auto",
+                        language.locale(systemLocale).equals(Messages.SIMPLIFIED_CHINESE)
+                            ? tr("settings.language.chinese") : tr("settings.language.english"));
+                    case SIMPLIFIED_CHINESE -> tr("settings.language.chinese");
+                    case ENGLISH -> tr("settings.language.english");
+                });
+            }
+        };
     }
 
     private static Label note(String text) {

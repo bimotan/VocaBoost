@@ -19,6 +19,8 @@ import javafx.scene.layout.VBox;
 import java.util.List;
 import java.util.Optional;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * The window header: app title, deck and service status, the offline mode switch (the same one as on
  * the Settings tab), and the deck selector with create, rename and archive.
@@ -41,7 +43,7 @@ public final class DeckHeader {
         this.settingsService = settingsService;
         this.configured = configured;
 
-        Label title = Widgets.styled(new Label("VocaBoost"), "app-title");
+        Label title = Widgets.styled(new Label(tr("app.title")), "app-title");
         subtitleLabel.getStyleClass().add("secondary-text");
         subtitleLabel.setId("headerSubtitleLabel");
 
@@ -49,7 +51,7 @@ public final class DeckHeader {
         deckSelector.valueProperty().addListener((observable, oldDeck, newDeck) -> {
             // Only the user's choice switches decks, not the selector catching up with the deck list.
             if (!showingDecks && newDeck != null && newDeck.getId() != decks.currentId()) {
-                context.errors().guard("Switch deck failed", () -> decks.switchTo(newDeck));
+                context.errors().guard(tr("header.switchDeck.failed"), () -> decks.switchTo(newDeck));
             }
         });
         decks.activeDecks().addListener((ListChangeListener<Deck>) change -> showDecks());
@@ -63,20 +65,20 @@ public final class DeckHeader {
             }
         });
 
-        Button newDeckButton = new Button("New deck");
+        Button newDeckButton = new Button(tr("header.newDeck"));
         newDeckButton.setId("newDeckButton");
         newDeckButton.setOnAction(event -> createDeck());
-        Button renameDeckButton = new Button("Rename");
+        Button renameDeckButton = new Button(tr("header.rename"));
         renameDeckButton.setId("renameDeckButton");
         renameDeckButton.setOnAction(event -> renameCurrentDeck());
-        Button archiveDeckButton = new Button("Archive");
+        Button archiveDeckButton = new Button(tr("header.archive"));
         archiveDeckButton.setId("archiveDeckButton");
         archiveDeckButton.setOnAction(event -> archiveCurrentDeck());
 
-        Label deckLabel = Widgets.formLabel("_Deck", deckSelector);
+        Label deckLabel = Widgets.formLabel(tr("header.deck"), deckSelector);
         HBox deckControls = new HBox(8, deckLabel, deckSelector, newDeckButton, renameDeckButton, archiveDeckButton);
         deckControls.setAlignment(Pos.CENTER_LEFT);
-        CheckBox offlineToggle = offlineMode.checkBox("offlineModeToggle", "Offline mode / 离线模式");
+        CheckBox offlineToggle = offlineMode.checkBox("offlineModeToggle", tr("offline.toggle"));
         // In a narrow window the status line is cut short first, then the deck selector, never the
         // title or the buttons.
         for (Region region : List.of(title, deckLabel, newDeckButton, renameDeckButton, archiveDeckButton)) {
@@ -111,16 +113,17 @@ public final class DeckHeader {
 
     private void updateSubtitle() {
         boolean offline = settingsService.isOfflineMode();
-        String dictionaryStatus = settingsService.getEcdictPath().isPresent() ? "ECDICT configured"
-            : offline ? "starter words" : "starter/online fallback";
-        subtitleLabel.setText("Deck: " + context.decks().current().getName() + " | Dictionary: " + dictionaryStatus
-            + " | AI: " + (configured.ai().isAvailable() ? "configured" : "mock")
-            + (offline ? " | Offline mode" : ""));
+        String dictionaryStatus = settingsService.getEcdictPath().isPresent() ? tr("header.dictionary.ecdict")
+            : offline ? tr("header.dictionary.starter") : tr("header.dictionary.starterOnline");
+        String ai = configured.ai().isAvailable() ? tr("header.ai.configured") : tr("header.ai.mock");
+        String subtitle = tr("header.subtitle", context.decks().current().getName(), dictionaryStatus, ai);
+        subtitleLabel.setText(offline ? tr("header.subtitle.offline", subtitle) : subtitle);
     }
 
     private void createDeck() {
-        Optional<String> name = context.dialogs().askText("New deck", "Create a new deck", "Deck name", "");
-        name.ifPresent(value -> context.errors().guard("Create deck failed", () -> {
+        Optional<String> name = context.dialogs().askText(tr("header.newDeck.title"), tr("header.newDeck.header"),
+            tr("header.deckName"), "");
+        name.ifPresent(value -> context.errors().guard(tr("header.newDeck.failed"), () -> {
             Deck created = deckService.createDeck(value);
             context.decks().switchTo(created);
             context.changes().publish(DataChange.DECKS);
@@ -129,8 +132,9 @@ public final class DeckHeader {
 
     private void renameCurrentDeck() {
         Deck deck = context.decks().current();
-        Optional<String> name = context.dialogs().askText("Rename deck", "Rename current deck", "Deck name", deck.getName());
-        name.ifPresent(value -> context.errors().guard("Rename deck failed", () -> {
+        Optional<String> name = context.dialogs().askText(tr("header.rename.title"), tr("header.rename.header"),
+            tr("header.deckName"), deck.getName());
+        name.ifPresent(value -> context.errors().guard(tr("header.rename.failed"), () -> {
             deckService.renameDeck(deck.getId(), value);
             context.decks().reloadDecks();
             context.changes().publish(DataChange.DECKS);
@@ -139,10 +143,10 @@ public final class DeckHeader {
 
     private void archiveCurrentDeck() {
         Deck deck = context.decks().current();
-        boolean confirmed = context.dialogs().confirm("Archive deck", "Archive " + deck.getName() + "?",
-            "Words remain in SQLite, but the deck will be hidden from active study views.");
+        boolean confirmed = context.dialogs().confirm(tr("header.archive.title"),
+            tr("header.archive.header", deck.getName()), tr("header.archive.content"));
         if (confirmed) {
-            context.errors().guard("Archive deck failed", () -> {
+            context.errors().guard(tr("header.archive.failed"), () -> {
                 Deck next = deckService.archiveDeck(deck.getId());
                 context.decks().switchTo(next);
                 context.changes().publish(DataChange.DECKS);

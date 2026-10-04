@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.BiFunction;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 /**
  * Exports the current deck's words for other apps: an Anki plain-text file (the file Anki's
  * "Import File" reads, with the meaning, part of speech, phonetic, example and tags) and a plain
@@ -26,8 +28,8 @@ import java.util.function.BiFunction;
 final class WordListExportBox {
     private final ViewContext context;
     private final Label status = new Label();
-    private final Button ankiButton = new Button("Export for Anki (TSV)");
-    private final Button wordListButton = new Button("Export word list (txt)");
+    private final Button ankiButton = new Button(tr("export.anki"));
+    private final Button wordListButton = new Button(tr("export.wordList"));
     private final VBox root;
 
     WordListExportBox(ViewContext context, ImportExportService importExportService) {
@@ -36,16 +38,16 @@ final class WordListExportBox {
         wordListButton.setId("exportWordListButton");
         status.setId("exportStatusLabel");
         status.setWrapText(true);
-        ankiButton.setOnAction(event -> export("Export for Anki", "vocaboost-anki.txt",
-            new FileChooser.ExtensionFilter("Anki plain text", "*.txt", "*.tsv"), importExportService::exportForAnki));
-        wordListButton.setOnAction(event -> export("Export word list", "vocaboost-word-list.txt",
-            new FileChooser.ExtensionFilter("Text", "*.txt"), importExportService::exportWordList));
+        ankiButton.setOnAction(event -> export(tr("export.anki.title"), "vocaboost-anki.txt",
+            new FileChooser.ExtensionFilter(tr("export.anki.filter"), "*.txt", "*.tsv"), importExportService::exportForAnki));
+        wordListButton.setOnAction(event -> export(tr("export.wordList.title"), "vocaboost-word-list.txt",
+            new FileChooser.ExtensionFilter(tr("export.text.filter"), "*.txt"), importExportService::exportWordList));
 
-        Label hint = new Label("Anki: File > Import, then choose the file; the columns, tags and HTML are set by the file.");
+        Label hint = new Label(tr("export.anki.hint"));
         hint.setWrapText(true);
         HBox buttons = new HBox(10, ankiButton, wordListButton);
         buttons.setAlignment(Pos.CENTER_LEFT);
-        root = new VBox(10, Widgets.sectionTitle("Export for Other Apps"), buttons, hint, status);
+        root = new VBox(10, Widgets.sectionTitle(tr("export.title")), buttons, hint, status);
     }
 
     Node root() {
@@ -64,19 +66,19 @@ final class WordListExportBox {
         context.async().run(
             () -> exporter.apply(deck.getId(), output),
             exported -> {
-                status.setText("Deck: " + deck.getName() + System.lineSeparator() + "Exported: "
-                    + exported.toAbsolutePath());
-                context.errors().showInfo("Exported: " + exported.toAbsolutePath());
+                status.setText(tr("import.deck", deck.getName()) + System.lineSeparator()
+                    + tr("export.done", exported.toAbsolutePath().toString()));
+                context.errors().showInfo(tr("export.done", exported.toAbsolutePath().toString()));
             },
             error -> {
                 String message = error.getMessage() == null || error.getMessage().isBlank()
                     ? UiErrors.rootMessage(error)
                     : error.getMessage();
-                status.setText("Export failed: " + message);
-                context.errors().showError("Export failed", message);
+                status.setText(tr("import.failure", tr("export.failed"), message));
+                context.errors().showError(tr("export.failed"), message);
             },
             status,
-            "Exporting...",
+            tr("export.running"),
             ankiButton, wordListButton
         );
     }

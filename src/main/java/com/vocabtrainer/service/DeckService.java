@@ -8,6 +8,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 public class DeckService {
     private static final int MAX_DECK_NAME_LENGTH = 60;
 
@@ -19,12 +21,18 @@ public class DeckService {
         this.settingsService = settingsService;
     }
 
+    /** The deck a new database starts with, named in the app's language. */
     public Deck ensureDefaultDeck() {
         try {
-            return deckRepository.ensureDefaultDeck();
+            return deckRepository.ensureDefaultDeck(defaultDeckName());
         } catch (SQLException e) {
-            throw new IllegalStateException("无法初始化默认词库", e);
+            throw new IllegalStateException(tr("deck.error.defaultDeckFailed"), e);
         }
+    }
+
+    /** The name of the deck a new database starts with, in the app's language. */
+    public static String defaultDeckName() {
+        return tr("deck.defaultName");
     }
 
     /**
@@ -46,7 +54,7 @@ public class DeckService {
             settingsService.saveLastDeckId(deck.getId());
             return deck;
         } catch (SQLException e) {
-            throw new IllegalStateException("无法打开词库", e);
+            throw new IllegalStateException(tr("deck.error.openFailed"), e);
         }
     }
 
@@ -58,7 +66,7 @@ public class DeckService {
             }
             return decks;
         } catch (SQLException e) {
-            throw new IllegalStateException("无法读取词库列表", e);
+            throw new IllegalStateException(tr("deck.error.readFailed"), e);
         }
     }
 
@@ -66,7 +74,7 @@ public class DeckService {
         try {
             return deckRepository.findAllArchived();
         } catch (SQLException e) {
-            throw new IllegalStateException("无法读取已归档词库列表", e);
+            throw new IllegalStateException(tr("deck.error.readArchivedFailed"), e);
         }
     }
 
@@ -89,7 +97,7 @@ public class DeckService {
             rejectNameInUse(cleanName, null);
             return deckRepository.create(cleanName);
         } catch (SQLException e) {
-            throw new IllegalArgumentException("创建失败：词库名可能已存在", e);
+            throw new IllegalArgumentException(tr("deck.error.createNameInUse"), e);
         }
     }
 
@@ -99,7 +107,7 @@ public class DeckService {
             rejectNameInUse(cleanName, id);
             return deckRepository.rename(id, cleanName);
         } catch (SQLException e) {
-            throw new IllegalArgumentException("重命名失败：词库名可能已存在", e);
+            throw new IllegalArgumentException(tr("deck.error.renameNameInUse"), e);
         }
     }
 
@@ -108,16 +116,16 @@ public class DeckService {
         try {
             List<Deck> decks = deckRepository.findAllActive();
             if (decks.stream().noneMatch(deck -> deck.getId() == id)) {
-                throw new IllegalArgumentException("词库不存在或已归档");
+                throw new IllegalArgumentException(tr("deck.error.notActive"));
             }
             if (decks.size() <= 1) {
-                throw new IllegalArgumentException("至少需要保留一个活动词库：请先新建或恢复另一个词库，再归档这个词库");
+                throw new IllegalArgumentException(tr("deck.error.lastActive"));
             }
             deckRepository.archive(id);
             List<Deck> remaining = deckRepository.findAllActive();
             return remaining.isEmpty() ? oldestActiveDeckOrRecover() : remaining.get(0);
         } catch (SQLException e) {
-            throw new IllegalStateException("归档词库失败", e);
+            throw new IllegalStateException(tr("deck.error.archiveFailed"), e);
         }
     }
 
@@ -131,13 +139,12 @@ public class DeckService {
             if (deck.isPresent() && deck.get().isArchived()) {
                 Optional<Deck> active = deckRepository.findByName(deck.get().getName());
                 if (active.isPresent() && active.get().getId() != id) {
-                    throw new IllegalArgumentException("已有同名的活动词库「" + deck.get().getName()
-                        + "」：请先重命名或归档那个词库，再恢复这个词库");
+                    throw new IllegalArgumentException(tr("deck.error.restoreNameInUse", deck.get().getName()));
                 }
             }
             return deckRepository.restore(id);
         } catch (SQLException e) {
-            throw new IllegalArgumentException("恢复词库失败：" + e.getMessage(), e);
+            throw new IllegalArgumentException(tr("deck.error.restoreFailed", e.getMessage()), e);
         }
     }
 
@@ -156,7 +163,7 @@ public class DeckService {
         if (newestArchived.isPresent()) {
             return deckRepository.restore(newestArchived.get().getId());
         }
-        return deckRepository.ensureDefaultDeck();
+        return deckRepository.ensureDefaultDeck(defaultDeckName());
     }
 
     /** Names are unique among active decks; an archived deck's name can be used again. */
@@ -165,16 +172,16 @@ public class DeckService {
         if (existing.isEmpty() || (renamingId != null && existing.get().getId() == renamingId)) {
             return;
         }
-        throw new IllegalArgumentException("已有同名词库「" + name + "」，请换一个名称");
+        throw new IllegalArgumentException(tr("deck.error.nameInUse", name));
     }
 
     private String validateName(String name) {
         String cleanName = name == null ? "" : name.trim().replaceAll("\\s+", " ");
         if (cleanName.isBlank()) {
-            throw new IllegalArgumentException("词库名称不能为空");
+            throw new IllegalArgumentException(tr("deck.error.nameEmpty"));
         }
         if (cleanName.length() > MAX_DECK_NAME_LENGTH) {
-            throw new IllegalArgumentException("词库名称不能超过 " + MAX_DECK_NAME_LENGTH + " 个字符");
+            throw new IllegalArgumentException(tr("deck.error.nameTooLong", MAX_DECK_NAME_LENGTH));
         }
         return cleanName;
     }

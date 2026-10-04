@@ -4,6 +4,8 @@ import com.vocabtrainer.domain.ValidatedWord;
 
 import java.util.regex.Pattern;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 public class WordValidationService {
     private static final int MAX_ENGLISH_LENGTH = 80;
     private static final int MAX_CHINESE_LENGTH = 400;
@@ -27,10 +29,10 @@ public class WordValidationService {
 
         String cleanChinese = normalizeChinese(chinese);
         if (cleanChinese.isBlank()) {
-            throw new IllegalArgumentException("Chinese meaning cannot be empty.");
+            throw new IllegalArgumentException(tr("validation.chinese.empty"));
         }
         if (cleanChinese.length() > MAX_CHINESE_LENGTH) {
-            throw new IllegalArgumentException("Chinese meaning is too long.");
+            throw new IllegalArgumentException(tr("validation.chinese.tooLong"));
         }
 
         return new ValidatedWord(
@@ -70,13 +72,13 @@ public class WordValidationService {
 
     private void validateEnglish(String cleanEnglish) {
         if (cleanEnglish.isBlank()) {
-            throw new IllegalArgumentException("English word cannot be empty.");
+            throw new IllegalArgumentException(tr("validation.english.empty"));
         }
         if (cleanEnglish.length() > MAX_ENGLISH_LENGTH) {
-            throw new IllegalArgumentException("English word is too long.");
+            throw new IllegalArgumentException(tr("validation.english.tooLong"));
         }
         if (!ENGLISH_PATTERN.matcher(cleanEnglish).matches()) {
-            throw new IllegalArgumentException("English can only contain letters, spaces, hyphens and apostrophes.");
+            throw new IllegalArgumentException(tr("validation.english.characters"));
         }
     }
 }

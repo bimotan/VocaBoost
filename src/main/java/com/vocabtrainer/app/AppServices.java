@@ -42,6 +42,7 @@ import com.vocabtrainer.ui.MainWindow;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.Clock;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Random;
 import java.util.function.BiFunction;
@@ -112,9 +113,12 @@ public record AppServices(
         databaseManager.close();
     }
 
-    /** The main window on these services; {@code dialogs} shows its modal dialogs and file choosers. */
-    public MainWindow createMainWindow(Dialogs dialogs) {
-        return new MainWindow(this, dialogs);
+    /**
+     * The main window on these services; {@code dialogs} shows its modal dialogs and file choosers, and
+     * {@code systemLocale} is the computer's locale, which the language setting Auto follows.
+     */
+    public MainWindow createMainWindow(Dialogs dialogs, Locale systemLocale) {
+        return new MainWindow(this, dialogs, systemLocale);
     }
 
     /** Calls {@code supplier} once, on first use, and returns that value from then on. */

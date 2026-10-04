@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
 
+import static com.vocabtrainer.util.Messages.tr;
+
 public final class DictionaryServiceFactory {
     /** The configured dictionary API's address; without it there is none. */
     public static final String API_BASE_URL = "DICTIONARY_API_BASE_URL";
@@ -83,9 +85,10 @@ public final class DictionaryServiceFactory {
         List<DictionaryService> chain = new ArrayList<>();
         chain.add(local);
         if (configuredApi != null) {
-            chain.add(new OfflineAwareDictionaryService(configuredApi, offline, "词典 API"));
+            chain.add(new OfflineAwareDictionaryService(configuredApi, offline, tr("dictionary.api.name")));
         }
-        chain.add(new CachingDictionaryService(new OfflineAwareDictionaryService(online, offline, "在线词典"),
+        chain.add(new CachingDictionaryService(new OfflineAwareDictionaryService(online, offline,
+                tr("dictionary.online.name")),
             cacheRepository, clock));
         return new CompositeDictionaryService(chain);
     }
