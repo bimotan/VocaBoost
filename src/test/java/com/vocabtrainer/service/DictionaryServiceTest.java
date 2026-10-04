@@ -32,23 +32,6 @@ class DictionaryServiceTest {
     final TestDatabases databases = new TestDatabases();
 
     @Test
-    void mockDictionaryReturnsCandidate() {
-        DictionaryLookupResult result = new MockDictionaryService().lookup("abate");
-
-        assertTrue(result.success());
-        assertEquals("abate", result.entries().get(0).english());
-        assertFalse(result.entries().get(0).chinese().isBlank());
-    }
-
-    @Test
-    void mockDictionaryReportsMissingUnknownWords() {
-        DictionaryLookupResult result = new MockDictionaryService().lookup("notarealword");
-
-        assertFalse(result.success());
-        assertTrue(result.message().contains("Not found"));
-    }
-
-    @Test
     void localDictionaryVerifiesBundledStarterWords() {
         DictionaryService service = new LocalDictionaryService();
 
@@ -230,10 +213,24 @@ class DictionaryServiceTest {
             b64("dictionaryapi.dev")
         );
         cacheRepository.save("like", oldPayload, "dictionary", LocalDateTime.now());
-        DictionaryService service = new CachingDictionaryService(new MockDictionaryService(), cacheRepository);
+        AtomicInteger calls = new AtomicInteger();
+        DictionaryService delegate = new DictionaryService() {
+            @Override
+            public DictionaryLookupResult lookup(String english) {
+                calls.incrementAndGet();
+                return DictionaryLookupResult.notFound("Not found in the test dictionary.");
+            }
+
+            @Override
+            public boolean isConfigured() {
+                return true;
+            }
+        };
+        DictionaryService service = new CachingDictionaryService(delegate, cacheRepository);
 
         DictionaryLookupResult result = service.lookup("like");
 
+        assertEquals(0, calls.get(), "the cached entry answers");
         assertTrue(result.success());
         assertEquals("", result.entries().get(0).chinese());
         assertEquals("Something that a person likes.", result.entries().get(0).definition());
