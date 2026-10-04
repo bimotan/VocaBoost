@@ -91,7 +91,8 @@ class TextEncodingTest {
         Path file = write("starter-gbk.csv", starter.getBytes(GBK));
 
         assertEquals(TextEncoding.GB18030, TextEncoding.detect(file).charset());
-        assertEquals(List.of("abate", "减弱; 减少", "verb", "The storm began to abate.", "gre;starter"), readAll(file).get(1));
+        assertEquals(List.of("abate", "减弱; 减少", "verb", "By late afternoon the storm had begun to abate, and the"
+            + " stranded hikers finally felt safe enough to descend.", "gre;starter"), readAll(file).get(1));
     }
 
     @Test
