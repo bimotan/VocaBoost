@@ -41,6 +41,22 @@ class WordListFilterTest {
     }
 
     @Test
+    void uncheckedListsTheWordsAddedWhileTheDictionariesCouldNotBeAsked() {
+        WordCard unchecked = word("zzyzx", "noun", "mine; UNCHECKED", CardState.NEW, 0, 0, 0, 0, 0, NOW);
+        WordCard notATag = word("quokka", "noun", "unchecked-later", CardState.NEW, 0, 0, 0, 0, 0, NOW);
+        WordCard suspendedUnchecked = suspended(word("vex", "verb", "unchecked", CardState.NEW, 0, 0, 0, 0, 0, NOW));
+        List<WordCard> all = List.of(fresh, lapsedLater, unchecked, notATag, suspendedUnchecked);
+
+        assertEquals(List.of(unchecked, suspendedUnchecked), all.stream()
+            .filter(word -> new WordListFilter("Unchecked", "", "").matches(word, NOW, DAY_END)).toList());
+        assertEquals(List.of(lapsedLater), all.stream()
+            .filter(word -> new WordListFilter("Unverified", "", "").matches(word, NOW, DAY_END)).toList(),
+            "a word no dictionary had is not an unchecked one");
+        assertEquals("Unchecked", WordListFilter.statusLabel("Unchecked"));
+        assertTrue(WordListFilter.STATUSES.contains("Unchecked"));
+    }
+
+    @Test
     void aSuspendedWordSaysSoAndIsNeverDueWeakOrMastered() {
         assertEquals("Suspended", WordListFilter.statusOf(suspendedLeech, NOW, DAY_END));
         assertEquals("Suspended", WordListFilter.statusOf(suspended(word("zeal", "noun", "", CardState.REVIEW, 40, 3,

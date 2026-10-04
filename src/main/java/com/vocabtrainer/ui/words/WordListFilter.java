@@ -14,7 +14,9 @@ import static com.vocabtrainer.util.Messages.tr;
  * The Word List's status, tag and part-of-speech filters and its Status column, without JavaFX.
  * The rules for weak and mastered words come from {@link WordCard}, so the list agrees with the
  * weak-words review mode and the dashboard. Suspended words are listed under All, Suspended, Leech,
- * Unverified and the tag and part-of-speech filters, never as due, weak or mastered.
+ * Unverified, Unchecked and the tag and part-of-speech filters, never as due, weak or mastered.
+ * Unverified lists the words no dictionary had when they were added (tag UNVERIFIED), Unchecked
+ * those added while the dictionaries could not be asked (tag UNCHECKED).
  *
  * @param status       one of {@link #STATUSES}, which name the filters, not texts ({@link #statusLabel} names
  *                     them); null means All
@@ -23,7 +25,7 @@ import static com.vocabtrainer.util.Messages.tr;
  */
 public record WordListFilter(String status, String tag, String partOfSpeech) {
     public static final List<String> STATUSES =
-        List.of("All", "Due", "Weak", "Mastered", "Leech", "Suspended", "Unverified");
+        List.of("All", "Due", "Weak", "Mastered", "Leech", "Suspended", "Unverified", "Unchecked");
 
     /** What the status filter shows for one of {@link #STATUSES}. */
     public static String statusLabel(String status) {
@@ -34,6 +36,7 @@ public record WordListFilter(String status, String tag, String partOfSpeech) {
             case "Leech" -> tr("words.status.leech");
             case "Suspended" -> tr("words.status.suspended");
             case "Unverified" -> tr("words.status.unverified");
+            case "Unchecked" -> tr("words.status.unchecked");
             default -> tr("words.status.all");
         };
     }
@@ -56,6 +59,9 @@ public record WordListFilter(String status, String tag, String partOfSpeech) {
             return false;
         }
         if ("Unverified".equals(status) && !containsIgnoreCase(word.getTags(), "UNVERIFIED")) {
+            return false;
+        }
+        if ("Unchecked".equals(status) && !word.hasTag("UNCHECKED")) {
             return false;
         }
         if (tag != null && !tag.isBlank() && !containsIgnoreCase(word.getTags(), tag.trim())) {

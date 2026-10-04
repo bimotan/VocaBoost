@@ -153,6 +153,54 @@ public class WordRepository {
         }
     }
 
+    /**
+     * Replaces the word's tags with {@code tags} and fills its phonetic with {@code phonetic} when it
+     * has none, but only while its tags are still {@code expectedTags}: an edit made since they were
+     * read wins, and nothing else of the word (its schedule above all) is written. Returns whether
+     * the word was changed.
+     */
+    public boolean updateTagsIfUnchanged(long id, String expectedTags, String tags, String phonetic)
+        throws SQLException {
+        String sql = """
+            UPDATE words
+            SET tags = ?,
+                phonetic = CASE WHEN TRIM(COALESCE(phonetic, '')) = '' AND ? <> '' THEN ? ELSE phonetic END
+            WHERE id = ? AND COALESCE(tags, '') = ?
+            """;
+        String newPhonetic = phonetic == null ? "" : phonetic.strip();
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, nullable(tags));
+            statement.setString(2, newPhonetic);
+            statement.setString(3, newPhonetic);
+            statement.setLong(4, id);
+            statement.setString(5, expectedTags == null ? "" : expectedTags);
+            return statement.executeUpdate() == 1;
+        }
+    }
+
+    /**
+     * The words of the decks tagged {@code tag} (one of their tags, ignoring case), suspended ones
+     * too, in the decks' order and then by English word.
+     */
+    public List<WordCard> findTagged(Collection<Long> deckIds, String tag) throws SQLException {
+        List<WordCard> tagged = new ArrayList<>();
+        for (long deckId : new LinkedHashSet<>(deckIds)) {
+            String sql = "SELECT * FROM words WHERE deck_id = ? AND lower(COALESCE(tags, '')) LIKE ? "
+                + "ORDER BY lower(english), id";
+            try (Connection connection = databaseManager.getConnection();
+                 PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setLong(1, deckId);
+                statement.setString(2, "%" + tag.toLowerCase(Locale.ROOT) + "%");
+                try (ResultSet rs = statement.executeQuery()) {
+                    // LIKE narrows the rows down; WordCard.hasTag decides, so "unchecked-later" is not "unchecked".
+                    mapList(rs).stream().filter(word -> word.hasTag(tag)).forEach(tagged::add);
+                }
+            }
+        }
+        return tagged;
+    }
+
     public void deleteById(long id) throws SQLException {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement("DELETE FROM words WHERE id = ?")) {
