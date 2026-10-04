@@ -80,7 +80,6 @@ public final class WordDetailsCard {
         empty.setId(idPrefix + "Empty");
         playButton.setAccessibleText(tr("extras.play"));
         playButton.setTooltip(new Tooltip(tr("extras.play")));
-        playButton.getStyleClass().add("play-button");
         extrasLink.setTooltip(new Tooltip(tr("extras.lookUp.tooltip")));
         extrasStatus.setWrapText(true);
         extrasStatus.getStyleClass().add("muted-text");

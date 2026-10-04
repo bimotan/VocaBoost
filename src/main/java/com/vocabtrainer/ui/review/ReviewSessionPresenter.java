@@ -1372,7 +1372,8 @@ public final class ReviewSessionPresenter {
         if (skipped > 0) {
             completionMetrics += System.lineSeparator() + tr("review.complete.skipped", skippedWithoutExamples(skipped));
         }
-        result = mode == ReviewMode.WEAK_WORDS ? tr("review.complete.nextWeakWords") : tr("review.complete.next");
+        result = mode == ReviewMode.WEAK_WORDS ? tr("review.complete.nextWeakWords")
+            : allDecks ? tr("review.complete.nextAllDecks") : tr("review.complete.next");
     }
 
     private static String today(DailyGoalProgress progress) {
