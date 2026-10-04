@@ -74,6 +74,18 @@ Multi-step writes use `DatabaseManager.inTransaction` (exposed to services as `T
 
 Going back to a snapshot is done by hand while the app is closed, as the note in Settings → Data and Logs says: delete `vocab.db-wal` and `vocab.db-shm` if they are there (a write-ahead log left by a crash would otherwise be applied to the copied file), copy the snapshot over `vocab.db` and start the app again. Decision: there is no "Restore snapshot..." button. Replacing the database file under the running app's pooled connections and open views is not safe, and doing it at the next start would need a restart flow; the manual steps are short and make clear that everything since the snapshot is lost.
 
+### Timestamps
+
+Decision: times are stored as the computer's local wall-clock time without a zone (`DateTimeUtil.toDatabase`, ISO `yyyy-MM-ddTHH:mm:ss[.nnn]`), and days (`daily_goals.goal_date`, the study day of a review) as local dates; they are compared as text in SQL. They are not migrated to UTC instants. VocaBoost is a single-user app on one computer, and its study days are meant to follow the clock on the wall: "due today", the new-word allowance, the daily goal and the streak change at the rollover hour of the user's local time wherever they are, which a zone-less local time gives directly and a UTC instant would only give after converting every comparison with the current zone. Converting every time column would be a large migration of every table for a rare case.
+
+What happens when the local time changes:
+
+- **Moving to another time zone** (say from Beijing to New York, 12 or 13 hours back) shifts every stored time by that much relative to real time. Due times stay the same wall-clock times: a card due tomorrow at 4:00 is due at 4:00 New York time, and a learning step due in 10 minutes waits until its clock time comes round, at most the zone difference later in real time (earlier when moving east). Review intervals count study days, so this costs at most part of a day. A review just after the move can be stored with an earlier time than the last review before it, so logs of that day may sort in a different order; the study day each review counts for is still the local day it was made on. The streak counts study days with a review: the day of the move is one study day of the old or the new zone's clock, so it neither breaks nor doubles unless a whole local day passes without a review.
+- **Daylight saving time** repeats or skips one hour of local time once a year. A review in the repeated hour may sort before one made an hour earlier; due times move by at most that hour.
+- **The rollover hour** (4:00 by default) limits both: a study day changes at 4:00 local time rather than at midnight, so the hours around a zone change or a daylight saving switch (which happen at night, around 2:00 to 3:00) fall inside one study day, and late-night reviews never land on a different day than the evening's.
+
+Snapshots and JSON backups store the same local times, so restoring one on a computer in another zone shifts it the same way.
+
 ## Review Algorithm
 
 Reviews are scheduled with FSRS-5 and its published default parameters. The pure arithmetic is in `service.scheduling`: `Fsrs` (stability, difficulty, retrievability R = (1 + 19/81 · t/S)^-0.5 and the interval for the desired retention), `StudyDay` (the day rollover) and `CardScheduler` (states, steps, intervals and fuzz); `ReviewScheduler` applies them to a word.
