@@ -198,7 +198,8 @@ public final class SmokeTest {
             // Asked on the JavaFX thread after the start, so a start that has run is done by then.
             Status status;
             try {
-                status = onFxThread(() -> new Status(fx.stage().isShowing(), newDialog(fx)), remaining(deadline));
+                status = onFxThread(() -> new Status(fx.stage().isShowing(), newDialog(fx),
+                    fx.stage().getIcons().size()), remaining(deadline));
             } catch (TimeoutException e) {
                 return Optional.of("the main window was not shown within " + timeout.toSeconds()
                     + " seconds (the JavaFX thread is busy)");
@@ -220,7 +221,9 @@ public final class SmokeTest {
                     shownAt = now;
                 } else if (now - shownAt >= SETTLE.toNanos() && !backgroundTasksRunning()) {
                     // The results of finished background tasks were applied before this status was read.
-                    return Optional.empty();
+                    return status.icons() == VocabTrainerApp.ICON_SIZES.size() ? Optional.empty()
+                        : Optional.of("the window has " + status.icons() + " of the "
+                            + VocabTrainerApp.ICON_SIZES.size() + " sizes of the app icon");
                 }
             } else if (opened.isDone()) {
                 return Optional.of("the app started but did not show the main window");
@@ -238,8 +241,11 @@ public final class SmokeTest {
             .anyMatch(thread -> thread.isAlive() && UiAsync.THREAD_NAME.equals(thread.getName()));
     }
 
-    /** Whether the main window is showing, and the title and text of a dialog the app opened. */
-    private record Status(boolean showing, Optional<String> dialog) {
+    /**
+     * Whether the main window is showing, the title and text of a dialog the app opened, and how many
+     * sizes of the app icon the window has.
+     */
+    private record Status(boolean showing, Optional<String> dialog, int icons) {
     }
 
     /** A window that was not open before the app started, other than the main window: a dialog. */

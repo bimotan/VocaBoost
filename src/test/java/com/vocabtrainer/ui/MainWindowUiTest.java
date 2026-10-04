@@ -31,6 +31,7 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextInputControl;
+import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
@@ -300,6 +301,11 @@ abstract class MainWindowUiTest {
             stage.getScene().getRoot().applyCss();
             stage.getScene().getRoot().layout();
         });
+    }
+
+    /** The icons of the window, as the title bar and the task bar get them. */
+    List<Image> windowIcons() {
+        return Fx.call(() -> List.copyOf(stage.getIcons()));
     }
 
     /** The window's smallest size: {min width, min height}. */

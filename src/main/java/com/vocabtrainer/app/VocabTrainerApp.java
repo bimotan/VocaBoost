@@ -13,11 +13,15 @@ import com.vocabtrainer.util.Messages;
 import javafx.application.Application;
 import javafx.geometry.Dimension2D;
 import javafx.scene.Scene;
+import javafx.scene.image.Image;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 
+import java.net.URL;
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -26,6 +30,8 @@ public class VocabTrainerApp extends Application {
     private static final Logger LOGGER = Logger.getLogger(VocabTrainerApp.class.getName());
     /** The computer's locale, read before the app sets the default locale to its language. */
     private static final Locale SYSTEM_LOCALE = Locale.getDefault();
+    /** The sizes of the app icon in src/main/resources/icons (rendered by packaging/icons/make-icons.sh). */
+    static final List<Integer> ICON_SIZES = List.of(16, 32, 48, 64, 128, 256, 512);
 
     private AppServices services;
 
@@ -80,11 +86,31 @@ public class VocabTrainerApp extends Application {
     public static void showMainWindow(Stage stage, MainWindow mainWindow) {
         Scene scene = mainWindow.createScene();
         stage.setTitle(Messages.tr("app.title"));
+        stage.getIcons().setAll(icons());
         Dimension2D minimum = WindowSize.minimumWindowSize(Screen.getPrimary().getVisualBounds());
         stage.setMinWidth(minimum.getWidth());
         stage.setMinHeight(minimum.getHeight());
         stage.setScene(scene);
         stage.show();
+    }
+
+    /**
+     * The app icon in every size it comes in, for the window's title bar and the task bar, which pick
+     * the size they need. A size that cannot be read is logged and left out.
+     */
+    static List<Image> icons() {
+        List<Image> icons = new ArrayList<>();
+        for (int size : ICON_SIZES) {
+            String name = "/icons/vocaboost-" + size + ".png";
+            URL url = VocabTrainerApp.class.getResource(name);
+            Image icon = url == null ? null : new Image(url.toExternalForm());
+            if (icon == null || icon.isError()) {
+                LOGGER.warning("Cannot read the app icon " + name);
+            } else {
+                icons.add(icon);
+            }
+        }
+        return icons;
     }
 
     /** Closes the database so SQLite checkpoints the write-ahead log and releases the file. */
