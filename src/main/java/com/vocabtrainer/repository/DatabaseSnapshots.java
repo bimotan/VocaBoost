@@ -164,10 +164,17 @@ public final class DatabaseSnapshots {
 
     /**
      * Deletes the oldest snapshots so that {@code keep} are left, never {@code written}, the one just
-     * taken; one that cannot be deleted is logged.
+     * taken. A snapshot that cannot be deleted, or a folder that cannot be listed, is logged: the new
+     * snapshot is written either way.
      */
-    private void prune(Path written) throws IOException {
-        List<Path> others = new ArrayList<>(list());
+    private void prune(Path written) {
+        List<Path> others;
+        try {
+            others = new ArrayList<>(list());
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Could not list the database snapshots to delete old ones", e);
+            return;
+        }
         others.remove(written);
         for (Path old : others.subList(Math.min(Math.max(0, keep - 1), others.size()), others.size())) {
             try {

@@ -246,7 +246,8 @@ class EcdictTagDeckServiceTest {
 
     @Test
     void aRatingWhileADeckIsBuiltWaitsForOneBatchAtMost() throws Exception {
-        importGenerated(8 * EcdictTagDeckService.BATCH_SIZE);
+        // 12 batches of 150 ms: in one transaction, as before, a write would wait about 1.8 seconds.
+        importGenerated(12 * EcdictTagDeckService.BATCH_SIZE);
         Deck other = decks.createDeck("Mine");
         CountDownLatch building = new CountDownLatch(1);
         // A slow disk: each batch holds the database for 150 ms.
@@ -277,8 +278,8 @@ class EcdictTagDeckServiceTest {
             Thread.sleep(60);
         }
 
-        assertEquals(8 * EcdictTagDeckService.BATCH_SIZE, build.get(30, TimeUnit.SECONDS).added());
-        assertTrue(slowestMillis < 700, "a write waited " + slowestMillis + " ms for the deck being built");
+        assertEquals(12 * EcdictTagDeckService.BATCH_SIZE, build.get(30, TimeUnit.SECONDS).added());
+        assertTrue(slowestMillis < 900, "a write waited " + slowestMillis + " ms for the deck being built");
         assertEquals(3, words.countAll(other.getId()));
     }
 

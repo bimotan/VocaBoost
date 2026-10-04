@@ -373,10 +373,12 @@ public class ReviewLogRepository {
 
     /**
      * The study days with a review in any deck (practice and Already known do not count), stepping
-     * back from {@code before}: the day of the newest review before it, then the day of the newest
-     * review before that day started, and so on while each day is the one before the last. The last
-     * day listed is the first one that breaks the run (it is not the day before the previous one), so
-     * the caller sees where the run ended; empty when there is no review before {@code before}.
+     * back from {@code before}, the start of a study day: the day of the newest review before it, then
+     * the day of the newest review before that day started, and so on while each day is the one
+     * before the last. The last day listed is the first one that breaks the run (it is not the day
+     * before the previous one), so the caller sees where the run ended; empty when there is no review
+     * before {@code before}. When the newest review is older than the two days before {@code before},
+     * only its day is listed: no run can reach {@code before} from there.
      *
      * <p>One query, whatever the length of the run: a recursive query takes one indexed lookup per
      * day inside SQLite, which is how the streak is counted (see {@code GoalService}).
@@ -401,11 +403,13 @@ public class ReviewLogRepository {
                 UNION ALL
                 SELECT date(%s, :shift), run.day
                 FROM run
-                WHERE run.day IS NOT NULL AND (run.later IS NULL OR run.day = date(run.later, '-1 day'))
+                WHERE run.day IS NOT NULL AND (
+                    (run.later IS NULL AND run.day >= date(?1, :shift, '-2 days'))
+                    OR run.day = date(run.later, '-1 day'))
             )
             SELECT day FROM run WHERE day IS NOT NULL
             """.formatted(
-                newestBefore.formatted("?", IS_REVIEW),
+                newestBefore.formatted("?1", IS_REVIEW),
                 newestBefore.formatted("strftime('%Y-%m-%dT%H:%M:%S', run.day, :start)", IS_REVIEW))
             .replace(":shift", "'-" + rolloverHour + " hours'")
             .replace(":start", "'+" + rolloverHour + " hours'");

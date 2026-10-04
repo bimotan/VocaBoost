@@ -276,6 +276,22 @@ class GoalServiceTest {
     }
 
     @Test
+    void aRunThatEndedDaysAgoIsNotWalkedBack() throws Exception {
+        WordCard word = word(deck, "abate");
+        databaseManager.inTransaction(() -> {
+            for (int i = 10; i < 310; i++) {
+                logs.insert(log(word, DAY.minusDays(i).atTime(20, 0), ReviewKind.REVIEW, ReviewRating.GOOD));
+            }
+            return null;
+        });
+
+        assertEquals(List.of(DAY.minusDays(10)), logs.reviewDaysBackFrom(new StudyDay().start(DAY.plusDays(1)), 4),
+            "no run can reach today from ten days ago: only that day is read");
+        assertEquals(0, goals.getTodayProgress(deck.getId()).currentStreak());
+        assertEquals(300, goals.progressFor(deck.getId(), DAY.minusDays(10)).currentStreak());
+    }
+
+    @Test
     void theStreakFollowsTheStudyDaysOfAnyHistoryAsTheDayByDayWalkDid() throws Exception {
         WordCard word = word(deck, "abate");
         Random random = new Random(7);
