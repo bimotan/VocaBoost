@@ -4,6 +4,7 @@ import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.AiCacheRepository;
 import com.vocabtrainer.service.AiService;
 import com.vocabtrainer.service.AiServiceFactory;
+import com.vocabtrainer.service.AutoExplain;
 import com.vocabtrainer.service.SettingsService;
 import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.DataChange;
@@ -14,7 +15,9 @@ import com.vocabtrainer.util.Messages;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.GridPane;
@@ -31,7 +34,9 @@ import static com.vocabtrainer.util.Messages.tr;
 /**
  * Saves, clears and tests the optional AI provider used for review explanations, and clears its
  * cache. A saved API key is never put back into the form: the box shows its last characters, and
- * Replace or Remove change it.
+ * Replace or Remove change it. "Explain automatically" chooses when a checked answer is explained
+ * without Explain being pressed (after every answer, only after a mistake, or never); it is saved at
+ * once, and a choice that cannot be saved is reported and the selector goes back to the saved one.
  */
 final class AiSettingsBox {
     private final ViewContext context;
@@ -43,9 +48,12 @@ final class AiSettingsBox {
     private final Label apiKeyStatus = new Label();
     private final Button replaceKeyButton = new Button(tr("ai.key.replace"));
     private final Button removeKeyButton = new Button(tr("ai.key.remove"));
+    private final ComboBox<AutoExplain> autoExplainSelector = new ComboBox<>();
     private final VBox root;
     /** Whether the user chose Replace, so the key field is shown although a key is saved. */
     private boolean replacingKey;
+    /** Set while the selector shows the saved choice, which is not a choice of the user's. */
+    private boolean showingSavedAutoExplain;
 
     AiSettingsBox(ViewContext context, SettingsService settingsService, AiCacheRepository aiCacheRepository,
                   ConfiguredServices configured) {
@@ -151,6 +159,9 @@ final class AiSettingsBox {
         GridPane.setHgrow(baseUrlField, Priority.ALWAYS);
         GridPane.setHgrow(keyRow, Priority.ALWAYS);
         GridPane.setHgrow(modelField, Priority.ALWAYS);
+        configureAutoExplain();
+        form.add(Widgets.formLabel(tr("ai.autoExplain"), autoExplainSelector), 0, 5);
+        form.add(autoExplainSelector, 1, 5);
         HBox buttons = new HBox(10, saveButton, clearButton, testButton, clearCacheButton);
         Label privacyNote = new Label(tr("ai.privacy.requests") + System.lineSeparator() + tr("ai.privacy.key"));
         privacyNote.setId("aiPrivacyNoteLabel");
@@ -162,6 +173,47 @@ final class AiSettingsBox {
 
     Node root() {
         return root;
+    }
+
+    private void configureAutoExplain() {
+        autoExplainSelector.setId("aiAutoExplainSelector");
+        autoExplainSelector.getItems().setAll(AutoExplain.values());
+        autoExplainSelector.setCellFactory(list -> autoExplainCell());
+        autoExplainSelector.setButtonCell(autoExplainCell());
+        showSavedAutoExplain();
+        autoExplainSelector.valueProperty().addListener((observable, oldChoice, choice) -> {
+            if (showingSavedAutoExplain || choice == null) {
+                return;
+            }
+            try {
+                settingsService.saveAutoExplain(choice);
+            } catch (RuntimeException e) {
+                context.errors().reportFailure(tr("ai.autoExplain.failed"), e);
+                showSavedAutoExplain();
+            }
+        });
+    }
+
+    private void showSavedAutoExplain() {
+        showingSavedAutoExplain = true;
+        try {
+            autoExplainSelector.setValue(settingsService.getAutoExplain());
+        } catch (RuntimeException e) {
+            context.errors().logFailure(tr("ai.autoExplain.failed"), e);
+            autoExplainSelector.setValue(AutoExplain.DEFAULT);
+        } finally {
+            showingSavedAutoExplain = false;
+        }
+    }
+
+    private static ListCell<AutoExplain> autoExplainCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(AutoExplain choice, boolean empty) {
+                super.updateItem(choice, empty);
+                setText(empty || choice == null ? null : choice.label());
+            }
+        };
     }
 
     private void testProvider(Button testButton) {

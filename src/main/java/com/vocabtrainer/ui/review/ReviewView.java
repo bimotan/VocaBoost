@@ -5,6 +5,7 @@ import com.vocabtrainer.domain.ReviewRating;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ReviewService;
 import com.vocabtrainer.service.ReviewSettings;
+import com.vocabtrainer.service.SettingsService;
 import com.vocabtrainer.ui.ConfiguredServices;
 import com.vocabtrainer.ui.DataChange;
 import com.vocabtrainer.ui.Labels;
@@ -71,6 +72,10 @@ import static com.vocabtrainer.util.Messages.tr;
  * Already known or suspension while the Review tab is shown, unless the focus is in a field with
  * text, whose own typing it undoes.
  *
+ * <p>With an AI provider, an answer the presenter does not explain by itself (see
+ * {@link com.vocabtrainer.service.AutoExplain}) can be explained with "Explain", which "Regenerate
+ * explanation" replaces once an explanation was asked for.
+ *
  * <p>Next to the answer, "Already known" marks a new card as known, "Suspend" suspends the card and
  * "Undo" takes back the last of these or the last rating. After a rating made a card a leech, a
  * notice under the result offers to suspend it and, with an AI provider, a memory aid.
@@ -99,6 +104,7 @@ public final class ReviewView {
     private final Button submitAnswerButton = new Button(tr("review.submit"));
     private final TextArea reviewResultArea = new TextArea();
     private final WordDetailsCard detailsCard = new WordDetailsCard("reviewDetails");
+    private final Button explainButton = new Button(tr("review.explain"));
     private final Button regenerateExplanationButton = new Button(tr("review.regenerate"));
     private final Label completionTitleLabel = new Label(tr("review.complete"));
     private final Label completionMetricsLabel = new Label();
@@ -126,12 +132,13 @@ public final class ReviewView {
     /** Set while {@link #render} updates the selectors, whose listeners only react to the user. */
     private boolean rendering;
 
-    /** {@code clock} times the answers. */
+    /** {@code settingsService} says when answers are explained by themselves; {@code clock} times the answers. */
     public ReviewView(ViewContext context, ReviewService reviewService, GoalService goalService,
-                      ConfiguredServices configured, Clock clock) {
+                      ConfiguredServices configured, SettingsService settingsService, Clock clock) {
         this.context = context;
         this.presenter = new ReviewSessionPresenter(reviewService, goalService, configured::ai, context.async(),
             context.changes(), context.errors()::reportFailure, clock);
+        presenter.setAutoExplain(settingsService::getAutoExplain);
         this.tab = Widgets.tab("reviewTab", tr("review.tab"), createContent());
         presenter.addListener(this::render);
         // Answers are only timed while the tab is shown; the first card is loaded behind the Dashboard.
@@ -307,13 +314,17 @@ public final class ReviewView {
         // On a short window the result shrinks to a few lines before the tab has to scroll.
         reviewResultArea.setMinHeight(70);
         reviewResultArea.setAccessibleText(tr("review.result.accessible"));
+        explainButton.setId("explainButton");
+        explainButton.setTooltip(new Tooltip(tr("review.explain.tooltip")));
+        explainButton.setOnAction(event -> {
+            context.errors().guard(tr("review.explain.failed"), presenter::explain);
+            keepKeyboardOnSuggestion();
+        });
         regenerateExplanationButton.setId("regenerateExplanationButton");
         regenerateExplanationButton.setTooltip(new Tooltip(tr("review.regenerate.tooltip")));
         regenerateExplanationButton.setOnAction(event -> {
             context.errors().guard(tr("review.regenerate.failed"), presenter::regenerateExplanation);
-            // The button is disabled while the provider answers, which would pass the focus on to
-            // Again, where Space would rate Again; keep the keyboard on the suggested rating, as after Submit.
-            presenter.suggestedRating().ifPresent(rating -> ratingButtonsByRating.get(rating).requestFocus());
+            keepKeyboardOnSuggestion();
         });
 
         completionTitleLabel.setId("completionTitleLabel");
@@ -344,9 +355,12 @@ public final class ReviewView {
             undoButton);
         answerBox.setAlignment(Pos.CENTER_LEFT);
         configureLeechNotice();
-        HBox explanationActions = new HBox(10, regenerateExplanationButton);
+        HBox explanationActions = new HBox(10, explainButton, regenerateExplanationButton);
         explanationActions.setAlignment(Pos.CENTER_RIGHT);
-        explanationActions.managedProperty().bind(regenerateExplanationButton.visibleProperty());
+        explainButton.managedProperty().bind(explainButton.visibleProperty());
+        regenerateExplanationButton.managedProperty().bind(regenerateExplanationButton.visibleProperty());
+        explanationActions.managedProperty().bind(explainButton.visibleProperty()
+            .or(regenerateExplanationButton.visibleProperty()));
         showIf(detailsCard.root(), false);
         VBox question = new VBox(6, reviewWordLabel, reviewHintLabel);
         VBox content = new VBox(16, modeBox, sessionBox, question, reviewMetaLabel, answerBox,
@@ -366,6 +380,14 @@ public final class ReviewView {
         pane.setCenter(Widgets.tabScroll(content, true));
         pane.setBottom(ratingButtons);
         return pane;
+    }
+
+    /**
+     * Explain and Regenerate are disabled while the provider answers, which would pass the focus on
+     * to Again, where Space would rate Again; the keyboard stays on the suggested rating, as after Submit.
+     */
+    private void keepKeyboardOnSuggestion() {
+        presenter.suggestedRating().ifPresent(rating -> ratingButtonsByRating.get(rating).requestFocus());
     }
 
     /** Already known, Suspend and Undo, next to the answer field. */
@@ -614,7 +636,10 @@ public final class ReviewView {
         memoryAidButton.setDisable(!presenter.canRequestMemoryAid());
         memoryAidLabel.setText(presenter.memoryAid());
         memoryAidLabel.setVisible(!presenter.memoryAid().isEmpty());
-        regenerateExplanationButton.setVisible(presenter.usesAiProvider());
+        boolean offersExplain = presenter.offersExplain();
+        explainButton.setVisible(offersExplain);
+        explainButton.setDisable(!presenter.canExplain());
+        regenerateExplanationButton.setVisible(presenter.usesAiProvider() && !offersExplain);
         regenerateExplanationButton.setDisable(!presenter.canRegenerateExplanation());
         if (presenter.cardNumber() != renderedCardNumber && presenter.canSubmit()) {
             renderedCardNumber = presenter.cardNumber();

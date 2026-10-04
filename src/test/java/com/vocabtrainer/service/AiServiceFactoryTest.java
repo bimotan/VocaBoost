@@ -79,7 +79,10 @@ class AiServiceFactoryTest {
             warnings = log.warnings();
         }
 
-        assertTrue(first.endsWith("AI provider failed; mock fallback was used."), first);
+        assertTrue(first.endsWith("AI provider failed: the provider's server failed (HTTP 503): try again later. The"
+            + " offline mock explanation is shown instead; Settings → AI Explanation Provider → Test AI Explanation"
+            + " shows the details."), first);
+        assertFalse(first.contains("temporarily unavailable"), "the provider's own message stays in the log");
         assertEquals(1, warnings.size());
         assertEquals(List.of(), cachedResponses(), "the fallback text must not be cached");
 

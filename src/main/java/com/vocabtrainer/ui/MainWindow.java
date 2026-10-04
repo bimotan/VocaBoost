@@ -62,7 +62,7 @@ public class MainWindow {
         DecksView decksView = new DecksView(context, services.deckService(), services.statsService(),
             services.ecdictTagDecks());
         ReviewView review = new ReviewView(context, services.reviewService(), services.goalService(), configured,
-            services.clock());
+            services.settingsService(), services.clock());
         AddImportView addImport = new AddImportView(context, services.wordRepository(), services.validationService(),
             services.importExportService(), services.settingsService(), configured);
         StatisticsView statistics = new StatisticsView(context, services.statsService(), services.goalService(),

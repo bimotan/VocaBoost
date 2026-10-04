@@ -9,6 +9,7 @@ import com.vocabtrainer.domain.ReviewSessionSummary;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.service.AiService;
 import com.vocabtrainer.service.AnswerGrade;
+import com.vocabtrainer.service.AutoExplain;
 import com.vocabtrainer.service.ExplanationRequest;
 import com.vocabtrainer.service.GoalService;
 import com.vocabtrainer.service.ReviewAnswer;
@@ -64,6 +65,11 @@ import static com.vocabtrainer.util.Messages.tr;
  * check caps it, what it counts as instead ("Hard (53%)"); the suggested rating is the best the
  * answer counts as, at most Good. When the check capped the ratings the user may override it ("I was
  * right"): the rating they choose then counts as it is, and the log says so.
+ *
+ * Once an answer is checked, the AI provider explains it by itself when {@link AutoExplain} says so
+ * (after every answer, only after a mistake, or never); otherwise {@link #explain()} asks for it.
+ * Without a provider, or while offline mode is on, the offline mock text is shown at once, since
+ * nothing is sent.
  *
  * Before the answer is submitted, only what cannot give the answer away is shown with the question
  * ({@link #hint()}); once it is checked, the card's phonetic, part of speech, example (the word in
@@ -135,6 +141,10 @@ public final class ReviewSessionPresenter {
     private ExplanationRequest explanationRequest;
     private String checkedText = "";
     private boolean explanationLoading;
+    /** Whether the answered card's explanation was asked for, by itself or with Explain. */
+    private boolean explanationAsked;
+    /** When a checked answer is explained without Explain; read at every answer. */
+    private Supplier<AutoExplain> autoExplain = () -> AutoExplain.ALWAYS;
 
     private long deckId;
     private ReviewMode mode;
@@ -198,6 +208,14 @@ public final class ReviewSessionPresenter {
         this.failures = failures;
         this.clock = clock;
         this.mode = reviewService.sessionMode();
+    }
+
+    /**
+     * Sets when a checked answer is explained by the AI provider without Explain; asked at every
+     * answer, so a changed setting applies to the next one. {@link AutoExplain#ALWAYS} until set.
+     */
+    public void setAutoExplain(Supplier<AutoExplain> autoExplain) {
+        this.autoExplain = Objects.requireNonNull(autoExplain, "autoExplain");
     }
 
     /** Called after every change of the state or of a displayed text. */
@@ -352,7 +370,7 @@ public final class ReviewSessionPresenter {
 
     /**
      * Checks the typed answer, shows the correct one and the interval each rating would give, and
-     * asks the AI service for an explanation.
+     * asks the AI service for an explanation when {@link AutoExplain} says so.
      */
     public void submit() {
         if (state != State.AWAITING_ANSWER) {
@@ -369,7 +387,8 @@ public final class ReviewSessionPresenter {
 
     /**
      * Shows the checked answer of {@code answered}, with {@code note} above it when not empty, and the
-     * interval each rating would give, and asks the AI service for an explanation.
+     * interval each rating would give, and asks the AI service for an explanation when it is to be
+     * explained by itself ({@link #explainsAutomatically}).
      */
     private void showChecked(WordCard answered, ReviewAnswer answerChecked, String note) {
         checked = answerChecked;
@@ -383,7 +402,42 @@ public final class ReviewSessionPresenter {
             + verdict(checked);
         state = State.ANSWERED;
         explanationRequest = new ExplanationRequest(answered, checked.userAnswer(), checked.direction());
-        requestExplanation(false);
+        explanationAsked = false;
+        if (explainsAutomatically(checked)) {
+            requestExplanation(false);
+        } else {
+            result = checkedText;
+            fireChanged();
+        }
+    }
+
+    /**
+     * Whether {@code answer} is explained without Explain: always by the offline mock text, which
+     * sends nothing; by the AI provider when {@link AutoExplain} says so, a mistake being an answer
+     * whose rating the check capped. A setting that cannot be read counts as its default.
+     */
+    private boolean explainsAutomatically(ReviewAnswer answer) {
+        if (!usesAiProvider()) {
+            return true;
+        }
+        AutoExplain choice;
+        try {
+            choice = autoExplain.get();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Cannot read when to explain answers; using the default", e);
+            choice = AutoExplain.DEFAULT;
+        }
+        return (choice == null ? AutoExplain.DEFAULT : choice).explainsAutomatically(answer.canOverride());
+    }
+
+    /**
+     * Asks the AI provider for the answered card's explanation, which was not asked for by itself.
+     * Does nothing unless {@link #canExplain()}.
+     */
+    public void explain() {
+        if (canExplain()) {
+            requestExplanation(false);
+        }
     }
 
     /**
@@ -903,11 +957,28 @@ public final class ReviewSessionPresenter {
     }
 
     /**
-     * Whether the explanation of the answered card can be asked for again: it has arrived, and an AI
-     * provider is configured and may be used.
+     * Whether the explanation of the answered card can be asked for again: it was asked for and has
+     * arrived, and an AI provider is configured and may be used.
      */
     public boolean canRegenerateExplanation() {
-        return canRate() && explanationRequest != null && !explanationLoading && usesAiProvider();
+        return canRate() && explanationRequest != null && explanationAsked && !explanationLoading
+            && usesAiProvider();
+    }
+
+    /**
+     * Whether the answered card's explanation can be asked for with Explain: an AI provider may be
+     * used and it was not asked for yet.
+     */
+    public boolean canExplain() {
+        return canRate() && explanationRequest != null && !explanationAsked && usesAiProvider();
+    }
+
+    /**
+     * Whether Explain is offered rather than Regenerate: an AI provider may be used, and the card on
+     * screen has no explanation asked for (also before its answer is checked).
+     */
+    public boolean offersExplain() {
+        return !explanationAsked && usesAiProvider();
     }
 
     /** Whether explanations come from an AI provider, rather than the offline mock text. */
@@ -1020,6 +1091,7 @@ public final class ReviewSessionPresenter {
         explanations.invalidate();
         explanationRequest = null;
         explanationLoading = false;
+        explanationAsked = false;
         card = null;
         answer = "";
         result = "";
@@ -1238,13 +1310,14 @@ public final class ReviewSessionPresenter {
         return tr("review.nothingLeft");
     }
 
-    /** Shows the checked answer with "loading" and asks the AI service for its explanation. */
+    /** Shows the checked answer with "loading" and asks the AI service for its explanation, or again for it. */
     private void requestExplanation(boolean regenerate) {
         String separator = System.lineSeparator() + System.lineSeparator();
         String shownAnswer = checkedText;
         ExplanationRequest request = explanationRequest;
         result = shownAnswer + separator + tr("review.explanation.loading");
         explanationLoading = true;
+        explanationAsked = true;
         long ticket = explanations.next();
         AiService ai = aiServices.get();
         fireChanged();

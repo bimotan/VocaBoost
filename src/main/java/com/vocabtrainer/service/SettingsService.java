@@ -24,6 +24,8 @@ public class SettingsService {
     public static final String AI_TEMPERATURE_KEY = "ai.temperature";
     /** The highest temperature OpenAI-compatible providers accept. */
     public static final double MAX_AI_TEMPERATURE = 2.0;
+    /** When review answers are explained without Explain being pressed, see {@link AutoExplain}. */
+    public static final String AI_AUTO_EXPLAIN_KEY = "ai.autoExplain";
     public static final String LAST_DECK_ID_KEY = "ui.lastDeckId";
     /** "true" while offline mode is on: no online dictionary lookups and no AI requests. */
     public static final String OFFLINE_MODE_KEY = "network.offline";
@@ -126,6 +128,28 @@ public class SettingsService {
         }
     }
 
+    /**
+     * When the Review tab asks the AI provider to explain an answer by itself; {@link AutoExplain#DEFAULT}
+     * when nothing is saved. A saved value that is not a choice is logged and read as the default.
+     */
+    public AutoExplain getAutoExplain() {
+        Optional<String> saved = get(AI_AUTO_EXPLAIN_KEY).filter(value -> !value.isBlank());
+        if (saved.isEmpty()) {
+            return AutoExplain.DEFAULT;
+        }
+        Optional<AutoExplain> choice = AutoExplain.fromSetting(saved.get());
+        if (choice.isEmpty()) {
+            LOGGER.warning("Ignoring setting " + AI_AUTO_EXPLAIN_KEY + "=" + saved.get()
+                + ": it must be always, mistakes or never");
+        }
+        return choice.orElse(AutoExplain.DEFAULT);
+    }
+
+    public void saveAutoExplain(AutoExplain choice) {
+        save(AI_AUTO_EXPLAIN_KEY, (choice == null ? AutoExplain.DEFAULT : choice).settingValue());
+    }
+
+    /** Deletes the provider settings; when to explain answers is the user's preference and stays. */
     public void clearAiSettings() {
         delete(AI_PROVIDER_KEY);
         delete(AI_BASE_URL_KEY);
