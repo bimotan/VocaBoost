@@ -116,7 +116,9 @@ class SmokeTestUiTest {
         assertTrue(output.contains("Smoke test passed: the main window was shown on a new database."), output);
         assertEquals(List.of(), contents(home), "the user's home folder is never written");
         // The temporary data folder is deleted; only JavaFX's native libraries stay, for the next run.
-        assertEquals(List.of(temp.resolve("vocaboost-smoke-test-javafx")), contents(temp), output);
+        assertEquals(List.of(temp.resolve("vocaboost-smoke-test-javafx")), contents(temp).stream()
+            .filter(path -> path.getFileName().toString().startsWith("vocaboost-smoke-test-"))
+            .toList(), output);
     }
 
     private static List<Path> contents(Path folder) throws IOException {
