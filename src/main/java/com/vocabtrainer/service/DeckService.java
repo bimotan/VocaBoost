@@ -11,7 +11,8 @@ import java.util.Optional;
 import static com.vocabtrainer.util.Messages.tr;
 
 public class DeckService {
-    private static final int MAX_DECK_NAME_LENGTH = 60;
+    /** The longest deck name, in characters. */
+    public static final int MAX_DECK_NAME_LENGTH = 60;
 
     private final DeckRepository deckRepository;
     private final SettingsService settingsService;

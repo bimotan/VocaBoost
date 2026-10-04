@@ -54,7 +54,11 @@ import static com.vocabtrainer.util.Messages.tr;
 public class BackupService {
     private static final Logger LOGGER = Logger.getLogger(BackupService.class.getName());
 
-    /** What a restore does with backup words that are already in the target deck. */
+    /**
+     * What a restore does with backup words that are already in the target deck. A word the deck has
+     * but never reviewed (new, no repetitions, no review logs) has no progress to keep: whatever the
+     * policy, the backup's card replaces its schedule and suspension.
+     */
     public enum ExistingWordPolicy {
         /** Keep the card's current review schedule. */
         KEEP_SCHEDULE,
@@ -229,12 +233,36 @@ public class BackupService {
     public BackupRestoreResult importJsonBackup(Path inputPath, long deckId, ExistingWordPolicy policy) {
         JsonNode root = readBackup(inputPath);
         int version = formatVersion(root);
+        return restoreInTransaction(inputPath, () -> {
+            Deck deck = deckRepository.findById(deckId)
+                .orElseThrow(() -> new IllegalArgumentException(tr("deck.error.notFound")));
+            return restore(root, version, deck, false, policy);
+        });
+    }
+
+    /**
+     * Restores a backup into a new deck, named as the deck the backup was made from (or, for a backup
+     * that does not say, after the file), with " (2)", " (3)", ... appended when an active deck has
+     * that name; otherwise as {@link #importJsonBackup(Path, long, ExistingWordPolicy)}. Every word is
+     * new there, so the whole backup is restored. The deck is created in the restore's transaction.
+     */
+    public BackupRestoreResult importJsonBackupIntoNewDeck(Path inputPath) {
+        JsonNode root = readBackup(inputPath);
+        int version = formatVersion(root);
+        return restoreInTransaction(inputPath, () -> {
+            Deck deck = deckRepository.create(freeDeckName(backupDeckName(root, inputPath)));
+            return restore(root, version, deck, true, ExistingWordPolicy.KEEP_SCHEDULE);
+        });
+    }
+
+    /** Writes a snapshot, then runs {@code restore} in one transaction and logs the rows it skipped. */
+    private BackupRestoreResult restoreInTransaction(Path inputPath, SqlRestore restore) {
         if (snapshots != null) {
             snapshots.takeQuietly("before-restore");
         }
         RestoreTally tally;
         try {
-            tally = databaseManager.inTransaction(() -> restore(root, version, deckId, policy));
+            tally = databaseManager.inTransaction(restore::run);
         } catch (SQLException e) {
             throw new IllegalStateException(tr("backup.error.restore"), e);
         }
@@ -342,21 +370,64 @@ public class BackupService {
         return number;
     }
 
-    private RestoreTally restore(JsonNode root, int version, long deckId, ExistingWordPolicy policy)
+    /** The name of the deck the backup was made from, else the file's name without .json. */
+    private String backupDeckName(JsonNode root, Path inputPath) {
+        String name = root.path("deck").path("name").asText("").trim().replaceAll("\\s+", " ");
+        if (name.isEmpty()) {
+            name = inputPath.getFileName().toString().replaceFirst("(?i)\\.json$", "").trim().replaceAll("\\s+", " ");
+        }
+        return name.isEmpty() ? tr("backup.newDeck.name") : name;
+    }
+
+    /**
+     * {@code name}, or {@code name} with " (2)", " (3)", ... appended: the first no active deck has,
+     * ignoring case, shortened to the longest deck name allowed.
+     */
+    private String freeDeckName(String name) throws SQLException {
+        String candidate = shorten(name, "");
+        for (int number = 2; deckRepository.findByName(candidate).isPresent(); number++) {
+            candidate = shorten(name, " (" + number + ")");
+        }
+        return candidate;
+    }
+
+    private static String shorten(String name, String suffix) {
+        int room = DeckService.MAX_DECK_NAME_LENGTH - suffix.length();
+        return (name.length() > room ? name.substring(0, room).trim() : name) + suffix;
+    }
+
+    /**
+     * Restores the backup into {@code deck}. The review logs of a word are restored only when the
+     * word's schedule is the backup's after the restore (the word was added, its schedule replaced,
+     * or it already had it): the logs of a word that keeps its own, different progress are counted
+     * but not added, so they cannot inflate that card's history.
+     */
+    private RestoreTally restore(JsonNode root, int version, Deck deck, boolean deckCreated, ExistingWordPolicy policy)
         throws SQLException {
-        RestoreTally tally = new RestoreTally(version);
+        long deckId = deck.getId();
+        RestoreTally tally = new RestoreTally(version, deck, deckCreated);
         Map<String, WordCard> deckWords = new HashMap<>();
         for (WordCard word : wordRepository.findAllIncludingSuspended(deckId)) {
             deckWords.put(wordKey(word.getEnglish()), word);
         }
+        Set<Long> reviewedWords = reviewLogRepository.wordsWithLogs(deckId);
 
         Set<String> restoredWords = new HashSet<>();
+        Set<Long> takesBackupLogs = new HashSet<>();
         List<WordCard> withoutCardState = new ArrayList<>();
         restoreRows(root, "words", tr("backup.row.word"), tally,
-            row -> restoreWord(row, deckId, policy, deckWords, restoredWords, withoutCardState, tally));
+            row -> restoreWord(row, deckId, policy, deckWords, reviewedWords, restoredWords, takesBackupLogs,
+                withoutCardState, tally));
 
         List<ReviewLog> logs = new ArrayList<>();
-        restoreRows(root, "reviewLogs", tr("backup.row.reviewLog"), tally, row -> logs.add(reviewLog(row, deckWords)));
+        restoreRows(root, "reviewLogs", tr("backup.row.reviewLog"), tally, row -> {
+            ReviewLog log = reviewLog(row, deckWords);
+            if (takesBackupLogs.contains(log.getWordId())) {
+                logs.add(log);
+            } else {
+                tally.keptWordLogsSkipped++;
+            }
+        });
         // A log with the same word, time and rating is the same review, already in the deck or earlier in the file.
         int logsInserted = reviewLogRepository.insertAllIfAbsent(logs);
         tally.logsInserted += logsInserted;
@@ -398,8 +469,14 @@ public class BackupService {
         }
     }
 
+    /**
+     * Adds the backup's word, or decides what happens to the deck's word of that spelling; see
+     * {@link ExistingWordPolicy}. The ids of the words whose schedule is the backup's afterwards go
+     * into {@code takesBackupLogs}.
+     */
     private void restoreWord(JsonNode row, long deckId, ExistingWordPolicy policy, Map<String, WordCard> deckWords,
-                             Set<String> restoredWords, List<WordCard> withoutCardState, RestoreTally tally)
+                             Set<Long> reviewedWords, Set<String> restoredWords, Set<Long> takesBackupLogs,
+                             List<WordCard> withoutCardState, RestoreTally tally)
         throws SQLException, JsonProcessingException {
         BackupFile.WordEntry entry = objectMapper.treeToValue(row, BackupFile.WordEntry.class);
         ValidatedWord validated = validationService.validate(entry.english(), entry.chinese(), entry.phonetic(),
@@ -429,21 +506,39 @@ public class BackupService {
             word.setSuspended(Boolean.TRUE.equals(entry.archived()));
             wordRepository.insert(word);
             deckWords.put(key, word);
+            takesBackupLogs.add(word.getId());
             if (schedule != null && schedule.state() == null) {
                 withoutCardState.add(word);
             }
             tally.wordsInserted++;
-        } else if (policy == ExistingWordPolicy.OVERWRITE_SCHEDULE && schedule != null
-            && !schedule.sameAs(existing)) {
+            return;
+        }
+        // Never reviewed: nothing of its own to keep, so the backup's card replaces it, unless that
+        // card was never reviewed or suspended either.
+        boolean unreviewed = existing.getState() == CardState.NEW && existing.getRepetitions() == 0
+            && !reviewedWords.contains(existing.getId());
+        boolean backupSuspended = Boolean.TRUE.equals(entry.archived());
+        boolean replace = schedule != null && (policy == ExistingWordPolicy.OVERWRITE_SCHEDULE
+            || (unreviewed && (!schedule.isNewCard() || backupSuspended)));
+        boolean suspend = unreviewed && replace && backupSuspended != existing.isSuspended();
+        if (replace && (!schedule.sameAs(existing) || suspend)) {
             schedule.applyTo(existing);
+            if (unreviewed) {
+                existing.setSuspended(backupSuspended);
+            }
             wordRepository.update(existing);
             if (schedule.state() == null) {
                 withoutCardState.add(existing);
             }
+            takesBackupLogs.add(existing.getId());
             tally.wordsUpdated++;
-        } else {
-            tally.wordsSkipped++;
+            return;
         }
+        if (schedule != null && schedule.sameAs(existing)) {
+            // Already the backup's schedule, as when restoring into the deck the backup came from.
+            takesBackupLogs.add(existing.getId());
+        }
+        tally.wordsSkipped++;
     }
 
     /** The saved review schedule, or null for a version 1 entry, which has none. */
@@ -675,6 +770,11 @@ public class BackupService {
         void restore(JsonNode row) throws SQLException, JsonProcessingException;
     }
 
+    @FunctionalInterface
+    private interface SqlRestore {
+        RestoreTally run() throws SQLException;
+    }
+
     /**
      * The review-schedule columns of a card. {@code state} is null for a backup written before FSRS;
      * {@link #applyTo} then estimates the FSRS state from the SM-2 fields until it is derived.
@@ -694,6 +794,11 @@ public class BackupService {
     ) {
         static Schedule newCard(LocalDateTime now) {
             return new Schedule(null, now, WordCard.DEFAULT_EASINESS, 0, 0, 0, 0, CardState.NEW, 0, 0, 0);
+        }
+
+        /** Whether the saved card was never reviewed, so it has no progress to bring. */
+        boolean isNewCard() {
+            return (state == null || state == CardState.NEW) && repetitions == 0 && lastReviewedAt == null;
         }
 
         static Schedule of(WordCard word) {
@@ -732,18 +837,23 @@ public class BackupService {
 
     private static final class RestoreTally {
         private final int formatVersion;
+        private final Deck deck;
+        private final boolean deckCreated;
         private int wordsInserted;
         private int wordsUpdated;
         private int wordsSkipped;
         private int logsInserted;
         private int duplicateLogsSkipped;
+        private int keptWordLogsSkipped;
         private int dailyGoalsRestored;
         private int achievementsRestored;
         private final List<String> invalidRows = new ArrayList<>();
         private Exception firstFailure;
 
-        private RestoreTally(int formatVersion) {
+        private RestoreTally(int formatVersion, Deck deck, boolean deckCreated) {
             this.formatVersion = formatVersion;
+            this.deck = deck;
+            this.deckCreated = deckCreated;
         }
 
         private void invalid(String row, Exception failure) {
@@ -754,8 +864,9 @@ public class BackupService {
         }
 
         private BackupRestoreResult toResult() {
-            return new BackupRestoreResult(formatVersion, wordsInserted, wordsUpdated, wordsSkipped, logsInserted,
-                duplicateLogsSkipped, dailyGoalsRestored, achievementsRestored, invalidRows);
+            return new BackupRestoreResult(deck, deckCreated, formatVersion, wordsInserted, wordsUpdated, wordsSkipped,
+                logsInserted, duplicateLogsSkipped, keptWordLogsSkipped, dailyGoalsRestored, achievementsRestored,
+                invalidRows);
         }
     }
 }

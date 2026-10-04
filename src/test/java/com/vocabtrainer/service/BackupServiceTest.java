@@ -169,7 +169,13 @@ class BackupServiceTest {
         WordCard saved = db.words.findByEnglish(deck.getId(), "aberrant").orElseThrow();
 
         Deck other = db.decks.create("Other");
-        WordCard fresh = db.words.save(WordCard.createNew(other.getId(), "Aberrant", "反常的"));
+        // Studied in this deck: it has progress of its own to keep.
+        WordCard studied = WordCard.createNew(other.getId(), "Aberrant", "反常的");
+        studied.setState(CardState.LEARNING);
+        studied.setRepetitions(1);
+        WordCard fresh = db.words.save(studied);
+        db.logs.insert(new ReviewLog(0, fresh.getId(), NOW.minusHours(1), "反常的", "反常的", 1.0, ReviewRating.GOOD,
+            900, ReviewKind.LEARN, ReviewMode.EN_TO_ZH));
 
         BackupRestoreResult kept = db.backup.importJsonBackup(json, other.getId());
         assertEquals(1, kept.wordsSkipped());
@@ -178,6 +184,12 @@ class BackupServiceTest {
         assertEquals(fresh.getNextReviewAt(), afterKeep.getNextReviewAt());
         assertEquals(0, afterKeep.getIntervalDays());
         assertEquals("反常的", afterKeep.getChinese());
+        // Its own history stays its own: the backup's two logs of aberrant are not added to it.
+        assertEquals(1, kept.logsInserted(), "zeal's log, a word the restore added");
+        assertEquals(2, kept.keptWordLogsSkipped());
+        assertEquals(1, db.logs.findByWord(fresh.getId()).size());
+        assertTrue(kept.toSummary().contains("Review logs not added because their word kept its own progress in the"
+            + " deck: 2."), kept.toSummary());
 
         BackupRestoreResult overwritten = db.backup.importJsonBackup(json, other.getId(),
             BackupService.ExistingWordPolicy.OVERWRITE_SCHEDULE);
@@ -185,11 +197,82 @@ class BackupServiceTest {
         WordCard afterOverwrite = db.words.findById(fresh.getId()).orElseThrow();
         assertSameSchedule(saved, afterOverwrite);
         assertEquals("反常的", afterOverwrite.getChinese(), "only the schedule is replaced");
+        assertEquals(2, overwritten.logsInserted(), "the schedule is the backup's now, and so is its history");
+        assertEquals(0, overwritten.keptWordLogsSkipped());
+        assertEquals(3, db.logs.findByWord(fresh.getId()).size());
 
         BackupRestoreResult again = db.backup.importJsonBackup(json, other.getId(),
             BackupService.ExistingWordPolicy.OVERWRITE_SCHEDULE);
         assertEquals(0, again.wordsUpdated());
         assertEquals(4, again.wordsSkipped());
+        assertEquals(0, again.logsInserted());
+        assertEquals(3, again.duplicateLogsSkipped());
+    }
+
+    @Test
+    void wordsTheDeckNeverReviewedTakeTheBackupsProgressEvenWhenProgressIsKept() throws Exception {
+        // A reinstall: the new database's starter words are the backup's words, never reviewed.
+        Db source = new Db(tempDir.resolve("before.db"));
+        Deck sourceDeck = source.decks.ensureDefaultDeck();
+        seedTrickyDeck(source, sourceDeck.getId());
+        Path json = source.backup.exportJsonBackup(sourceDeck.getId(), tempDir.resolve("backup.json"));
+        Db fresh = new Db(tempDir.resolve("reinstalled.db"));
+        Deck deck = fresh.decks.ensureDefaultDeck();
+        for (String english : List.of("aberrant", "lucid", "zeal", "obdurate", "mitigate")) {
+            fresh.words.insert(card(deck.getId(), english, "新安装的释义"));
+        }
+
+        BackupRestoreResult result = fresh.backup.importJsonBackup(json, deck.getId());
+
+        assertEquals(0, result.wordsInserted());
+        assertEquals(2, result.wordsUpdated(), "aberrant and zeal had progress in the backup");
+        assertEquals(2, result.wordsSkipped(), "lucid and obdurate were never reviewed in the backup either");
+        assertEquals(3, result.logsInserted());
+        assertEquals(0, result.keptWordLogsSkipped());
+        Map<String, WordCard> restored = byEnglish(fresh.words.findAllIncludingSuspended(deck.getId()));
+        Map<String, WordCard> original = byEnglish(source.words.findAllIncludingSuspended(sourceDeck.getId()));
+        assertSameSchedule(original.get("aberrant"), restored.get("aberrant"));
+        assertSameSchedule(original.get("zeal"), restored.get("zeal"));
+        assertTrue(restored.get("zeal").isSuspended(), "the backup's card replaces it, suspension included");
+        assertEquals("新安装的释义", restored.get("aberrant").getChinese(), "the text stays the deck's");
+        assertEquals(CardState.NEW, restored.get("mitigate").getState());
+        assertEquals(2, fresh.logs.findByWord(restored.get("aberrant").getId()).size());
+    }
+
+    @Test
+    void aBackupCanBeRestoredIntoANewDeckNamedAfterItsDeck() throws Exception {
+        Db source = new Db(tempDir.resolve("gre.db"));
+        Deck gre = source.decks.create("GRE");
+        seedTrickyDeck(source, gre.getId());
+        Path json = source.backup.exportJsonBackup(gre.getId(), tempDir.resolve("backup.json"));
+        Db target = new Db(tempDir.resolve("target.db"));
+        Deck current = target.decks.ensureDefaultDeck();
+        target.decks.create("gre");
+
+        BackupRestoreResult first = target.backup.importJsonBackupIntoNewDeck(json);
+        BackupRestoreResult second = target.backup.importJsonBackupIntoNewDeck(json);
+
+        assertTrue(first.deckCreated());
+        assertEquals("GRE (2)", first.deck().getName(), "an active deck has the name, in any case");
+        assertEquals("GRE (3)", second.deck().getName());
+        assertEquals(4, first.wordsInserted());
+        assertEquals(3, first.logsInserted());
+        assertEquals(1, first.achievementsRestored());
+        assertTrue(first.toSummary().contains("Restored into a new deck, \"GRE (2)\"."), first.toSummary());
+        assertEquals(logSnapshot(source, gre.getId()), logSnapshot(target, first.deck().getId()));
+        assertEquals(0, target.words.countAll(current.getId()), "the current deck is left alone");
+
+        // A version 1 backup names no deck: the file does; a long name is shortened to fit " (2)".
+        Path unnamed = Files.writeString(tempDir.resolve("my  words.json"),
+            "{\"words\":[{\"english\":\"lucid\",\"chinese\":\"清晰的\"}]}", StandardCharsets.UTF_8);
+        assertEquals("my words", target.backup.importJsonBackupIntoNewDeck(unnamed).deck().getName());
+        String longName = "L".repeat(DeckService.MAX_DECK_NAME_LENGTH);
+        target.decks.create(longName);
+        Path named = Files.writeString(tempDir.resolve("long.json"), "{\"version\":2,\"deck\":{\"name\":\""
+            + longName + "\"},\"words\":[]}", StandardCharsets.UTF_8);
+        assertEquals("L".repeat(DeckService.MAX_DECK_NAME_LENGTH - 4) + " (2)",
+            target.backup.importJsonBackupIntoNewDeck(named).deck().getName());
+        assertFalse(first.toSummary().isEmpty());
     }
 
     @Test
@@ -204,7 +287,7 @@ class BackupServiceTest {
             new CardStateBackfill(db.words, db.logs, new ReviewScheduler()), snapshots);
 
         backup.importJsonBackup(json, db.decks.create("Restored").getId());
-        backup.importJsonBackup(json, db.decks.create("Again").getId());
+        backup.importJsonBackupIntoNewDeck(json);
 
         List<Path> written = snapshots.list();
         assertEquals(2, written.size());

@@ -28,6 +28,13 @@ import static com.vocabtrainer.util.Messages.tr;
 final class DataActions {
     private static final Logger LOGGER = Logger.getLogger(DataActions.class.getName());
 
+    /** What to do with the backup's words: restore into the current deck one way or the other, or into a new deck. */
+    private enum RestoreChoice {
+        KEEP_PROGRESS,
+        USE_BACKUP_PROGRESS,
+        NEW_DECK
+    }
+
     private final ViewContext context;
     private final StatsService statsService;
     private final GoalService goalService;
@@ -122,17 +129,24 @@ final class DataActions {
             return;
         }
         Deck targetDeck = context.decks().current();
-        Optional<BackupService.ExistingWordPolicy> policy = askExistingWordPolicy(targetDeck);
-        if (policy.isEmpty()) {
+        Optional<RestoreChoice> choice = askRestoreChoice(targetDeck);
+        if (choice.isEmpty()) {
             return;
         }
+        Path backup = file.get();
         context.async().run(
             () -> {
-                BackupRestoreResult result = backupService.importJsonBackup(file.get(), targetDeck.getId(), policy.get());
+                BackupRestoreResult result = switch (choice.get()) {
+                    case NEW_DECK -> backupService.importJsonBackupIntoNewDeck(backup);
+                    case USE_BACKUP_PROGRESS -> backupService.importJsonBackup(backup, targetDeck.getId(),
+                        BackupService.ExistingWordPolicy.OVERWRITE_SCHEDULE);
+                    case KEEP_PROGRESS -> backupService.importJsonBackup(backup, targetDeck.getId(),
+                        BackupService.ExistingWordPolicy.KEEP_SCHEDULE);
+                };
                 bringReviewsBeforeExams();
                 return result;
             },
-            result -> afterRestore(result, targetDeck),
+            this::afterRestore,
             error -> context.errors().showError(tr("import.failed"), UiErrors.rootMessage(error)),
             status,
             tr("data.backup.importing")
@@ -148,25 +162,34 @@ final class DataActions {
         }
     }
 
-    private Optional<BackupService.ExistingWordPolicy> askExistingWordPolicy(Deck targetDeck) {
+    private Optional<RestoreChoice> askRestoreChoice(Deck targetDeck) {
         ButtonType keepProgress = new ButtonType(tr("data.backup.keep"), ButtonBar.ButtonData.OK_DONE);
         ButtonType useBackupProgress = new ButtonType(tr("data.backup.useBackup"), ButtonBar.ButtonData.OTHER);
+        ButtonType newDeck = new ButtonType(tr("data.backup.newDeck"), ButtonBar.ButtonData.OTHER);
         Optional<ButtonType> choice = context.dialogs().choose(tr("data.backup.import"),
             tr("data.backup.question", targetDeck.getName()), tr("data.backup.explanation"),
-            keepProgress, useBackupProgress, ButtonType.CANCEL);
+            keepProgress, useBackupProgress, newDeck, ButtonType.CANCEL);
         if (choice.isEmpty() || choice.get() == ButtonType.CANCEL) {
             return Optional.empty();
         }
-        return Optional.of(choice.get() == useBackupProgress
-            ? BackupService.ExistingWordPolicy.OVERWRITE_SCHEDULE
-            : BackupService.ExistingWordPolicy.KEEP_SCHEDULE);
+        if (choice.get() == newDeck) {
+            return Optional.of(RestoreChoice.NEW_DECK);
+        }
+        return Optional.of(choice.get() == useBackupProgress ? RestoreChoice.USE_BACKUP_PROGRESS
+            : RestoreChoice.KEEP_PROGRESS);
     }
 
-    private void afterRestore(BackupRestoreResult result, Deck targetDeck) {
+    private void afterRestore(BackupRestoreResult result) {
         // A restore brings back saved history; unlike adding words it earns no XP or new-word credit.
-        context.errors().guard(tr("data.backup.refreshFailed"),
-            () -> context.changes().publish(DataChange.WORDS, DataChange.REVIEWS));
-        context.dialogs().showText(tr("data.backup.import"), tr("import.deck", targetDeck.getName()), result.toSummary(),
-            result.invalidRows().isEmpty() ? 5 : 12);
+        context.errors().guard(tr("data.backup.refreshFailed"), () -> {
+            if (result.deckCreated()) {
+                context.decks().switchTo(result.deck());
+                context.changes().publish(DataChange.DECKS, DataChange.WORDS, DataChange.REVIEWS);
+            } else {
+                context.changes().publish(DataChange.WORDS, DataChange.REVIEWS);
+            }
+        });
+        context.dialogs().showText(tr("data.backup.import"), tr("import.deck", result.deck().getName()),
+            result.toSummary(), result.invalidRows().isEmpty() ? 5 : 12);
     }
 }

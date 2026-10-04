@@ -18,10 +18,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 public class ReviewLogRepository {
     /**
@@ -162,6 +164,26 @@ public class ReviewLogRepository {
             statement.setLong(1, deckId);
             try (ResultSet rs = statement.executeQuery()) {
                 return mapLogs(rs);
+            }
+        }
+    }
+
+    /** The ids of the deck's words, suspended ones included, that have at least one review log. */
+    public Set<Long> wordsWithLogs(long deckId) throws SQLException {
+        String sql = """
+            SELECT w.id
+            FROM words w
+            WHERE w.deck_id = ? AND EXISTS (SELECT 1 FROM review_logs l WHERE l.word_id = w.id)
+            """;
+        try (Connection connection = databaseManager.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, deckId);
+            try (ResultSet rs = statement.executeQuery()) {
+                Set<Long> ids = new HashSet<>();
+                while (rs.next()) {
+                    ids.add(rs.getLong(1));
+                }
+                return ids;
             }
         }
     }
