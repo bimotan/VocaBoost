@@ -80,7 +80,7 @@ public class DeckService {
 
     /**
      * The active deck named {@code name}, with its spaces trimmed and collapsed as {@link #createDeck}
-     * does; empty when there is none.
+     * does and ignoring upper and lower case; empty when there is none.
      */
     public Optional<Deck> findActiveDeck(String name) {
         String cleanName = name == null ? "" : name.trim().replaceAll("\\s+", " ");
@@ -139,7 +139,8 @@ public class DeckService {
             if (deck.isPresent() && deck.get().isArchived()) {
                 Optional<Deck> active = deckRepository.findByName(deck.get().getName());
                 if (active.isPresent() && active.get().getId() != id) {
-                    throw new IllegalArgumentException(tr("deck.error.restoreNameInUse", deck.get().getName()));
+                    throw new IllegalArgumentException(
+                        DeckRepository.restoreNameInUse(deck.get().getName(), active.get().getName()));
                 }
             }
             return deckRepository.restore(id);
@@ -166,13 +167,19 @@ public class DeckService {
         return deckRepository.ensureDefaultDeck(defaultDeckName());
     }
 
-    /** Names are unique among active decks; an archived deck's name can be used again. */
+    /**
+     * Names are unique among active decks, ignoring upper and lower case ("GRE" and "gre" are one
+     * name); an archived deck's name can be used again, and a deck can be renamed to its own name in
+     * other case.
+     */
     private void rejectNameInUse(String name, Long renamingId) throws SQLException {
         Optional<Deck> existing = deckRepository.findByName(name);
         if (existing.isEmpty() || (renamingId != null && existing.get().getId() == renamingId)) {
             return;
         }
-        throw new IllegalArgumentException(tr("deck.error.nameInUse", name));
+        String existingName = existing.get().getName();
+        throw new IllegalArgumentException(existingName.equals(name) ? tr("deck.error.nameInUse", name)
+            : tr("deck.error.nameInUseCase", existingName, name));
     }
 
     private String validateName(String name) {

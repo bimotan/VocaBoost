@@ -139,6 +139,39 @@ class DeckServiceTest {
     }
 
     @Test
+    void activeDeckNamesIgnoreUpperAndLowerCase() throws Exception {
+        DatabaseManager databaseManager = databases.open(tempDir.resolve("case.db"));
+        DeckRepository deckRepository = new DeckRepository(databaseManager);
+        DeckService deckService = new DeckService(deckRepository,
+            new SettingsService(new SettingsRepository(databaseManager)));
+        deckService.ensureDefaultDeck();
+        Deck gre = deckService.createDeck("GRE");
+
+        IllegalArgumentException create = assertThrows(IllegalArgumentException.class, () -> deckService.createDeck("gre"));
+        assertEquals("A deck is already named \"GRE\", which differs from \"gre\" only in upper and lower case:"
+            + " choose another name.", create.getMessage());
+        Deck toefl = deckService.createDeck("TOEFL");
+        assertThrows(IllegalArgumentException.class, () -> deckService.renameDeck(toefl.getId(), "Gre"));
+        assertEquals("Gre", deckService.renameDeck(gre.getId(), "Gre").getName(), "a deck's own name in other case");
+        assertEquals(gre.getId(), deckService.findActiveDeck(" gRE ").orElseThrow().getId());
+
+        deckService.archiveDeck(gre.getId());
+        Deck upper = deckService.createDeck("GRE");
+        IllegalArgumentException restore = assertThrows(IllegalArgumentException.class,
+            () -> deckService.restoreDeck(gre.getId()));
+        assertEquals("An active deck is named \"GRE\", which differs from \"Gre\" only in upper and lower case:"
+            + " rename or archive that deck before you restore this one.", restore.getMessage());
+        SQLException repositoryRestore = assertThrows(SQLException.class, () -> deckRepository.restore(gre.getId()));
+        assertEquals(restore.getMessage(), repositoryRestore.getMessage());
+        assertEquals(upper.getId(), deckRepository.findAnyByName("Gre").orElseThrow().getId(), "the active deck first");
+        deckService.archiveDeck(upper.getId());
+        assertEquals(gre.getId(), deckRepository.findAnyByName("Gre").orElseThrow().getId(),
+            "an archived deck named exactly so before a newer one that differs in case");
+        // The unique index ignores case too, also without the service's check.
+        assertThrows(SQLException.class, () -> deckRepository.create("toefl"));
+    }
+
+    @Test
     void databaseKeepsActiveNamesUniqueEvenWithoutTheServiceChecks() throws Exception {
         DatabaseManager databaseManager = databases.open(tempDir.resolve("index.db"));
         DeckRepository deckRepository = new DeckRepository(databaseManager);

@@ -165,6 +165,34 @@ class SchemaMigrationTest {
     }
 
     @Test
+    void renamesActiveDecksWhoseNamesDifferOnlyInCaseAndIndexesNamesIgnoringCase() throws Exception {
+        Path file = tempDir.resolve("deck-case.db");
+        LegacySchemas.EFFECTIVE_RATING_VERSION_7.create(file);
+        LegacySchemas.execute(file,
+            "INSERT INTO decks(id, name, created_at, archived) VALUES(1, 'GRE', '2026-04-01T08:00:00', 0)",
+            "INSERT INTO decks(id, name, created_at, archived) VALUES(2, 'gre', '2026-04-02T08:00:00', 0)",
+            "INSERT INTO decks(id, name, created_at, archived) VALUES(3, 'Gre', '2026-04-03T08:00:00', 0)",
+            "INSERT INTO decks(id, name, created_at, archived) VALUES(4, 'gre (2)', '2026-04-04T08:00:00', 0)",
+            "INSERT INTO decks(id, name, created_at, archived) VALUES(5, 'gre', '2026-04-05T08:00:00', 1)",
+            "INSERT INTO decks(id, name, created_at, archived) VALUES(6, '托福', '2026-04-06T08:00:00', 0)",
+            word(2, "lucid", "清晰的"));
+
+        DatabaseManager databaseManager = databases.open(file);
+
+        // The oldest keeps its name; the first free " (n)" ignoring case goes to each newer one, oldest first.
+        assertEquals(List.of("1|GRE|0", "2|gre (3)|0", "3|Gre (4)|0", "4|gre (2)|0", "5|gre|1", "6|托福|0"),
+            stringColumn(file, "SELECT id || '|' || name || '|' || archived FROM decks ORDER BY id"));
+        assertEquals(List.of("2|lucid"), stringColumn(file, "SELECT deck_id || '|' || english FROM words"));
+        assertEquals(List.of("1|NOCASE"), stringColumn(file, "SELECT il.\"unique\" || '|' || ix.coll"
+            + " FROM pragma_index_list('decks') il, pragma_index_xinfo(il.name) ix"
+            + " WHERE il.name = 'idx_decks_active_name' AND ix.key = 1"));
+        DeckRepository decks = new DeckRepository(databaseManager);
+        assertThrows(SQLException.class, () -> decks.create("gRE"));
+        assertThrows(SQLException.class, () -> decks.restore(5));
+        assertDatabaseIsConsistent(file);
+    }
+
+    @Test
     void collapsesReviewLogsDuplicatedByRepeatedRestores() throws Exception {
         Path file = tempDir.resolve("duplicate-logs.db");
         LegacySchemas.DECK_SCOPED_GOALS.create(file);
