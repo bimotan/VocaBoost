@@ -62,7 +62,7 @@ class ReviewLogBackupTest {
     @Test
     void aRestoredBackupKeepsTheKindAndDirectionOfEveryReview() throws SQLException {
         Deck source = decks.create("Source");
-        WordCard word = WordCard.createNew(source.getId(), "lucid", "清晰的");
+        WordCard word = WordCard.createNew(source.getId(), "lucid", "清晰的", FIRST);
         word.setState(CardState.REVIEW);
         word.setStability(3);
         word.setDifficulty(5);
@@ -125,7 +125,7 @@ class ReviewLogBackupTest {
     @Test
     void aRestoredBackupKeepsWhatEachReviewCountedAsAndWhetherItWasOverridden() throws SQLException {
         Deck source = decks.create("Source");
-        WordCard word = words.insert(WordCard.createNew(source.getId(), "lucid", "清晰的"));
+        WordCard word = words.insert(WordCard.createNew(source.getId(), "lucid", "清晰的", FIRST));
         logs.insert(new ReviewLog(0, word.getId(), FIRST, "清楚", "清晰的", 0.25, ReviewRating.GOOD, 1500,
             ReviewKind.LEARN, ReviewMode.EN_TO_ZH, ReviewRating.GOOD, true));
         logs.insert(new ReviewLog(0, word.getId(), FIRST.plusDays(1), "清楚", "清晰的", 0.25, ReviewRating.EASY, 1500,

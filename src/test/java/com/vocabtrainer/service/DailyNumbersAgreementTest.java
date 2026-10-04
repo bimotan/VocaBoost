@@ -39,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DailyNumbersAgreementTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-05-28T10:00:00Z"), ZoneId.of("UTC"));
+    private static final LocalDateTime NOW = LocalDateTime.now(CLOCK);
     private static final LocalDate TODAY = LocalDate.of(2026, 5, 28);
 
     @TempDir
@@ -57,9 +58,9 @@ class DailyNumbersAgreementTest {
         StatsService stats = new StatsService(words, logs, CLOCK, new StudyDay());
         Deck gre = decks.ensureDefaultDeck();
         Deck toefl = decks.create("TOEFL");
-        WordCard lucid = words.save(WordCard.createNew(gre.getId(), "lucid", "清晰的"));
-        WordCard abate = words.save(WordCard.createNew(gre.getId(), "abate", "减弱"));
-        WordCard laud = words.save(WordCard.createNew(toefl.getId(), "laud", "赞扬"));
+        WordCard lucid = words.save(WordCard.createNew(gre.getId(), "lucid", "清晰的", NOW));
+        WordCard abate = words.save(WordCard.createNew(gre.getId(), "abate", "减弱", NOW));
+        WordCard laud = words.save(WordCard.createNew(toefl.getId(), "laud", "赞扬", NOW));
 
         // GRE today: four reviews, two of them correct, one of them a new word.
         save(goals, logs, gre, log(lucid, TODAY.atTime(8, 0), ReviewKind.LEARN, ReviewRating.GOOD, null, 1.0));

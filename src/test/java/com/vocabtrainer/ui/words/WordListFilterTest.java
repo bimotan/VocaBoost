@@ -122,7 +122,7 @@ class WordListFilterTest {
     private static WordCard word(String english, String pos, String tags, CardState state, double stability,
                                  double difficulty, int repetitions, int consecutiveCorrect, int lapses,
                                  LocalDateTime nextReviewAt) {
-        WordCard word = WordCard.createNew(1, english, "词");
+        WordCard word = WordCard.createNew(1, english, "词", NOW);
         word.setPartOfSpeech(pos);
         word.setTags(tags);
         word.setState(state);

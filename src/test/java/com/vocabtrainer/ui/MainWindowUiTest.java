@@ -1,5 +1,6 @@
 package com.vocabtrainer.ui;
 
+import com.vocabtrainer.TestClock;
 import com.vocabtrainer.app.AppServices;
 import com.vocabtrainer.app.VocabTrainerApp;
 import com.vocabtrainer.domain.Deck;
@@ -30,6 +31,7 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextInputControl;
+import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
@@ -49,6 +51,7 @@ import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.time.LocalDateTime;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -72,6 +75,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * whatever the locale of the machine they run on, unless a test saves another language or overrides
  * {@link #systemLocale()}.
  *
+ * <p>The services and the views run on {@link #clock}, which stands still at {@link #TEST_START}
+ * until a test moves it, so the study day, the due words and every date the window shows are the
+ * same whenever and in whatever time zone the tests run.
+ *
  * <p>Dashboard, Decks, Statistics and Word List recompute their content only while their tab is
  * shown, like a user would see them, so select the tab before reading its controls.
  */
@@ -87,6 +94,11 @@ abstract class MainWindowUiTest {
     static final Locale TEST_SYSTEM_LOCALE = Locale.ENGLISH;
     /** The JVM's own default locale, which every test leaves as it found it. */
     private static final Locale JVM_DEFAULT_LOCALE = Locale.getDefault();
+    /**
+     * When every test starts: a Tuesday at 10:00, hours away from midnight and from the 4 am start of
+     * the study day.
+     */
+    static final LocalDateTime TEST_START = LocalDateTime.of(2026, 3, 10, 10, 0);
 
     private static final String BACKGROUND_THREAD_NAME = "vocaboost-background-task";
     /** Longer than a debounce of typed input (the Word List's search had one of 250 ms). */
@@ -96,6 +108,8 @@ abstract class MainWindowUiTest {
     Path tempDir;
 
     final ScriptedDialogs dialogs = new ScriptedDialogs();
+    /** The clock of the services and the views; a test may set it or move it forward. */
+    final TestClock clock = new TestClock(TEST_START);
     AppServices services;
     private Stage stage;
     private String testName;
@@ -116,6 +130,7 @@ abstract class MainWindowUiTest {
 
     private void showMainWindow() {
         AppServices.Builder builder = AppServices.builder(tempDir.resolve("vocab.db"))
+            .clock(clock)
             .dictionaryService((cache, local) -> offlineDictionary(local))
             .aiService((cache, settings) -> new MockAiService());
         AppServices.Builder configured = configure(builder);
@@ -286,6 +301,11 @@ abstract class MainWindowUiTest {
             stage.getScene().getRoot().applyCss();
             stage.getScene().getRoot().layout();
         });
+    }
+
+    /** The icons of the window, as the title bar and the task bar get them. */
+    List<Image> windowIcons() {
+        return Fx.call(() -> List.copyOf(stage.getIcons()));
     }
 
     /** The window's smallest size: {min width, min height}. */

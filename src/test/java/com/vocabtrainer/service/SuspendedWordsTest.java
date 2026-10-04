@@ -101,7 +101,7 @@ class SuspendedWordsTest {
 
     private static WordCard card(Deck deck, String english, CardState state, double stability, double difficulty,
                                  LocalDateTime due) {
-        WordCard card = WordCard.createNew(deck.getId(), english, english.startsWith("new") ? "新" : "旧");
+        WordCard card = WordCard.createNew(deck.getId(), english, english.startsWith("new") ? "新" : "旧", NOW);
         card.setAddedAt(due.minusDays(10));
         card.setState(state);
         card.setStability(stability);

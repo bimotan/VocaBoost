@@ -230,7 +230,7 @@ class AlreadyKnownTest {
     }
 
     private WordCard newCard(String english, String chinese) {
-        WordCard card = WordCard.createNew(deck.getId(), english, chinese);
+        WordCard card = WordCard.createNew(deck.getId(), english, chinese, clock.now());
         card.setAddedAt(NOW.minusDays(1));
         card.setNextReviewAt(NOW.minusDays(1));
         return card;

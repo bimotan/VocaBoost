@@ -5,6 +5,7 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.image.Image;
 import javafx.scene.text.Font;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,23 @@ class WindowUiTest extends MainWindowUiTest {
         assertEquals(WindowSize.MIN_WIDTH, minimum[0]);
         assertEquals(WindowSize.MIN_HEIGHT, minimum[1]);
         assertTrue(minimum[1] <= 728, "a 1366 x 768 screen has about 728 px above the taskbar");
+    }
+
+    @Test
+    void theWindowHasTheAppIconInEverySize() {
+        List<Image> icons = windowIcons();
+
+        assertEquals(List.of(16, 32, 48, 64, 128, 256, 512),
+            icons.stream().map(icon -> (int) icon.getWidth()).toList());
+        for (Image icon : icons) {
+            assertFalse(icon.isError(), icon.getUrl());
+            assertEquals(icon.getWidth(), icon.getHeight(), icon.getUrl());
+            // Transparent corners around the rounded square, the V's white in the middle.
+            int size = (int) icon.getWidth();
+            assertEquals(0, Fx.call(() -> icon.getPixelReader().getArgb(0, 0)) >>> 24, icon.getUrl());
+            assertEquals(0xFFFFFFFF, (int) Fx.call(() -> icon.getPixelReader().getArgb(size / 2, size * 2 / 3)),
+                icon.getUrl());
+        }
     }
 
     @Test

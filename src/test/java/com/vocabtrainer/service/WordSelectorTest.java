@@ -40,7 +40,7 @@ class WordSelectorTest {
 
     @Test
     void aNewWordWeighsAsMuchAsAReviewAtItsDueDate() {
-        assertEquals(WordSelector.NEW_CARD_WEIGHT, selector.calculateWeight(WordCard.createNew(1, "new", "新"), NOW));
+        assertEquals(WordSelector.NEW_CARD_WEIGHT, selector.calculateWeight(WordCard.createNew(1, "new", "新", NOW), NOW));
     }
 
     @Test
@@ -57,7 +57,7 @@ class WordSelectorTest {
     }
 
     private static WordCard reviewCard(String english, double stability, LocalDateTime lastReview) {
-        WordCard card = WordCard.createNew(1, english, "词");
+        WordCard card = WordCard.createNew(1, english, "词", NOW);
         card.setState(CardState.REVIEW);
         card.setStability(stability);
         card.setDifficulty(5);

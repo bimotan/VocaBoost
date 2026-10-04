@@ -21,6 +21,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -30,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Offline mode: no online dictionary lookup and no AI request reaches the network. */
 class OfflineModeTest {
+    private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-01T09:00:00Z"), ZoneOffset.UTC);
     private static final String QUOKKA = """
         [{"word":"quokka","meanings":[{"partOfSpeech":"noun","definitions":[
             {"definition":"A small wallaby of south-western Australia."}]}]}]
@@ -76,7 +79,7 @@ class OfflineModeTest {
             new HttpDictionaryService(server.uri("/api").toString(), "key", StubHttpServer.client()),
             new PublicOnlineDictionaryService(StubHttpServer.client(), server.uri("/dictapi/"), server.uri("/wiki/"),
                 Duration.ofSeconds(2)),
-            new DictionaryCacheRepository(databaseManager), Clock.systemDefaultZone(), settings::isOfflineMode);
+            new DictionaryCacheRepository(databaseManager), CLOCK, settings::isOfflineMode);
         // Online, the public dictionary's answer is cached (the configured API does not have the word).
         assertTrue(chain.lookup("quokka").success());
         int onlineRequests = server.requests().size();
@@ -133,7 +136,7 @@ class OfflineModeTest {
 
     @Test
     void theAppsDictionaryChainFollowsTheSavedOfflineMode() throws Exception {
-        try (AppServices services = AppServices.builder(tempDir.resolve("app.db")).open()) {
+        try (AppServices services = AppServices.builder(tempDir.resolve("app.db")).clock(CLOCK).open()) {
             databases.track(services.databaseManager());
             services.settingsService().saveOfflineMode(true);
 

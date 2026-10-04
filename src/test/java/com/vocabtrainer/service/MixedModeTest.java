@@ -171,7 +171,7 @@ class MixedModeTest {
 
     /** A mature card, due today: last reviewed 30 days ago at a stability of 30 days. */
     private WordCard dueReview(String english, String chinese) {
-        WordCard card = WordCard.createNew(deck.getId(), english, chinese);
+        WordCard card = WordCard.createNew(deck.getId(), english, chinese, clock.now());
         card.setState(CardState.REVIEW);
         card.setStability(30);
         card.setDifficulty(5);

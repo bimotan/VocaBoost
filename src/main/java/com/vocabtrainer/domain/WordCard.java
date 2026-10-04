@@ -54,8 +54,13 @@ public class WordCard {
     public WordCard() {
     }
 
+    /** A new card added now by the system clock; see {@link #createNew(long, String, String, LocalDateTime)}. */
     public static WordCard createNew(long deckId, String english, String chinese) {
-        LocalDateTime now = LocalDateTime.now();
+        return createNew(deckId, english, chinese, LocalDateTime.now());
+    }
+
+    /** A new card added at {@code now}, due from then on. */
+    public static WordCard createNew(long deckId, String english, String chinese, LocalDateTime now) {
         WordCard card = new WordCard();
         card.deckId = deckId;
         card.english = english == null ? "" : english.trim();

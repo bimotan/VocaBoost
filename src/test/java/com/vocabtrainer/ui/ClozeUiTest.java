@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
-import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -64,7 +63,7 @@ class ClozeUiTest extends MainWindowUiTest {
     @Test
     void cardsWithoutAUsableExampleAreSkippedWithAVisibleCount() throws SQLException {
         List<WordCard> firstNew = services.wordRepository()
-            .findNewCards(currentDeck().getId(), LocalDateTime.now().plusDays(1), 3);
+            .findNewCards(currentDeck().getId(), clock.now().plusDays(1), 3);
         firstNew.get(0).setExampleSentence("");
         firstNew.get(1).setExampleSentence("This sentence does not have the word.");
         firstNew.forEach(word -> {

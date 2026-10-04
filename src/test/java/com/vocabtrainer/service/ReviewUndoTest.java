@@ -341,7 +341,7 @@ class ReviewUndoTest {
     }
 
     private WordCard newCard(String english, String chinese, int daysAgo) {
-        WordCard card = WordCard.createNew(deck.getId(), english, chinese);
+        WordCard card = WordCard.createNew(deck.getId(), english, chinese, clock.now());
         card.setAddedAt(NOW.minusDays(daysAgo));
         card.setNextReviewAt(NOW.minusDays(daysAgo));
         return card;
@@ -349,7 +349,7 @@ class ReviewUndoTest {
 
     /** A review card due today, with every scheduling field set to something of its own. */
     private WordCard reviewCard(String english, String chinese, int lapses) {
-        WordCard card = WordCard.createNew(deck.getId(), english, chinese);
+        WordCard card = WordCard.createNew(deck.getId(), english, chinese, clock.now());
         card.setAddedAt(NOW.minusDays(40));
         card.setState(CardState.REVIEW);
         card.setStability(12.5);

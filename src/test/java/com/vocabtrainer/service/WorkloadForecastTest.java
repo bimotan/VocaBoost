@@ -68,7 +68,7 @@ class WorkloadForecastTest {
         Random random = new Random(42);
         List<WordCard> all = new ArrayList<>();
         for (int i = 0; i < 600; i++) {
-            WordCard word = WordCard.createNew(i % 7 == 0 ? other.getId() : deck.getId(), "word" + i, "释义");
+            WordCard word = WordCard.createNew(i % 7 == 0 ? other.getId() : deck.getId(), "word" + i, "释义", clock.now());
             word.setState(STATES[random.nextInt(STATES.length)]);
             // From 10 days overdue to 45 days ahead, at any minute of the day, around every rollover hour.
             word.setNextReviewAt(NOW.minusDays(10).plusMinutes(random.nextInt(55 * 24 * 60)));
@@ -111,7 +111,7 @@ class WorkloadForecastTest {
     @Test
     void newWordsFollowTheDailyLimitUntilNoneAreLeft() throws SQLException {
         for (int i = 0; i < 47; i++) {
-            WordCard word = WordCard.createNew(deck.getId(), "new" + (char) ('a' + i / 26) + (char) ('a' + i % 26), "释义");
+            WordCard word = WordCard.createNew(deck.getId(), "new" + (char) ('a' + i / 26) + (char) ('a' + i % 26), "释义", clock.now());
             word.setNextReviewAt(NOW.minusDays(1));
             words.insert(word);
         }
@@ -154,7 +154,7 @@ class WorkloadForecastTest {
     }
 
     private WordCard reviewCard(String english, LocalDateTime due) {
-        WordCard card = WordCard.createNew(deck.getId(), english, "释义");
+        WordCard card = WordCard.createNew(deck.getId(), english, "释义", clock.now());
         card.setState(CardState.REVIEW);
         card.setStability(5);
         card.setDifficulty(5);

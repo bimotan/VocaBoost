@@ -200,7 +200,7 @@ class ClozeModeTest {
 
     /** A new card, due, added after the ones before it. */
     private WordCard newCard(String english, String chinese, String example) {
-        WordCard card = WordCard.createNew(deck.getId(), english, chinese);
+        WordCard card = WordCard.createNew(deck.getId(), english, chinese, clock.now());
         card.setExampleSentence(example);
         card.setAddedAt(NOW.minusDays(1).plusSeconds(added++));
         card.setNextReviewAt(NOW.minusDays(1));

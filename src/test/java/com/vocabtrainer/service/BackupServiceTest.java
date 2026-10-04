@@ -60,7 +60,7 @@ class BackupServiceTest {
     void exportsCsvFiles() throws Exception {
         Db db = new Db(tempDir.resolve("csv.db"));
         Deck deck = db.decks.ensureDefaultDeck();
-        WordCard word = WordCard.createNew(deck.getId(), "lucid", "清晰的");
+        WordCard word = WordCard.createNew(deck.getId(), "lucid", "清晰的", NOW);
         word.setTags("backup");
         db.words.save(word);
         db.logs.insert(new ReviewLog(0, word.getId(), NOW, "清晰的", "清晰的", 1.0, ReviewRating.EASY, 900));
@@ -170,7 +170,7 @@ class BackupServiceTest {
 
         Deck other = db.decks.create("Other");
         // Studied in this deck: it has progress of its own to keep.
-        WordCard studied = WordCard.createNew(other.getId(), "Aberrant", "反常的");
+        WordCard studied = WordCard.createNew(other.getId(), "Aberrant", "反常的", NOW);
         studied.setState(CardState.LEARNING);
         studied.setRepetitions(1);
         WordCard fresh = db.words.save(studied);
@@ -357,7 +357,7 @@ class BackupServiceTest {
         Db target = new Db(tempDir.resolve("target.db"),
             manager -> failingLogs[0] = new FailingReviewLogRepository(manager));
         Deck deck = target.decks.ensureDefaultDeck();
-        WordCard existing = target.words.save(WordCard.createNew(deck.getId(), "aberrant", "反常的"));
+        WordCard existing = target.words.save(WordCard.createNew(deck.getId(), "aberrant", "反常的", NOW));
         target.logs.insert(new ReviewLog(0, existing.getId(), NOW.minusDays(1), "x", "反常的", 0.0,
             ReviewRating.AGAIN, 500));
         target.goals.ensure(deck.getId(), TODAY, 20, 5, 10);
@@ -432,7 +432,7 @@ class BackupServiceTest {
     void restoringAnEmptyGoalDayAgainReportsNothingRestored() throws Exception {
         Db db = new Db(tempDir.resolve("empty-day.db"));
         Deck deck = db.decks.ensureDefaultDeck();
-        db.words.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
+        db.words.save(WordCard.createNew(deck.getId(), "lucid", "清晰的", NOW));
         // Older versions created an empty row for today whenever the dashboard was shown, so backups contain them.
         db.goals.ensure(deck.getId(), TODAY, GoalService.DEFAULT_REVIEW_GOAL, GoalService.DEFAULT_NEW_WORD_GOAL,
             GoalService.DEFAULT_SESSION_GOAL);
@@ -622,7 +622,7 @@ class BackupServiceTest {
     }
 
     private static WordCard card(long deckId, String english, String chinese) {
-        WordCard word = WordCard.createNew(deckId, english, chinese);
+        WordCard word = WordCard.createNew(deckId, english, chinese, NOW);
         word.setAddedAt(LocalDateTime.of(2026, 2, 1, 12, 0));
         word.setNextReviewAt(LocalDateTime.of(2026, 2, 1, 12, 0));
         return word;

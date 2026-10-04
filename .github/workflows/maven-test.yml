@@ -68,6 +68,17 @@ jobs:
       - name: Install virtual display
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
+      # No test may depend on the time of day. Between midnight and the 4 am study-day rollover the
+      # calendar day and the study day differ, so run the tests where it is 1 am now.
+      - name: Use a time zone where it is 1 am
+        run: |
+          offset=$(( ($(date -u +%-H) - 1 + 24) % 24 ))
+          if [ "$offset" -gt 12 ]; then offset=$((offset - 24)); fi
+          # Etc/GMT+N is N hours behind UTC.
+          if [ "$offset" -ge 0 ]; then zone="Etc/GMT+$offset"; else zone="Etc/GMT$offset"; fi
+          echo "TZ=$zone" >> "$GITHUB_ENV"
+          echo "The tests run in $zone, where it is $(TZ=$zone date '+%H:%M')."
+
       - name: Build and run all tests including UI tests
         run: xvfb-run -a -s "-screen 0 1400x900x24" ./mvnw -B -ntp verify -Pui-tests
 
@@ -129,8 +140,17 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
-      - name: Smoke-test the app image
+      # Starts the packaged launcher with --smoke-test: a new database in a temporary folder, the main
+      # window shown, exit code 0.
+      - name: Smoke-test the Windows app image
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./scripts/smoke-test.ps1 target/dist/VocaBoost/VocaBoost.exe
+
+      - name: Smoke-test the Linux app image
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: xvfb-run -a -s "-screen 0 1400x900x24" scripts/smoke-test.sh target/dist/VocaBoost/bin/VocaBoost
 
       - name: Upload the Windows app image

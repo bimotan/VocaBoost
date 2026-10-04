@@ -30,6 +30,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class ConnectionPoolTest {
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 5, 28, 9, 0);
+
     @TempDir
     Path tempDir;
 
@@ -54,13 +56,12 @@ class ConnectionPoolTest {
         long opened = databaseManager.connectionsOpened();
 
         for (int i = 0; i < 50; i++) {
-            wordRepository.save(WordCard.createNew(deckId, "word" + (char) ('a' + i % 26) + i, "释义"));
+            wordRepository.save(WordCard.createNew(deckId, "word" + (char) ('a' + i % 26) + i, "释义", NOW));
             wordRepository.countAll(deckId);
             wordRepository.findAll(deckId);
         }
         for (int i = 0; i < 20; i++) {
-            databaseManager.inTransaction(() -> wordRepository.countDue(deckId, LocalDateTime.now(),
-                LocalDateTime.now().plusDays(1)));
+            databaseManager.inTransaction(() -> wordRepository.countDue(deckId, NOW, NOW.plusDays(1)));
         }
 
         assertEquals(opened, databaseManager.connectionsOpened());
@@ -82,7 +83,7 @@ class ConnectionPoolTest {
 
     @Test
     void closingReturnsTheConnectionAndClosesStatementsTheBorrowerLeftOpen() throws Exception {
-        wordRepository.save(WordCard.createNew(deckId, "lucid", "清晰的"));
+        wordRepository.save(WordCard.createNew(deckId, "lucid", "清晰的", NOW));
         SettingsRepository settings = new SettingsRepository(databaseManager);
         try (Connection writer = databaseManager.getConnection()) {
             Connection returned;
@@ -174,7 +175,7 @@ class ConnectionPoolTest {
         });
         holder.start();
         borrowed.await();
-        words.save(WordCard.createNew(deck, "lucid", "清晰的"));
+        words.save(WordCard.createNew(deck, "lucid", "清晰的", NOW));
 
         manager.close();
         assertEquals(1, manager.openConnectionCount(), "the connection still lent out stays open until returned");

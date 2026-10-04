@@ -8,6 +8,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -20,9 +21,16 @@ public class DeckRepository {
     public static final String DEFAULT_DECK_NAME = "默认词库";
 
     private final DatabaseManager databaseManager;
+    private final Clock clock;
 
     public DeckRepository(DatabaseManager databaseManager) {
+        this(databaseManager, Clock.systemDefaultZone());
+    }
+
+    /** {@code clock} dates the decks this creates. */
+    public DeckRepository(DatabaseManager databaseManager, Clock clock) {
         this.databaseManager = databaseManager;
+        this.clock = clock;
     }
 
     /** {@link #ensureDefaultDeck(String)} with the name {@link #DEFAULT_DECK_NAME}. */
@@ -44,7 +52,7 @@ public class DeckRepository {
     }
 
     public Deck create(String name) throws SQLException {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(clock);
         String sql = "INSERT INTO decks(name, created_at, archived) VALUES(?, ?, 0)";
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {

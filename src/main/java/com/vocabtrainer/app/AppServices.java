@@ -175,7 +175,10 @@ public record AppServices(
             return this;
         }
 
-        /** The clock of the review, goal, statistics and backup services and of the views; the system clock by default. */
+        /**
+         * The clock of the services and the views, which also dates new decks and words; the system
+         * clock by default.
+         */
         public Builder clock(Clock clock) {
             this.clock = Objects.requireNonNull(clock);
             return this;
@@ -196,7 +199,7 @@ public record AppServices(
                 snapshots.takeDailyIfDue();
             }
 
-            DeckRepository deckRepository = new DeckRepository(databaseManager);
+            DeckRepository deckRepository = new DeckRepository(databaseManager, clock);
             WordRepository wordRepository = wordRepositoryFactory.apply(databaseManager);
             ReviewLogRepository reviewLogRepository = reviewLogRepositoryFactory.apply(databaseManager);
             GoalRepository goalRepository = new GoalRepository(databaseManager);
@@ -221,7 +224,7 @@ public record AppServices(
             WordValidationService validationService = new WordValidationService();
             // Only opened by the first lookup; the ECDICT CSV itself is never read here.
             EcdictRepository ecdictRepository = new EcdictRepository(databasePath.resolveSibling("ecdict.db"));
-            EcdictImportService ecdictImportService = new EcdictImportService(ecdictRepository);
+            EcdictImportService ecdictImportService = new EcdictImportService(ecdictRepository, clock);
             LocalDictionaryService localDictionary = new LocalDictionaryService(ecdictRepository);
             BiFunction<DictionaryCacheRepository, LocalDictionaryService, DictionaryService> dictionaryFactory =
                 dictionaryServiceFactory != null
@@ -230,7 +233,7 @@ public record AppServices(
             // A word list import asks the network only when the user allows it, and builds the chain only then.
             ImportExportService importExportService = new ImportExportService(wordRepository, validationService,
                 localDictionary, memoize(() -> dictionaryFactory.apply(dictionaryCacheRepository, localDictionary)),
-                settingsService::isOfflineMode);
+                settingsService::isOfflineMode, clock);
             StarterImportService starterImportService = new StarterImportService(
                 importExportService, wordRepository, reviewLogRepository, goalRepository, settingsService);
             starterImportService.importOnce(startupDeck.getId());
@@ -286,7 +289,7 @@ public record AppServices(
                 reviewScheduler,
                 clock,
                 examPlanService,
-                new EcdictTagDeckService(ecdictRepository, deckService, wordRepository, validationService)
+                new EcdictTagDeckService(ecdictRepository, deckService, wordRepository, validationService, clock)
             );
         }
 

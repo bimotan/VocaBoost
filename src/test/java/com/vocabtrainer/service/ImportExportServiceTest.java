@@ -1,5 +1,6 @@
 package com.vocabtrainer.service;
 
+import com.vocabtrainer.TestClock;
 import com.vocabtrainer.domain.Deck;
 import com.vocabtrainer.domain.WordCard;
 import com.vocabtrainer.repository.DatabaseManager;
@@ -22,6 +23,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -81,6 +83,31 @@ class ImportExportServiceTest {
             "Line 4 skipped: date format is invalid (Text 'bad-date' could not be parsed at index 0)",
             "Line 5 skipped: review parameters must be numeric (For input string: \"x\")"
         ), result.messages());
+    }
+
+    @Test
+    void importedWordsAreDatedByTheServicesClock() throws Exception {
+        LocalDateTime now = LocalDateTime.of(2026, 3, 10, 10, 0);
+        ImportExportService clocked = new ImportExportService(wordRepository, new WordValidationService(), null, null,
+            () -> true, new TestClock(now));
+        Path legacyFile = tempDir.resolve("legacy.txt");
+        Files.writeString(legacyFile, String.join(System.lineSeparator(),
+            "rote;死记硬背;2025-06-13 14:02:19;2025-06-13 14:02:19;2.5;0;0",
+            "laud;赞美;2025-06-13 14:02:19;2025-06-14 09:00:00;2.5;3;1"
+        ), StandardCharsets.UTF_8);
+        Path csvFile = tempDir.resolve("words.csv");
+        Files.writeString(csvFile, "english,chinese\nlucid,清晰的\n", StandardCharsets.UTF_8);
+
+        assertEquals(2, clocked.importLegacyTxt(legacyFile, deck.getId()).importedCount());
+        assertEquals(1, clocked.importGreCsv(csvFile, deck.getId()).importedCount());
+
+        WordCard rote = word("rote").orElseThrow();
+        assertEquals(LocalDateTime.of(2025, 6, 13, 14, 2, 19), rote.getAddedAt());
+        assertEquals(now, rote.getNextReviewAt(), "a legacy row without an interval is due at once");
+        assertEquals(LocalDateTime.of(2025, 6, 17, 9, 0), word("laud").orElseThrow().getNextReviewAt());
+        WordCard lucid = word("lucid").orElseThrow();
+        assertEquals(now, lucid.getAddedAt());
+        assertEquals(now, lucid.getNextReviewAt());
     }
 
     @Test

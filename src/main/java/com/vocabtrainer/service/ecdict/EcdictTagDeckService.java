@@ -15,6 +15,8 @@ import com.vocabtrainer.util.ErrorMessages;
 import com.vocabtrainer.util.Messages;
 
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -203,14 +205,22 @@ public class EcdictTagDeckService {
     private final WordRepository wordRepository;
     private final WordValidationService validationService;
     private final TransactionRunner transactions;
+    private final Clock clock;
 
     public EcdictTagDeckService(EcdictRepository ecdict, DeckService deckService, WordRepository wordRepository,
                                 WordValidationService validationService) {
+        this(ecdict, deckService, wordRepository, validationService, Clock.systemDefaultZone());
+    }
+
+    /** {@code clock} dates the words this adds. */
+    public EcdictTagDeckService(EcdictRepository ecdict, DeckService deckService, WordRepository wordRepository,
+                                WordValidationService validationService, Clock clock) {
         this.ecdict = ecdict;
         this.deckService = deckService;
         this.wordRepository = wordRepository;
         this.validationService = validationService;
         this.transactions = wordRepository.transactions();
+        this.clock = clock;
     }
 
     /** Whether an ECDICT dictionary is imported, which building a deck needs. */
@@ -357,7 +367,8 @@ public class EcdictTagDeckService {
         try {
             ValidatedWord validated = validationService.validate(row.word(), entry.chinese(), entry.phonetic(),
                 entry.partOfSpeech(), "", entry.note(), tag.code());
-            WordCard word = WordCard.createNew(deckId, validated.english(), validated.chinese());
+            WordCard word = WordCard.createNew(deckId, validated.english(), validated.chinese(),
+                LocalDateTime.now(clock));
             word.setPhonetic(validated.phonetic());
             word.setPartOfSpeech(validated.partOfSpeech());
             word.setNote(validated.note());

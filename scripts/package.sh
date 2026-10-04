@@ -49,9 +49,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+project_root=$(cd "$(dirname "$0")/.." && pwd)
+# The app icon (packaging/icons/make-icons.sh renders both from packaging/icons/vocaboost.svg).
 case "$(uname -s)" in
-    Linux) os=linux types="app-image deb rpm" ;;
-    Darwin) os=macos types="app-image dmg pkg" ;;
+    Linux) os=linux types="app-image deb rpm" icon=$project_root/src/main/resources/icons/vocaboost-512.png ;;
+    Darwin) os=macos types="app-image dmg pkg" icon=$project_root/packaging/icons/vocaboost.icns ;;
     *) die "use scripts/package-windows.ps1 on Windows" ;;
 esac
 case " $types " in
@@ -59,7 +61,6 @@ case " $types " in
     *) die "--type $type is not available on $os (use one of: $types)" ;;
 esac
 
-project_root=$(cd "$(dirname "$0")/.." && pwd)
 target=$project_root/target
 input_dir=$target/jpackage-input
 runtime_dir=$target/jpackage-runtime
@@ -85,6 +86,7 @@ jdk_tool() {
 }
 
 # Check the tools first, so a missing one does not show up only after the build and the tests.
+[ -f "$icon" ] || die "the app icon $icon is missing"
 java=$(jdk_tool java)
 jdeps=$(jdk_tool jdeps)
 jlink=$(jdk_tool jlink)
@@ -143,7 +145,7 @@ step "Building a trimmed Java runtime (jlink)"
 
 package_args=(--type "$type" --name "$app_name" --app-version "$app_version" --input "$input_dir"
     --main-jar "$jar_name" --main-class "$main_class" --runtime-image "$runtime_dir" --dest "$output_dir"
-    --vendor VocaBoost --description "JavaFX and SQLite vocabulary trainer")
+    --vendor VocaBoost --description "JavaFX and SQLite vocabulary trainer" --icon "$icon")
 if [ "$type" = deb ] || [ "$type" = rpm ]; then
     package_args+=(--linux-shortcut)
 fi

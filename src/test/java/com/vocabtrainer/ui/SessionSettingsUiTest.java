@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
-import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -188,16 +187,16 @@ class SessionSettingsUiTest extends MainWindowUiTest {
         assertEquals("0 / 20", text("reviewedTodayLabel"), "practice is not a review");
     }
 
-    private static WordCard weakWord(long deckId, String english, String chinese) {
-        WordCard card = WordCard.createNew(deckId, english, chinese);
+    private WordCard weakWord(long deckId, String english, String chinese) {
+        WordCard card = WordCard.createNew(deckId, english, chinese, clock.now());
         card.setState(CardState.REVIEW);
         card.setStability(3);
         card.setDifficulty(6);
         card.setRepetitions(4);
         card.setConsecutiveCorrect(1);
         card.setLapses(1);
-        card.setLastReviewedAt(LocalDateTime.now().minusDays(1));
-        card.setNextReviewAt(LocalDateTime.now().plusDays(3));
+        card.setLastReviewedAt(clock.now().minusDays(1));
+        card.setNextReviewAt(clock.now().plusDays(3));
         return card;
     }
 

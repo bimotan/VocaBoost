@@ -55,6 +55,8 @@ class ReviewSessionPresenterTest {
     @RegisterExtension
     final TestDatabases databases = new TestDatabases();
 
+    /** The clock of the services and the presenters: a weekday at 10:00, far from midnight and the 4 am rollover. */
+    private final TestClock clock = new TestClock(LocalDateTime.of(2026, 3, 10, 10, 0));
     private final ManualTasks tasks = new ManualTasks();
     private final FakeAi ai = new FakeAi();
     private final DataChanges changes = new DataChanges();
@@ -69,12 +71,13 @@ class ReviewSessionPresenterTest {
     @BeforeEach
     void openDatabase() throws SQLException {
         services = AppServices.builder(tempDir.resolve("vocab.db"))
+            .clock(clock)
             .reviewLogRepository(databaseManager -> reviewLogs = new FailingReviewLogs(databaseManager))
             .open();
         databases.track(services.databaseManager());
         changes.subscribe(published::add);
         presenter = new ReviewSessionPresenter(services.reviewService(), services.goalService(), () -> ai, tasks,
-            changes, (title, error) -> failures.add(title));
+            changes, (title, error) -> failures.add(title), clock);
         presenter.addListener(() -> notifications++);
         deckId = services.startupDeck().getId();
     }
@@ -189,7 +192,7 @@ class ReviewSessionPresenterTest {
 
     @Test
     void theHintBeforeAnAnswerNeverGivesItAway() {
-        WordCard word = WordCard.createNew(deckId, "abate", "减弱; 减少");
+        WordCard word = WordCard.createNew(deckId, "abate", "减弱; 减少", clock.now());
         word.setPhonetic("/əˈbeɪt/");
         word.setPartOfSpeech("verb");
         word.setExampleSentence("The storm began to abate.");
@@ -342,7 +345,7 @@ class ReviewSessionPresenterTest {
     @Test
     void aLateExplanationDoesNotRevealTheAnswerWhenTheSameWordComesAgain() throws SQLException {
         Deck single = services.deckService().createDeck("Single");
-        services.wordRepository().insert(WordCard.createNew(single.getId(), "lucid", "清晰的"));
+        services.wordRepository().insert(WordCard.createNew(single.getId(), "lucid", "清晰的", clock.now()));
         presenter.showDeck(single.getId());
         assertEquals("lucid", presenter.question());
         long firstCardNumber = presenter.cardNumber();
@@ -367,7 +370,7 @@ class ReviewSessionPresenterTest {
         long cardNumber = presenter.cardNumber();
         presenter.setAnswer("半个答案");
 
-        services.wordRepository().insert(WordCard.createNew(deckId, "petrichor", "雨后泥土的气味"));
+        services.wordRepository().insert(WordCard.createNew(deckId, "petrichor", "雨后泥土的气味", clock.now()));
         presenter.wordsChanged();
 
         assertEquals(cardNumber, presenter.cardNumber());
@@ -403,7 +406,7 @@ class ReviewSessionPresenterTest {
         presenter.showDeck(deck.getId());
         assertEquals(State.COMPLETE, presenter.state());
 
-        services.wordRepository().insert(WordCard.createNew(deck.getId(), "petrichor", "雨后泥土的气味"));
+        services.wordRepository().insert(WordCard.createNew(deck.getId(), "petrichor", "雨后泥土的气味", clock.now()));
         presenter.wordsChanged();
 
         assertEquals(State.AWAITING_ANSWER, presenter.state());
@@ -463,8 +466,8 @@ class ReviewSessionPresenterTest {
     @Test
     void aFailedWordIsAskedAgainInTheSameSession() throws SQLException {
         Deck pair = services.deckService().createDeck("Pair");
-        services.wordRepository().insert(WordCard.createNew(pair.getId(), "lucid", "清晰的"));
-        services.wordRepository().insert(WordCard.createNew(pair.getId(), "abate", "减弱"));
+        services.wordRepository().insert(WordCard.createNew(pair.getId(), "lucid", "清晰的", clock.now()));
+        services.wordRepository().insert(WordCard.createNew(pair.getId(), "abate", "减弱", clock.now()));
         presenter.showDeck(pair.getId());
         String failed = presenter.question();
         presenter.setAnswer("完全错误");
@@ -590,7 +593,6 @@ class ReviewSessionPresenterTest {
 
     @Test
     void theResponseTimeIsMeasuredFromShowingTheCardToSubmitting() throws SQLException {
-        TestClock clock = new TestClock(LocalDateTime.now().plusSeconds(1));
         AppServices clocked = AppServices.builder(tempDir.resolve("clocked.db")).clock(clock).open();
         databases.track(clocked.databaseManager());
         ReviewSessionPresenter timed = new ReviewSessionPresenter(clocked.reviewService(), clocked.goalService(),
@@ -612,7 +614,6 @@ class ReviewSessionPresenterTest {
 
     @Test
     void theResponseTimeOnlyCountsTheTimeTheCardWasOnScreen() throws SQLException {
-        TestClock clock = new TestClock(LocalDateTime.now().plusSeconds(1));
         AppServices clocked = AppServices.builder(tempDir.resolve("clocked.db")).clock(clock).open();
         databases.track(clocked.databaseManager());
         ReviewSessionPresenter timed = new ReviewSessionPresenter(clocked.reviewService(), clocked.goalService(),
@@ -641,14 +642,14 @@ class ReviewSessionPresenterTest {
     @Test
     void theEighthLapseSaysTheWordIsNowALeech() throws SQLException {
         Deck deck = services.deckService().createDeck("Leech");
-        WordCard card = WordCard.createNew(deck.getId(), "cavil", "挑剔");
+        WordCard card = WordCard.createNew(deck.getId(), "cavil", "挑剔", clock.now());
         card.setState(CardState.REVIEW);
         card.setStability(2);
         card.setDifficulty(9);
         card.setRepetitions(20);
         card.setLapses(WordCard.LEECH_LAPSES - 1);
-        card.setLastReviewedAt(LocalDateTime.now().minusDays(3));
-        card.setNextReviewAt(LocalDateTime.now().minusDays(1));
+        card.setLastReviewedAt(clock.now().minusDays(3));
+        card.setNextReviewAt(clock.now().minusDays(1));
         services.wordRepository().insert(card);
         presenter.showDeck(deck.getId());
 
@@ -754,10 +755,10 @@ class ReviewSessionPresenterTest {
         presenter.selectSessionSize("50", "");
         presenter.changeMode(ReviewMode.ZH_TO_EN);
 
-        AppServices restarted = AppServices.builder(tempDir.resolve("vocab.db")).open();
+        AppServices restarted = AppServices.builder(tempDir.resolve("vocab.db")).clock(clock).open();
         databases.track(restarted.databaseManager());
         ReviewSessionPresenter next = new ReviewSessionPresenter(restarted.reviewService(), restarted.goalService(),
-            () -> ai, tasks, changes, (title, error) -> failures.add(title));
+            () -> ai, tasks, changes, (title, error) -> failures.add(title), clock);
         assertEquals(ReviewMode.ZH_TO_EN, next.mode());
         next.showDeck(deckId);
 
@@ -814,7 +815,7 @@ class ReviewSessionPresenterTest {
     void theNewWordLimitEndsTheSessionAndRaisingItLetsTheSessionGoOn() throws SQLException {
         Deck deck = services.deckService().createDeck("New words");
         for (String english : List.of("lucid", "abate", "laud", "cavil")) {
-            services.wordRepository().insert(WordCard.createNew(deck.getId(), english, "释义" + english));
+            services.wordRepository().insert(WordCard.createNew(deck.getId(), english, "释义" + english, clock.now()));
         }
         presenter.showDeck(deck.getId());
         presenter.setNewCardsPerDay(2);
@@ -836,16 +837,16 @@ class ReviewSessionPresenterTest {
         assertEquals(20, presenter.newCardsPerDay(), "each deck has its own limit");
     }
 
-    private static WordCard weakWord(Deck deck, String english, String chinese) {
-        WordCard card = WordCard.createNew(deck.getId(), english, chinese);
+    private WordCard weakWord(Deck deck, String english, String chinese) {
+        WordCard card = WordCard.createNew(deck.getId(), english, chinese, clock.now());
         card.setState(CardState.REVIEW);
         card.setStability(3);
         card.setDifficulty(6);
         card.setRepetitions(4);
         card.setConsecutiveCorrect(1);
         card.setLapses(1);
-        card.setLastReviewedAt(LocalDateTime.now().minusDays(1));
-        card.setNextReviewAt(LocalDateTime.now().plusDays(3));
+        card.setLastReviewedAt(clock.now().minusDays(1));
+        card.setNextReviewAt(clock.now().plusDays(3));
         return card;
     }
 
@@ -882,7 +883,7 @@ class ReviewSessionPresenterTest {
 
     @Test
     void clozeModeAsksTheBlankedExampleWithTheMeaningAsAHintAndCountsSkippedCards() throws SQLException {
-        List<WordCard> firstNew = services.wordRepository().findNewCards(deckId, LocalDateTime.now().plusDays(1), 3);
+        List<WordCard> firstNew = services.wordRepository().findNewCards(deckId, clock.now().plusDays(1), 3);
         for (WordCard withoutExample : firstNew.subList(0, 2)) {
             withoutExample.setExampleSentence(withoutExample == firstNew.get(0) ? "" : "No such word here.");
             services.wordRepository().update(withoutExample);
@@ -919,8 +920,8 @@ class ReviewSessionPresenterTest {
     @Test
     void aClozeSessionWithoutUsableExamplesSaysWhyItIsComplete() throws SQLException {
         long empty = services.deckService().createDeck("No examples").getId();
-        services.wordRepository().insert(WordCard.createNew(empty, "petrichor", "雨后泥土的气味"));
-        services.wordRepository().insert(WordCard.createNew(empty, "sonder", "旁人皆有故事之感"));
+        services.wordRepository().insert(WordCard.createNew(empty, "petrichor", "雨后泥土的气味", clock.now()));
+        services.wordRepository().insert(WordCard.createNew(empty, "sonder", "旁人皆有故事之感", clock.now()));
         presenter.showDeck(empty);
 
         presenter.changeMode(ReviewMode.CLOZE);
@@ -987,7 +988,7 @@ class ReviewSessionPresenterTest {
             new SimilarityService(), services.reviewScheduler(), services.goalService(), services.achievementService(),
             services.clock(), null, random);
         return new ReviewSessionPresenter(reviews, services.goalService(), () -> ai, tasks, changes,
-            (title, error) -> failures.add(title));
+            (title, error) -> failures.add(title), clock);
     }
 
     @Test

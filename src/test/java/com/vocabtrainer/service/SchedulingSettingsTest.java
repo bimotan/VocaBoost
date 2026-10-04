@@ -150,7 +150,7 @@ class SchedulingSettingsTest {
     }
 
     private WordCard reviewCard(String english, LocalDateTime lastReviewed, LocalDateTime due) {
-        WordCard card = WordCard.createNew(deck.getId(), english, "释义");
+        WordCard card = WordCard.createNew(deck.getId(), english, "释义", clock.now());
         card.setState(CardState.REVIEW);
         card.setStability(10);
         card.setDifficulty(5);

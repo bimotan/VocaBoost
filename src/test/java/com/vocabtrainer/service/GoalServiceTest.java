@@ -367,12 +367,9 @@ class GoalServiceTest {
         }
     }
 
-    /** A new word, due from the test clock's morning (createNew dates it by the wall clock). */
+    /** A new word, added and due from the test clock's morning. */
     private WordCard word(Deck target, String english) throws SQLException {
-        WordCard word = WordCard.createNew(target.getId(), english, "释义");
-        word.setAddedAt(DAY.atTime(8, 0));
-        word.setNextReviewAt(DAY.atTime(8, 0));
-        return words.save(word);
+        return words.save(WordCard.createNew(target.getId(), english, "释义", DAY.atTime(8, 0)));
     }
 
     /** Saves a log of the word at {@code at} and records it, as a rating does. */

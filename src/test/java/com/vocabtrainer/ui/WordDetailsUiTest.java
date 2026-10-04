@@ -18,7 +18,6 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -88,8 +87,8 @@ class WordDetailsUiTest extends MainWindowUiTest {
         abate.setDifficulty(6.0);
         abate.setRepetitions(3);
         abate.setLapses(1);
-        abate.setLastReviewedAt(LocalDateTime.now().minusMinutes(20));
-        abate.setNextReviewAt(LocalDateTime.now().minusMinutes(10));
+        abate.setLastReviewedAt(clock.now().minusMinutes(20));
+        abate.setNextReviewAt(clock.now().minusMinutes(10));
         services.wordRepository().update(abate);
         selectMode(ReviewMode.WEAK_WORDS);
         assertEquals("abate", text("reviewWordLabel"));
@@ -224,7 +223,7 @@ class WordDetailsUiTest extends MainWindowUiTest {
 
     @Test
     void aWordWithoutDetailsSaysHowToAddThem() throws SQLException {
-        services.wordRepository().insert(WordCard.createNew(currentDeck().getId(), "petrichor", "雨后泥土的气味"));
+        services.wordRepository().insert(WordCard.createNew(currentDeck().getId(), "petrichor", "雨后泥土的气味", clock.now()));
         selectTab("wordListTab");
 
         selectWord("petrichor");

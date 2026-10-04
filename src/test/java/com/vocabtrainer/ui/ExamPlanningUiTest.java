@@ -1,7 +1,5 @@
 package com.vocabtrainer.ui;
 
-import com.vocabtrainer.TestClock;
-import com.vocabtrainer.app.AppServices;
 import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.WordCard;
 import javafx.scene.Node;
@@ -16,7 +14,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
@@ -32,13 +29,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * exam, and the workload forecast on the Statistics tab.
  */
 class ExamPlanningUiTest extends MainWindowUiTest {
-    private final TestClock clock = new TestClock(LocalDateTime.now().plusSeconds(1));
-
-    @Override
-    AppServices.Builder configure(AppServices.Builder builder) {
-        return builder.clock(clock);
-    }
-
     @Test
     void theExamDateShowsACountdownAndANewWordPlanThatSetsTheDailyLimit() {
         selectTab("dashboardTab");

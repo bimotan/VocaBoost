@@ -1,7 +1,5 @@
 package com.vocabtrainer.ui;
 
-import com.vocabtrainer.TestClock;
-import com.vocabtrainer.app.AppServices;
 import com.vocabtrainer.domain.CardState;
 import com.vocabtrainer.domain.ReviewLog;
 import com.vocabtrainer.domain.WordCard;
@@ -10,7 +8,6 @@ import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,18 +16,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * FSRS scheduling as the Review tab shows it: the interval on each rating button, learning steps
  * that bring a failed word back in the same session, and the response time that is logged.
- * The services and views run on a clock the tests move.
+ * The services and views run on the harness's clock, which the tests move.
  */
 @Tag("ui")
 class LearningStepsUiTest extends MainWindowUiTest {
-    /** Starts just after the starter words were added, so they are due as usual. */
-    private final TestClock clock = new TestClock(LocalDateTime.now().plusSeconds(1));
-
-    @Override
-    AppServices.Builder configure(AppServices.Builder builder) {
-        return builder.clock(clock);
-    }
-
     @Test
     void theRatingButtonsShowWhenEachRatingBringsTheWordBack() throws SQLException {
         selectTab("reviewTab");

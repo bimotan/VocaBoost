@@ -54,13 +54,13 @@ class WordTableUiTest extends MainWindowUiTest {
         dialogs.answerText("Sorting");
         click("newDeckButton");
         long deckId = currentDeck().getId();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = clock.now();
         // As text, "10 days" < "14 days" < "2 days" < "3 days" and "100%" < "45%" < "9%".
         services.wordRepository().insert(review(deckId, "alpha", 2, now.minusDays(1)));
         services.wordRepository().insert(review(deckId, "bravo", 10, now.minusDays(5000)));
         services.wordRepository().insert(review(deckId, "charlie", 14, now.minusDays(2)));
         services.wordRepository().insert(review(deckId, "delta", 3, now.minusDays(9)));
-        services.wordRepository().insert(WordCard.createNew(deckId, "echo", "新词"));
+        services.wordRepository().insert(WordCard.createNew(deckId, "echo", "新词", clock.now()));
         WordCard learning = review(deckId, "foxtrot", 1, now.minusMinutes(5));
         learning.setState(CardState.LEARNING);
         services.wordRepository().insert(learning);
@@ -107,7 +107,7 @@ class WordTableUiTest extends MainWindowUiTest {
             click("newDeckButton");
             int count = name.equals("Two") ? 2 : 10;
             for (int index = 0; index < count; index++) {
-                services.wordRepository().insert(WordCard.createNew(currentDeck().getId(), name + index, "词"));
+                services.wordRepository().insert(WordCard.createNew(currentDeck().getId(), name + index, "词", clock.now()));
             }
         }
         selectTab("decksTab");
@@ -129,12 +129,12 @@ class WordTableUiTest extends MainWindowUiTest {
         dialogs.answerText("Large");
         click("newDeckButton");
         long deckId = currentDeck().getId();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = clock.now();
         List<WordCard> words = new ArrayList<>();
         for (int index = 0; index < LARGE_DECK; index++) {
             String english = String.format("word%05d", index);
             // Two thirds in review, with intervals from 1 to 365 days and reviews up to a year ago.
-            WordCard word = index % 3 == 0 ? WordCard.createNew(deckId, english, "词" + index)
+            WordCard word = index % 3 == 0 ? WordCard.createNew(deckId, english, "词" + index, clock.now())
                 : review(deckId, english, 1 + index % 365, now.minusDays(index % 400).minusMinutes(index));
             word.setTags(index % 100 == 0 ? "hundredth" : "generated");
             word.setPartOfSpeech(index % 2 == 0 ? "noun" : "verb");
@@ -183,8 +183,8 @@ class WordTableUiTest extends MainWindowUiTest {
         assertTrue(slowest < KEYSTROKE_BOUND_MILLIS, "keystrokes took " + keystrokeMillis + " ms");
     }
 
-    private static WordCard review(long deckId, String english, int days, LocalDateTime lastReview) {
-        WordCard word = WordCard.createNew(deckId, english, english + "的意思");
+    private WordCard review(long deckId, String english, int days, LocalDateTime lastReview) {
+        WordCard word = WordCard.createNew(deckId, english, english + "的意思", clock.now());
         word.setState(CardState.REVIEW);
         word.setStability(days);
         word.setDifficulty(5);

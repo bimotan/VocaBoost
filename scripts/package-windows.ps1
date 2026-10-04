@@ -41,6 +41,14 @@ $RuntimeDir = Join-Path $Target "jpackage-runtime"
 $OutputDir = Join-Path $Target "dist"
 $AppName = "VocaBoost"
 $MainClass = "com.vocabtrainer.app.VocabTrainerLauncher"
+# The app icon in the format jpackage takes on each system (packaging/icons/make-icons.sh renders them).
+$Icon = if ($OnWindows) {
+    Join-Path $ProjectRoot "packaging/icons/vocaboost.ico"
+} elseif ($IsMacOS) {
+    Join-Path $ProjectRoot "packaging/icons/vocaboost.icns"
+} else {
+    Join-Path $ProjectRoot "src/main/resources/icons/vocaboost-512.png"
+}
 # Needed at run time but invisible to jdeps: TLS key exchange for the online dictionary and the AI
 # provider (jdk.crypto.ec; part of java.base from JDK 22 on), GBK/GB18030 CSV files (jdk.charsets)
 # and Chinese date and number formats (jdk.localedata, trimmed to $Locales).
@@ -82,6 +90,9 @@ function Find-JdkTool {
 # Check the tools first, so a missing one does not show up only after the build and the tests.
 if ($Console -and -not $OnWindows) {
     throw "-Console is only available on Windows."
+}
+if (-not (Test-Path -LiteralPath $Icon -PathType Leaf)) {
+    throw "The app icon $Icon is missing."
 }
 $java = Find-JdkTool "java"
 $jdeps = Find-JdkTool "jdeps"
@@ -163,7 +174,8 @@ $packageArgs = @(
     "--runtime-image", $RuntimeDir,
     "--dest", $OutputDir,
     "--vendor", "VocaBoost",
-    "--description", "JavaFX and SQLite vocabulary trainer"
+    "--description", "JavaFX and SQLite vocabulary trainer",
+    "--icon", $Icon
 )
 if ($Console) {
     $packageArgs += "--win-console"

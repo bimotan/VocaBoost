@@ -115,7 +115,7 @@ class LateResultsUiTest extends MainWindowUiTest {
     void aLateExplanationDoesNotRevealTheAnswerWhenTheSameWordIsAskedAgain() throws SQLException {
         dialogs.answerText("Single");
         click("newDeckButton");
-        services.wordRepository().insert(WordCard.createNew(currentDeck().getId(), "lucid", "清晰的"));
+        services.wordRepository().insert(WordCard.createNew(currentDeck().getId(), "lucid", "清晰的", clock.now()));
         selectTab("reviewTab");
         click("resetSessionButton");
         assertEquals("lucid", text("reviewWordLabel"));

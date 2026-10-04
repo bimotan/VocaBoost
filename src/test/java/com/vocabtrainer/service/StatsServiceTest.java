@@ -45,8 +45,8 @@ class StatsServiceTest {
 
         Deck defaultDeck = deckRepository.ensureDefaultDeck();
         Deck satDeck = deckRepository.create("SAT");
-        WordCard defaultWord = wordRepository.save(WordCard.createNew(defaultDeck.getId(), "abate", "减弱"));
-        WordCard satWord = wordRepository.save(WordCard.createNew(satDeck.getId(), "lucid", "清晰的"));
+        WordCard defaultWord = wordRepository.save(WordCard.createNew(defaultDeck.getId(), "abate", "减弱", NOW));
+        WordCard satWord = wordRepository.save(WordCard.createNew(satDeck.getId(), "lucid", "清晰的", NOW));
 
         reviewLogRepository.insert(new ReviewLog(0, defaultWord.getId(), NOW, "减弱", "减弱", 1,
             ReviewRating.GOOD, 1000));
@@ -76,7 +76,7 @@ class StatsServiceTest {
         Deck gre = deckRepository.create("GRE");
         Deck sat = deckRepository.create("SAT");
         Deck empty = deckRepository.create("Empty");
-        // Due dates are set relative to CLOCK, since WordCard.createNew uses the wall clock.
+        // Due dates are set relative to CLOCK.
         WordCard due = wordRepository.save(wordDueAt(gre, "abate", "减弱", NOW.minusHours(1)));
         wordRepository.save(wordDueAt(gre, "lucid", "清晰的", NOW.plusDays(3)));
         WordCard suspended = wordDueAt(gre, "gone", "消失的", NOW.minusHours(1));
@@ -111,8 +111,8 @@ class StatsServiceTest {
         ReviewLogRepository logs = new ReviewLogRepository(databaseManager);
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
         Deck other = new DeckRepository(databaseManager).create("Other");
-        WordCard word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
-        WordCard otherWord = wordRepository.save(WordCard.createNew(other.getId(), "abate", "减弱"));
+        WordCard word = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的", NOW));
+        WordCard otherWord = wordRepository.save(WordCard.createNew(other.getId(), "abate", "减弱", NOW));
         LocalDate firstDay = NOW.toLocalDate().minusDays(2);
         // A study day starts at 4 am: 3:59 am still belongs to the day before.
         log(logs, word, firstDay.atTime(3, 59, 59, 999_000_000), ReviewRating.GOOD);
@@ -136,8 +136,8 @@ class StatsServiceTest {
         WordRepository wordRepository = new WordRepository(databaseManager);
         ReviewLogRepository logs = new ReviewLogRepository(databaseManager);
         Deck deck = new DeckRepository(databaseManager).ensureDefaultDeck();
-        WordCard hard = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的"));
-        WordCard easy = wordRepository.save(WordCard.createNew(deck.getId(), "abate", "减弱"));
+        WordCard hard = wordRepository.save(WordCard.createNew(deck.getId(), "lucid", "清晰的", NOW));
+        WordCard easy = wordRepository.save(WordCard.createNew(deck.getId(), "abate", "减弱", NOW));
         log(logs, hard, NOW.minusDays(1), ReviewRating.AGAIN);
         log(logs, easy, NOW.minusHours(1), ReviewRating.EASY);
 
@@ -151,7 +151,7 @@ class StatsServiceTest {
     }
 
     private static WordCard wordDueAt(Deck deck, String english, String chinese, LocalDateTime dueAt) {
-        WordCard word = WordCard.createNew(deck.getId(), english, chinese);
+        WordCard word = WordCard.createNew(deck.getId(), english, chinese, NOW);
         word.setNextReviewAt(dueAt);
         return word;
     }
